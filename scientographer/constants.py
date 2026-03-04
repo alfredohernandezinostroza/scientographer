@@ -13,3 +13,7 @@ FIGURES_PATH.mkdir(exist_ok=True)
 
 dotenv.load_dotenv(Path('..','.env'))
 EMAIL = os.getenv('MY_EMAIL')
+DEFAULT_UI_PROJECT_ID = 1
+DEFAULT_UI_USERNAME = os.getenv('DEFAULT_UI_USERNAME')
+TEAM_NAME = os.getenv('TEAM_NAME')
+
