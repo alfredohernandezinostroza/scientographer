@@ -19,8 +19,10 @@ assert os.getenv("MY_EMAIL") is not None, "MY_EMAIL not found in .env file"
 assert os.getenv("DEFAULT_UI_USERNAME") is not None, "DEFAULT_UI_USERNAME not found in .env file"
 assert os.getenv("TEAM_NAME") is not None, "TEAM_NAME not found in .env file"
 assert os.getenv("GOOGLE_DRIVE_FOLDER_ID") is not None, "GOOGLE_DRIVE_FOLDER_ID not found in .env file"
+assert os.getenv("OPENCITATIONS_ACCESS_TOKEN") is not None, "OPENCITATIONS_ACCESS_TOKEN not found in .env file"
 
 EMAIL = os.getenv('MY_EMAIL')
 DEFAULT_UI_USERNAME = os.getenv('DEFAULT_UI_USERNAME')
 TEAM_NAME = os.getenv('TEAM_NAME')
 GOOGLE_DRIVE_FOLDER_ID = os.getenv('GOOGLE_DRIVE_FOLDER_ID')
+OPENCITATIONS_ACCESS_TOKEN = os.getenv('OPENCITATIONS_ACCESS_TOKEN')
