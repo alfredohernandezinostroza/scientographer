@@ -1,3 +1,4 @@
+from fa2 import ForceAtlas2
 import sys
 import pickle
 from hamilton_sdk import adapters
@@ -39,31 +40,6 @@ UI_CONFIG = adapters.HamiltonTracker(
     tags={"environment": "DEV", "team": TEAM_NAME, "version": "0.1"},
 )
 
-#####################
-##  Aux Functions  ##
-#####################
-
-def _build_edges_from_references(
-    references_df: pd.DataFrame, valid_dois: set[str]
-) -> list[tuple[str, str]]:
-    """
-    Build directed edges (citing_doi -> cited_doi) keeping only edges where
-    both endpoints are in the unified database (i.e., in valid_dois).
-    """
-    edges = []
-    for _, row in references_df.iterrows():
-        citing = row.get("citing_doi")
-        cited_dois = row.get("cited_dois", ())
-        if not citing or citing not in valid_dois:
-            continue
-        if cited_dois is None:
-            continue
-        for cited in cited_dois:
-            if cited and cited in valid_dois:
-                edges.append((citing, cited))
-    return edges
-
-
 ##################
 ##     Main     ##
 ##################
@@ -72,15 +48,15 @@ def _main() -> int:
     ## Inputs and Outputs ##
     ########################
     inputs = dict(
-        unified_database_path=PROCESSED_DATA_PATH / "unified_database.parquet",
+        unified_database_path=PROCESSED_DATA_PATH / "clean_unified_database.parquet",
         references_path=PROCESSED_DATA_PATH / "references_opencitations.parquet",
-        citation_network_path=PROCESSED_DATA_PATH / "citation_network.pkl",
-        communities_path=PROCESSED_DATA_PATH / "communities.parquet",
-        leiden_resolution=1.0,  # modifiable resolution parameter
+        citation_network_path=PROCESSED_DATA_PATH / "citation_network", #format will be added later
+        citation_network_plot_path=FIGURES_PATH / "citation_network", # will be added later
     )
     outputs = [
-        "save_citation_network",
-        "save_communities",
+        # "save_citation_network_as_pickle",
+        "save_citation_network_as_graphml",
+        # "plot_citation_network",
     ]
 
     import __main__
@@ -115,6 +91,30 @@ def _main() -> int:
         dr.execute(outputs, inputs=inputs)
     return 0
 
+
+#####################
+##  Aux Functions  ##
+#####################
+
+def _build_edges_from_references(
+    references_df: pd.DataFrame, valid_dois: set[str]
+) -> list[tuple[str, str]]:
+    """
+    Build directed edges (citing_doi -> cited_doi) keeping only edges where
+    both endpoints are in the unified database (i.e., in valid_dois).
+    """
+    edges = []
+    for _, row in references_df.iterrows():
+        citing = row.get("citing_doi")
+        cited_dois = row.get("cited_dois", ())
+        if not citing or citing not in valid_dois:
+            continue
+        if cited_dois is None:
+            continue
+        for cited in cited_dois:
+            if cited and cited in valid_dois:
+                edges.append((citing, cited))
+    return edges
 
 #########################
 ##    DAG Definition   ##
@@ -171,25 +171,52 @@ def citation_network(citation_edges: list[tuple[str, str]], valid_dois: set[str]
     logger.info(
         f"Citation network: {g.vcount()} vertices, {g.ecount()} edges."
     )
-    return g
 
+    #delete isolated nodes. Note that this is not necessary if we later retrieve only the giant component, but we get nice information of the amount of isolated papers
+    g.delete_vertices(g.vs.select(_degree=0))
+    logger.info(
+        f"Citation network after deleting isolated nodes: {g.vcount()} vertices, {g.ecount()} edges."
+    )
+
+    #get giant component
+    components = g.connected_components(mode="weak") #weak is to ignore direction, which is what we want for a citation network
+    giant = components.giant()
+    logger.info(
+        f"Citation network after taking giant components: {giant.vcount()} vertices, {giant.ecount()} edges."
+    )
+    return giant
+
+def citation_network_with_layout(citation_network: ig.Graph) -> ig.Graph:
+    forceatlas2 = ForceAtlas2(verbose=True)
+    layout = forceatlas2.forceatlas2_igraph_layout(citation_network.as_undirected(), iterations=500)
+    citation_network.vs["x"] = [coord[0] for coord in layout]
+    citation_network.vs["y"] = [coord[1] for coord in layout]
+    return citation_network
 
 @datasaver()
-def save_citation_network_as_pickle(citation_network: ig.Graph, citation_network_path: Path) -> dict:
-    """Persist the igraph citation network as a pickle file."""
-    with open(citation_network_path, "wb") as f:
-        pickle.dump(citation_network, f, protocol=pickle.HIGHEST_PROTOCOL)
-    metadata = utils.get_file_metadata(citation_network_path)
+def plot_citation_network(citation_network_with_layout: ig.Graph, citation_network_plot_path: Path) -> dict:
+    citation_network_plot_path = citation_network_plot_path.with_suffix("png")
+    ig.plot(citation_network_with_layout, target=citation_network_plot_path)
+    metadata = utils.get_file_metadata(citation_network_plot_path)
     return metadata
 
 @datasaver()
-def save_citation_network_as_graphml(citation_network: ig.Graph, citation_network_path: Path) -> dict:
-    """Persist the igraph citation network as a pickle file."""
-    with open(citation_network_path, "wb") as f:
-        pickle.dump(citation_network, f, protocol=pickle.HIGHEST_PROTOCOL)
-    metadata = utils.get_file_metadata(citation_network_path)
+def save_citation_network_as_pickle(citation_network_with_layout: ig.Graph, citation_network_path: Path) -> dict:
+    """Save the igraph citation network as a pickle file."""
+    path = citation_network_path.with_suffix(".pickle")
+    with open(path, "wb") as f:
+        pickle.dump(citation_network_with_layout, f, protocol=pickle.HIGHEST_PROTOCOL)
+    metadata = utils.get_file_metadata(path)
     return metadata
 
+@datasaver()
+def save_citation_network_as_graphml(citation_network_with_layout: ig.Graph, citation_network_path: Path) -> dict:
+    """Persist the igraph citation network as a pickle file."""
+    path = citation_network_path.with_suffix(".graphml")
+    citation_network_with_layout.write_graphml(path)
+    citation_network_with_layout.write
+    metadata = utils.get_file_metadata(path)
+    return metadata
 
 if __name__ == "__main__":
     sys.exit(_main())
