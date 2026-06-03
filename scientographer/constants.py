@@ -9,7 +9,7 @@ PROCESSED_DATA_PATH = Path("data","processed")
 PROCESSED_DATA_PATH.mkdir(exist_ok=True)
 
 GRAPH_LEVEL_DATA_PATH = Path("data","graph_level_data")
-PROCESSED_DATA_PATH.mkdir(exist_ok=True)
+GRAPH_LEVEL_DATA_PATH.mkdir(exist_ok=True)
 
 FIGURES_PATH = Path("reports","figures")
 FIGURES_PATH.mkdir(exist_ok=True)
@@ -29,3 +29,4 @@ DEFAULT_UI_USERNAME = os.getenv('DEFAULT_UI_USERNAME')
 TEAM_NAME = os.getenv('TEAM_NAME')
 GOOGLE_DRIVE_FOLDER_ID = os.getenv('GOOGLE_DRIVE_FOLDER_ID')
 OPENCITATIONS_ACCESS_TOKEN = os.getenv('OPENCITATIONS_ACCESS_TOKEN')
+OPENALEX_API_KEY = os.getenv('OPENALEX_API_KEY')
