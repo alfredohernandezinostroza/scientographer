@@ -213,8 +213,7 @@ def save_citation_network_as_pickle(citation_network_with_layout: ig.Graph, cita
 def save_citation_network_as_graphml(citation_network_with_layout: ig.Graph, citation_network_path: Path) -> dict:
     """Persist the igraph citation network as a pickle file."""
     path = citation_network_path.with_suffix(".graphml")
-    citation_network_with_layout.write_graphml(path)
-    citation_network_with_layout.write
+    citation_network_with_layout.write(path)
     metadata = utils.get_file_metadata(path)
     return metadata
 
