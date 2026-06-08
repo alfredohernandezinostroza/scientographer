@@ -49,11 +49,11 @@ def _main() -> int:
     ## Inputs and Outputs ##
     ########################
     inputs = dict(
-        unified_database_path=PROCESSED_DATA_PATH / "clean_unified_database.parquet",
+        clean_unified_database_path=PROCESSED_DATA_PATH / "clean_unified_database.parquet",
         references_path=PROCESSED_DATA_PATH / "references_opencitations.parquet",
         # references_path=PROCESSED_DATA_PATH / "updated_references.parquet",
         citation_network_path=PROCESSED_DATA_PATH / "citation_network", #format will be added later
-        citation_network_plot_path=FIGURES_PATH / "citation_network", # will be added later
+        citation_network_plot_path=FIGURES_PATH / "citation_network", #format will be added later
     )
     outputs = [
         # "save_citation_network_as_pickle",
@@ -123,10 +123,10 @@ def _build_edges_from_references(
 #########################
 
 @dataloader()
-def unified_database(unified_database_path: Path) -> tuple[pd.DataFrame, dict]:
+def clean_unified_database(clean_unified_database_path: Path) -> tuple[pd.DataFrame, dict]:
     """Load the unified (cleaned) database of papers."""
-    db = pd.read_parquet(unified_database_path)
-    return db, utils.get_file_metadata(unified_database_path)
+    db = pd.read_parquet(clean_unified_database_path)
+    return db, utils.get_file_metadata(clean_unified_database_path)
 
 
 @dataloader()
@@ -139,9 +139,9 @@ def references_df(references_path: Path) -> tuple[pd.DataFrame, dict]:
     return df, utils.get_file_metadata(references_path)
 
 
-def valid_dois(unified_database: pd.DataFrame) -> set[str]:
+def valid_dois(clean_unified_database: pd.DataFrame) -> set[str]:
     """Extract the set of lowercase DOIs present in the unified database."""
-    dois = unified_database["doi"].dropna()
+    dois = clean_unified_database["doi"].dropna()
     dois = dois[dois != ""].str.lower()
     return set(dois.tolist())
 
@@ -154,7 +154,7 @@ def citation_edges(references_df: pd.DataFrame, valid_dois: set[str]) -> list[tu
     return edges
 
 
-def citation_network(citation_edges: list[tuple[str, str]], valid_dois: set[str]) -> ig.Graph:
+def citation_network(citation_edges: list[tuple[str, str]], valid_dois: set[str], clean_unified_database: pd.DataFrame) -> ig.Graph:
     """Build a directed igraph citation network.
 
     Every paper in the unified database gets a vertex (isolated papers
@@ -165,7 +165,8 @@ def citation_network(citation_edges: list[tuple[str, str]], valid_dois: set[str]
 
     g = ig.Graph(directed=True)
     g.add_vertices(len(all_dois))
-    g.vs["name"] = all_dois  # vertex attribute: DOI string
+    g.vs["name"] = all_dois  # fast lookup
+    g.vs["doi"] = g.vs["name"]
 
     int_edges = [(doi_to_idx[src], doi_to_idx[dst]) for src, dst in citation_edges]
     g.add_edges(int_edges)
@@ -186,13 +187,20 @@ def citation_network(citation_edges: list[tuple[str, str]], valid_dois: set[str]
     logger.info(
         f"Citation network after taking giant components: {giant.vcount()} vertices, {giant.ecount()} edges."
     )
+
+    clean_unified_database = clean_unified_database.set_index("doi")
+    columns = clean_unified_database.columns.to_list()
+    for col in columns:
+        giant.vs[col] = clean_unified_database.loc[giant.vs["name"], col].tolist()
+    giant.vs["keywords"] = ["|".join(map(str.strip, keywords)) if keywords.tolist() else "" for keywords in giant.vs["keywords"]]
+    giant.vs["authors"] = ["|".join(map(str.strip, authors)) if authors.tolist() else "" for authors in giant.vs["authors"]]
     return giant
 
 @datasaver()
 def save_citation_network_without_layout_as_graphml(citation_network: ig.Graph, citation_network_path: Path) -> dict:
     """Save the igraph citation network as a pickle file."""
     path = citation_network_path.with_name(f"{citation_network_path.stem}_without_layout")
-    path = citation_network_path.with_suffix(".graphml")
+    path = path.with_suffix(".graphml")
     citation_network.write(path)
     metadata = utils.get_file_metadata(path)
     return metadata
