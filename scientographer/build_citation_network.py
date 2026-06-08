@@ -32,30 +32,32 @@ EXECUTE = True
 if EXECUTE:
     logger.info("Executing the DAG!")
 
-CURRENT_FILE_NAME = Path(__file__).stem
-UI_CONFIG = adapters.HamiltonTracker(
-    project_id=DEFAULT_UI_PROJECT_ID,
-    username=DEFAULT_UI_USERNAME,
-    dag_name=CURRENT_FILE_NAME,
-    tags={"environment": "DEV", "team": TEAM_NAME, "version": "0.1"},
-)
-
 ##################
 ##     Main     ##
 ##################
 def _main() -> int:
+
+    UI_CONFIG = adapters.HamiltonTracker(
+        project_id=DEFAULT_UI_PROJECT_ID,
+        username=DEFAULT_UI_USERNAME,
+        dag_name=CURRENT_FILE_NAME,
+        tags={"environment": "DEV", "team": TEAM_NAME, "version": "0.1"},
+    )
+    print(UI_CONFIG)
+
     ########################
     ## Inputs and Outputs ##
     ########################
     inputs = dict(
         unified_database_path=PROCESSED_DATA_PATH / "clean_unified_database.parquet",
         references_path=PROCESSED_DATA_PATH / "references_opencitations.parquet",
+        # references_path=PROCESSED_DATA_PATH / "updated_references.parquet",
         citation_network_path=PROCESSED_DATA_PATH / "citation_network", #format will be added later
         citation_network_plot_path=FIGURES_PATH / "citation_network", # will be added later
     )
     outputs = [
         # "save_citation_network_as_pickle",
-        "save_citation_network_as_graphml",
+        "save_citation_network_without_layout_as_graphml",
         # "plot_citation_network",
     ]
 
@@ -186,6 +188,15 @@ def citation_network(citation_edges: list[tuple[str, str]], valid_dois: set[str]
     )
     return giant
 
+@datasaver()
+def save_citation_network_without_layout_as_graphml(citation_network: ig.Graph, citation_network_path: Path) -> dict:
+    """Save the igraph citation network as a pickle file."""
+    path = citation_network_path.with_name(f"{citation_network_path.stem}_without_layout")
+    path = citation_network_path.with_suffix(".graphml")
+    citation_network.write(path)
+    metadata = utils.get_file_metadata(path)
+    return metadata
+
 def citation_network_with_layout(citation_network: ig.Graph) -> ig.Graph:
     forceatlas2 = ForceAtlas2(verbose=True)
     layout = forceatlas2.forceatlas2_igraph_layout(citation_network.as_undirected(), iterations=500)
@@ -211,7 +222,7 @@ def save_citation_network_as_pickle(citation_network_with_layout: ig.Graph, cita
 
 @datasaver()
 def save_citation_network_as_graphml(citation_network_with_layout: ig.Graph, citation_network_path: Path) -> dict:
-    """Persist the igraph citation network as a pickle file."""
+    """Save the igraph citation network as a pickle file."""
     path = citation_network_path.with_suffix(".graphml")
     citation_network_with_layout.write(path)
     metadata = utils.get_file_metadata(path)
