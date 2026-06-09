@@ -50,8 +50,8 @@ def _main() -> int:
     ########################
     inputs = dict(
         clean_unified_database_path=PROCESSED_DATA_PATH / "clean_unified_database.parquet",
-        references_path=PROCESSED_DATA_PATH / "references_opencitations.parquet",
-        # references_path=PROCESSED_DATA_PATH / "updated_references.parquet",
+        # references_path=PROCESSED_DATA_PATH / "references_opencitations.parquet",
+        references_path=PROCESSED_DATA_PATH / "updated_references.parquet",
         citation_network_path=PROCESSED_DATA_PATH / "citation_network", #format will be added later
         citation_network_plot_path=FIGURES_PATH / "citation_network", #format will be added later
     )
@@ -199,7 +199,7 @@ def citation_network(citation_edges: list[tuple[str, str]], valid_dois: set[str]
 @datasaver()
 def save_citation_network_without_layout_as_graphml(citation_network: ig.Graph, citation_network_path: Path) -> dict:
     """Save the igraph citation network as a pickle file."""
-    path = citation_network_path.with_name(f"{citation_network_path.stem}_without_layout")
+    path = citation_network_path.with_name(f"{citation_network_path.stem}_without_layout_updated_citations")
     path = path.with_suffix(".graphml")
     citation_network.write(path)
     metadata = utils.get_file_metadata(path)
