@@ -76,7 +76,7 @@ YEAR = 2020
 RESOLUTIONS: list[float] = [0.001, 0.002]
 # YEAR = 2026
 # RESOLUTIONS: list[float] = [0.0004, 0.001]
-TD_IDF_SAVING_PATH = KEYWORDS_LEVEL_DATA_PATH / f"until_{YEAR}_wordcloud_noverlap"
+TD_IDF_SAVING_PATH = KEYWORDS_LEVEL_DATA_PATH / f"until_{YEAR}_wordcloud_noverlap_2"
 TD_IDF_SAVING_PATH.mkdir(parents=True, exist_ok=True)
 TOP_N_CLUSTERS = 15
 # RESOLUTIONS: list[float] = [round(0.001 + i * 0.001, 3) for i in range(1, 9)]
@@ -142,8 +142,9 @@ def _main() -> int:
 
     # tfidf_outputs = [f"save_combined_plot_{name}" for name in _res_node_names]
     wordcloud_outputs = [f"save_wordcloud_figure_{name}" for name in _res_node_names]
+    frequency_wordcloud_outputs = [f"save_frequency_wordcloud_figure_{name}" for name in _res_node_names]
     # outputs = tfidf_outputs + wordcloud_outputs
-    outputs = wordcloud_outputs
+    outputs = wordcloud_outputs + frequency_wordcloud_outputs
 
     import __main__
 
@@ -464,6 +465,212 @@ def _cluster_centroids_and_radii(
     return result
 
 
+def _render_cluster_wordclouds(
+    cluster_freqs: dict[float, dict[str, float]],
+    graph: ig.Graph,
+    resolution: float,
+    top_n_clusters: int,
+    top_n_words: int,
+    svg_path: Path,
+    title: str,
+) -> dict:
+    """
+    Render and save a non-overlapping cluster-wordcloud figure.
+
+    The word *weights* (`cluster_freqs[cid][word]`) drive the relative font
+    sizes — they may be TF-IDF scores or raw keyword counts; this renderer is
+    agnostic to their meaning. The geometry (convex hull ∩ Voronoi cell per
+    cluster) guarantees the clouds never overlap.
+
+    Parameters
+    ----------
+    cluster_freqs : {cluster_id: {word: weight}} — already trimmed to the words
+                    that should be considered for each cluster.
+    graph         : laid-out citation network (needs 'x', 'y' and the cluster
+                    membership vertex attribute for this resolution).
+    svg_path      : destination file for the SVG.
+    title         : figure title.
+
+    Returns file-metadata dict (datasaver contract). Falls back to the output
+    directory's metadata when there is nothing to draw.
+    """
+    cluster_attr = f"cpm_communities_at_res={resolution}"
+    out_dir = _out_dir(resolution)
+
+    if not cluster_freqs:
+        logger.warning(f"[res={resolution}] No non-empty cluster frequency dicts. Skipping wordcloud.")
+        return utils.get_file_metadata(out_dir)
+
+    # ── Select top N clusters by node count ───────────────────────────────────
+    if cluster_attr not in graph.vs.attribute_names():
+        logger.warning(f"[res={resolution}] Vertex attribute '{cluster_attr}' not found in graph.")
+        return utils.get_file_metadata(out_dir)
+
+    memberships = np.array(graph.vs[cluster_attr], dtype=float)
+    unique_ids, counts = np.unique(memberships, return_counts=True)
+    top_indices = np.argsort(counts)[::-1][:top_n_clusters]
+    top_cluster_ids = set(unique_ids[top_indices].tolist())
+
+    drawable = sorted(top_cluster_ids & set(cluster_freqs.keys()))
+    if not drawable:
+        logger.warning(f"[res={resolution}] No overlap between top clusters and keyword scores.")
+        return utils.get_file_metadata(out_dir)
+
+    logger.info(f"[res={resolution}] Drawing wordclouds for {len(drawable)} clusters: {drawable}")
+
+    # ── Spatial data ──────────────────────────────────────────────────────────
+    all_x = np.array(graph.vs["x"], dtype=float)
+    all_y = np.array(graph.vs["y"], dtype=float)
+
+    # Global bounding box used to clip Voronoi cells
+    pad = max(all_x.ptp(), all_y.ptp()) * 0.05
+    bbox = (all_x.min() - pad, all_y.min() - pad,
+            all_x.max() + pad, all_y.max() + pad)
+
+    # Centroids of drawable clusters (in the order of `drawable`)
+    centroids = np.array([
+        [float(all_x[memberships == cid].mean()),
+         float(all_y[memberships == cid].mean())]
+        for cid in drawable
+    ])
+
+    # ── Voronoi cells for drawable centroids ──────────────────────────────────
+    voronoi_cells = _voronoi_finite_polygons(centroids, bbox)
+    # voronoi_cells[i] corresponds to drawable[i]
+
+    # ── Global font scale ─────────────────────────────────────────────────────
+    # The figure is 18 inches wide; matplotlib works in points (72 pt = 1 inch).
+    # We calculate how many data-coordinate units fit in one point so we can
+    # later convert WordCloud pixel font sizes to matplotlib point font sizes.
+    BASE_MAX_FONT_PTS = 80   # point size of the globally highest-scoring word
+    global_max_weight = float(max(
+        sc for cid in drawable for sc in cluster_freqs[cid].values()
+    ))
+
+    # ── Figure setup ──────────────────────────────────────────────────────────
+    fig, ax = plt.subplots(figsize=(18, 18))
+    ax.set_facecolor("white")
+    fig.patch.set_facecolor("white")
+    # Draw background scatter first so ax limits are set by the data
+    ax.scatter(all_x, all_y, s=2, c="#cccccc", alpha=0.4, zorder=1, linewidths=0)
+    # Force axes limits to the full graph extent before reading them
+    ax.set_xlim(all_x.min() - pad, all_x.max() + pad)
+    ax.set_ylim(all_y.min() - pad, all_y.max() + pad)
+    fig.canvas.draw()  # needed so get_xlim/ylim are accurate
+
+    fig_width_pts = 18 * 72   # 1 inch = 72 pt
+    data_range_x = ax.get_xlim()[1] - ax.get_xlim()[0]
+    pts_per_data_unit = fig_width_pts / data_range_x if data_range_x > 0 else 1.0
+
+    palette = _distinct_colors(len(drawable))
+
+    for idx, cid in enumerate(drawable):
+        freqs = cluster_freqs[cid]
+        local_max = max(freqs.values())
+
+        # Cluster colour — one unique color per cluster, never repeating
+        cluster_color = palette[idx]
+
+        # Node positions for this cluster
+        mask_members = memberships == cid
+        cluster_pts = np.column_stack([all_x[mask_members], all_y[mask_members]])
+
+        voronoi_cell = voronoi_cells[idx]
+
+        # ── Build mask ────────────────────────────────────────────────────────
+        # Choose mask resolution proportional to the region's data-space area
+        # so small clusters get fewer pixels (faster) and large ones get more.
+        region_area = voronoi_cell.intersection(
+            _convex_hull_polygon(cluster_pts)
+        ).area
+        # Scale: target ~1200 px on the longer axis of the full graph
+        full_area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
+        area_fraction = min(region_area / full_area, 1.0) if full_area > 0 else 1.0
+        target_px = max(200, int(1200 * np.sqrt(area_fraction)))
+        wc_width_px = target_px
+        wc_height_px = target_px
+
+        wc_mask, transform = _build_voronoi_hull_mask(
+            cluster_pts, voronoi_cell, wc_width_px, wc_height_px
+        )
+
+        # Check the mask has enough allowed pixels to be worth rendering
+        allowed_fraction = (wc_mask == 0).sum() / wc_mask.size
+        if allowed_fraction < 0.01:
+            logger.warning(
+                f"[res={resolution}] Cluster {cid}: mask has only "
+                f"{allowed_fraction:.1%} allowed pixels — skipping."
+            )
+            continue
+
+        # ── Font size calculation ─────────────────────────────────────────────
+        # The mask spans transform["data_min_x"]..transform["data_max_x"] in
+        # data space, mapped to wc_width_px pixels.
+        data_span_x = transform["data_max_x"] - transform["data_min_x"] or 1.0
+        pt_scale_factor = (data_span_x * pts_per_data_unit) / wc_width_px
+        target_pts_max = BASE_MAX_FONT_PTS * (local_max / global_max_weight)
+        target_pixels_max = max(10, int(target_pts_max / pt_scale_factor))
+
+        # ── Generate WordCloud using the mask ─────────────────────────────────
+        wc = WordCloud(
+            width=wc_width_px,
+            height=wc_height_px,
+            background_color=None,
+            mode="RGBA",
+            prefer_horizontal=0.9,
+            max_words=top_n_words,
+            max_font_size=target_pixels_max,
+            relative_scaling=1.0,
+            mask=wc_mask,
+        ).generate_from_frequencies(freqs)
+
+        # ── Unproject and draw each word ──────────────────────────────────────
+        data_min_x = transform["data_min_x"]
+        data_max_y = transform["data_max_y"]
+        data_span_y = transform["data_max_y"] - transform["data_min_y"] or 1.0
+
+        words_drawn = 0
+        for item in wc.layout_:
+            (word, _count), f_size, (y_px, x_px), orientation, _ = item
+
+            # PIL pixel → data coordinates
+            # x_px increases rightward, y_px increases downward (PIL origin top-left)
+            x_data = data_min_x + (x_px / wc_width_px) * data_span_x
+            y_data = data_max_y - (y_px / wc_height_px) * data_span_y
+
+            mpl_fontsize = f_size * pt_scale_factor
+            rot = 90 if orientation is not None else 0
+
+            ax.text(
+                x_data, y_data, word,
+                fontsize=mpl_fontsize,
+                color=cluster_color,
+                rotation=rot,
+                ha="left",
+                va="top",
+                zorder=2,
+            )
+            words_drawn += 1
+
+        logger.info(
+            f"[res={resolution}] Cluster {cid}: drew {words_drawn} words, "
+            f"mask allowed {allowed_fraction:.1%} of pixels, "
+            f"region X({transform['data_min_x']:.1f}..{transform['data_max_x']:.1f}) "
+            f"Y({transform['data_min_y']:.1f}..{transform['data_max_y']:.1f})"
+        )
+
+    ax.axis("off")
+    ax.set_title(title, fontsize=14, pad=12)
+    plt.tight_layout()
+
+    svg_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(svg_path, format="svg", bbox_inches="tight")
+    plt.close(fig)
+    logger.info(f"[res={resolution}] Saved vector wordcloud figure → {svg_path}")
+
+    return utils.get_file_metadata(svg_path)
+
+
 #########################
 ##    DAG Definition   ##
 #########################
@@ -701,6 +908,49 @@ def canonical_corpus(
 
 @parameterize(
     **{
+        f"cluster_keyword_counts_{name}": {
+            "canonical_corpus": source(f"canonical_corpus_{name}"),
+            "resolution": value(res),
+        }
+        for name, res in zip(_res_node_names, RESOLUTIONS)
+    }
+)
+def cluster_keyword_counts(
+    canonical_corpus: tuple[dict[int, str], dict[str, str]],
+    resolution: float,
+) -> dict[float, dict[str, int]]:
+    """
+    Count raw keyword occurrences per cluster from the canonical corpus.
+
+    Unlike `tfidf_matrix` (which down-weights keywords common across clusters),
+    this is a plain term-frequency tally: the more often a keyword appears in a
+    cluster, the larger its count. It feeds the frequency-based wordcloud.
+
+    Returns:
+        {{cluster_id: {{keyword_title_case: count}}}} — one entry per non-empty
+        cluster, sorted by cluster id.
+    """
+    corpus_str, _ = canonical_corpus
+
+    counts: dict[float, dict[str, int]] = {}
+    for cluster_id, document in sorted(corpus_str.items()):
+        if not document:
+            continue
+        tally: dict[str, int] = defaultdict(int)
+        for term in document.split("\t"):
+            if term:
+                tally[term.title()] += 1
+        if tally:
+            counts[float(cluster_id)] = dict(tally)
+
+    logger.info(
+        f"[res={resolution}] Computed keyword counts for {len(counts)} clusters."
+    )
+    return counts
+
+
+@parameterize(
+    **{
         f"tfidf_matrix_{name}": {
             "canonical_corpus": source(f"canonical_corpus_{name}"),
             "resolution": value(res),
@@ -894,8 +1144,6 @@ def save_wordcloud_figure(
     """
     X, vectorizer, cluster_ids = tfidf_matrix
     feature_names = vectorizer.get_feature_names_out()
-    cluster_attr = f"cpm_communities_at_res={resolution}"
-    out_dir = _out_dir(resolution)
 
     # ── Build per-cluster keyword frequency dicts from the tfidf matrix ───────
     cluster_freqs: dict[float, dict[str, float]] = {}
@@ -906,181 +1154,64 @@ def save_wordcloud_figure(
         if not scores.empty:
             cluster_freqs[float(cid)] = {kw.title(): float(sc) for kw, sc in scores.items()}
 
-    if not cluster_freqs:
-        logger.warning(f"[res={resolution}] No non-empty cluster frequency dicts. Skipping wordcloud.")
-        return utils.get_file_metadata(out_dir)
+    wordclouds_dir = TD_IDF_SAVING_PATH / "wordclouds"
+    svg_path = wordclouds_dir / f"tdidf_until_{YEAR}_wordcloud_at_{resolution}_{TOP_N_CLUSTERS}_clusters.svg"
 
-    # ── Select top N clusters by node count ───────────────────────────────────
-    if cluster_attr not in citation_network_with_layout.vs.attribute_names():
-        logger.warning(f"[res={resolution}] Vertex attribute '{cluster_attr}' not found in graph.")
-        return utils.get_file_metadata(out_dir)
+    return _render_cluster_wordclouds(
+        cluster_freqs=cluster_freqs,
+        graph=citation_network_with_layout,
+        resolution=resolution,
+        top_n_clusters=top_n_clusters,
+        top_n_words=top_n_words,
+        svg_path=svg_path,
+        title=f"Cluster wordclouds (TF-IDF)  |  resolution={resolution}",
+    )
 
-    memberships = np.array(citation_network_with_layout.vs[cluster_attr], dtype=float)
-    unique_ids, counts = np.unique(memberships, return_counts=True)
-    top_indices = np.argsort(counts)[::-1][:top_n_clusters]
-    top_cluster_ids = set(unique_ids[top_indices].tolist())
 
-    drawable = sorted(top_cluster_ids & set(cluster_freqs.keys()))
-    if not drawable:
-        logger.warning(f"[res={resolution}] No overlap between top clusters and TF-IDF scores.")
-        return utils.get_file_metadata(out_dir)
+@parameterize(
+    **{
+        f"save_frequency_wordcloud_figure_{name}": {
+            "cluster_keyword_counts": source(f"cluster_keyword_counts_{name}"),
+            "resolution": value(res),
+        }
+        for name, res in zip(_res_node_names, RESOLUTIONS)
+    }
+)
+@datasaver()
+def save_frequency_wordcloud_figure(
+    cluster_keyword_counts: dict[float, dict[str, int]],
+    citation_network_with_layout: ig.Graph,
+    resolution: float,
+    top_n_clusters: int,
+    top_n_words: int,
+) -> dict:
+    """
+    Same non-overlapping cluster-wordcloud layout as `save_wordcloud_figure`,
+    but font sizes reflect raw keyword FREQUENCY (per-cluster term counts)
+    rather than TF-IDF scores — the more often a keyword appears in a cluster,
+    the larger it renders.
 
-    logger.info(f"[res={resolution}] Drawing wordclouds for {len(drawable)} clusters: {drawable}")
-
-    # ── Spatial data ──────────────────────────────────────────────────────────
-    all_x = np.array(citation_network_with_layout.vs["x"], dtype=float)
-    all_y = np.array(citation_network_with_layout.vs["y"], dtype=float)
-
-    # Global bounding box used to clip Voronoi cells
-    pad = max(all_x.ptp(), all_y.ptp()) * 0.05
-    bbox = (all_x.min() - pad, all_y.min() - pad,
-            all_x.max() + pad, all_y.max() + pad)
-
-    # Centroids of drawable clusters (in the order of `drawable`)
-    centroids = np.array([
-        [float(all_x[memberships == cid].mean()),
-         float(all_y[memberships == cid].mean())]
-        for cid in drawable
-    ])
-
-    # ── Voronoi cells for drawable centroids ──────────────────────────────────
-    voronoi_cells = _voronoi_finite_polygons(centroids, bbox)
-    # voronoi_cells[i] corresponds to drawable[i]
-
-    # ── Global font scale ─────────────────────────────────────────────────────
-    # The figure is 18 inches wide; matplotlib works in points (72 pt = 1 inch).
-    # We calculate how many data-coordinate units fit in one point so we can
-    # later convert WordCloud pixel font sizes to matplotlib point font sizes.
-    BASE_MAX_FONT_PTS = 80   # point size of the globally highest-scoring word
-    global_max_tfidf = float(max(
-        sc for cid in drawable for sc in cluster_freqs[cid].values()
-    ))
-
-    # ── Figure setup ──────────────────────────────────────────────────────────
-    fig, ax = plt.subplots(figsize=(18, 18))
-    ax.set_facecolor("white")
-    fig.patch.set_facecolor("white")
-    # Draw background scatter first so ax limits are set by the data
-    ax.scatter(all_x, all_y, s=2, c="#cccccc", alpha=0.4, zorder=1, linewidths=0)
-    # Force axes limits to the full graph extent before reading them
-    ax.set_xlim(all_x.min() - pad, all_x.max() + pad)
-    ax.set_ylim(all_y.min() - pad, all_y.max() + pad)
-    fig.canvas.draw()  # needed so get_xlim/ylim are accurate
-
-    fig_width_pts = 18 * 72   # 1 inch = 72 pt
-    data_range_x = ax.get_xlim()[1] - ax.get_xlim()[0]
-    pts_per_data_unit = fig_width_pts / data_range_x if data_range_x > 0 else 1.0
-
-    modularity_meta = _modularity_meta(resolution)
-    palette = _distinct_colors(len(drawable))
-
-    for idx, cid in enumerate(drawable):
-        freqs = cluster_freqs[cid]
-        local_max = max(freqs.values())
-
-        # Cluster colour — one unique color per cluster, never repeating
-        cluster_color = palette[idx]
-
-        # Node positions for this cluster
-        mask_members = memberships == cid
-        cluster_pts = np.column_stack([all_x[mask_members], all_y[mask_members]])
-
-        voronoi_cell = voronoi_cells[idx]
-
-        # ── Build mask ────────────────────────────────────────────────────────
-        # Choose mask resolution proportional to the region's data-space area
-        # so small clusters get fewer pixels (faster) and large ones get more.
-        region_area = voronoi_cell.intersection(
-            _convex_hull_polygon(cluster_pts)
-        ).area
-        # Scale: target ~1200 px on the longer axis of the full graph
-        full_area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
-        area_fraction = min(region_area / full_area, 1.0) if full_area > 0 else 1.0
-        target_px = max(200, int(1200 * np.sqrt(area_fraction)))
-        wc_width_px = target_px
-        wc_height_px = target_px
-
-        wc_mask, transform = _build_voronoi_hull_mask(
-            cluster_pts, voronoi_cell, wc_width_px, wc_height_px
-        )
-
-        # Check the mask has enough allowed pixels to be worth rendering
-        allowed_fraction = (wc_mask == 0).sum() / wc_mask.size
-        if allowed_fraction < 0.01:
-            logger.warning(
-                f"[res={resolution}] Cluster {cid}: mask has only "
-                f"{allowed_fraction:.1%} allowed pixels — skipping."
-            )
-            continue
-
-        # ── Font size calculation ─────────────────────────────────────────────
-        # The mask spans transform["data_min_x"]..transform["data_max_x"] in
-        # data space, mapped to wc_width_px pixels.
-        data_span_x = transform["data_max_x"] - transform["data_min_x"] or 1.0
-        pt_scale_factor = (data_span_x * pts_per_data_unit) / wc_width_px
-        target_pts_max = BASE_MAX_FONT_PTS * (local_max / global_max_tfidf)
-        target_pixels_max = max(10, int(target_pts_max / pt_scale_factor))
-
-        # ── Generate WordCloud using the mask ─────────────────────────────────
-        wc = WordCloud(
-            width=wc_width_px,
-            height=wc_height_px,
-            background_color=None,
-            mode="RGBA",
-            prefer_horizontal=0.9,
-            max_words=top_n_words,
-            max_font_size=target_pixels_max,
-            relative_scaling=1.0,
-            mask=wc_mask,
-        ).generate_from_frequencies(freqs)
-
-        # ── Unproject and draw each word ──────────────────────────────────────
-        data_min_x = transform["data_min_x"]
-        data_max_y = transform["data_max_y"]
-        data_span_y = transform["data_max_y"] - transform["data_min_y"] or 1.0
-
-        words_drawn = 0
-        for item in wc.layout_:
-            (word, _count), f_size, (y_px, x_px), orientation, _ = item
-
-            # PIL pixel → data coordinates
-            # x_px increases rightward, y_px increases downward (PIL origin top-left)
-            x_data = data_min_x + (x_px / wc_width_px) * data_span_x
-            y_data = data_max_y - (y_px / wc_height_px) * data_span_y
-
-            mpl_fontsize = f_size * pt_scale_factor
-            rot = 90 if orientation is not None else 0
-
-            ax.text(
-                x_data, y_data, word,
-                fontsize=mpl_fontsize,
-                color=cluster_color,
-                rotation=rot,
-                ha="left",
-                va="top",
-                zorder=2,
-            )
-            words_drawn += 1
-
-        logger.info(
-            f"[res={resolution}] Cluster {cid}: drew {words_drawn} words, "
-            f"mask allowed {allowed_fraction:.1%} of pixels, "
-            f"region X({transform['data_min_x']:.1f}..{transform['data_max_x']:.1f}) "
-            f"Y({transform['data_min_y']:.1f}..{transform['data_max_y']:.1f})"
-        )
-
-    ax.axis("off")
-    ax.set_title(f"Cluster wordclouds  |  resolution={resolution}", fontsize=14, pad=12)
-    plt.tight_layout()
+    Returns file-metadata dict (datasaver contract).
+    """
+    # Keep only the top_n_words most frequent keywords per cluster.
+    cluster_freqs: dict[float, dict[str, float]] = {}
+    for cid, tally in cluster_keyword_counts.items():
+        top = sorted(tally.items(), key=lambda kv: kv[1], reverse=True)[:top_n_words]
+        if top:
+            cluster_freqs[float(cid)] = {kw: float(count) for kw, count in top}
 
     wordclouds_dir = TD_IDF_SAVING_PATH / "wordclouds"
-    wordclouds_dir.mkdir(parents=True, exist_ok=True)
-    svg_path = wordclouds_dir / f"until_{YEAR}_wordcloud_at_{resolution}_{TOP_N_CLUSTERS}_clusters.svg"
-    fig.savefig(svg_path, format="svg", bbox_inches="tight")
-    plt.close(fig)
-    logger.info(f"[res={resolution}] Saved vector wordcloud figure → {svg_path}")
+    svg_path = wordclouds_dir / f"frequency_until_{YEAR}_wordcloud_at_{resolution}_{TOP_N_CLUSTERS}_clusters.svg"
 
-    return utils.get_file_metadata(svg_path)
+    return _render_cluster_wordclouds(
+        cluster_freqs=cluster_freqs,
+        graph=citation_network_with_layout,
+        resolution=resolution,
+        top_n_clusters=top_n_clusters,
+        top_n_words=top_n_words,
+        svg_path=svg_path,
+        title=f"Cluster wordclouds (keyword frequency)  |  resolution={resolution}",
+    )
 
 
 if __name__ == "__main__":
