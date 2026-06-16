@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Final
 from collections import defaultdict
 
+import colorsys
+
 import numpy as np
 import pandas as pd
 import scipy.sparse
@@ -74,7 +76,7 @@ YEAR = 2020
 RESOLUTIONS: list[float] = [0.001, 0.002]
 # YEAR = 2026
 # RESOLUTIONS: list[float] = [0.0004, 0.001]
-TD_IDF_SAVING_PATH = KEYWORDS_LEVEL_DATA_PATH / f"until_{YEAR}_wordcloud_test_noverlap_15"
+TD_IDF_SAVING_PATH = KEYWORDS_LEVEL_DATA_PATH / f"until_{YEAR}_wordcloud_test_noverlap_colors_2"
 TD_IDF_SAVING_PATH.mkdir(parents=True, exist_ok=True)
 TOP_N_CLUSTERS = 15
 # RESOLUTIONS: list[float] = [round(0.001 + i * 0.001, 3) for i in range(1, 9)]
@@ -181,6 +183,15 @@ def _main() -> int:
 #####################
 ##  Aux Functions  ##
 #####################
+
+def _distinct_colors(n: int) -> list:
+    """Return n visually distinct colors guaranteed to contrast on a white background.
+
+    Uses HLS with fixed lightness (0.38) so no hue produces a pale/washed-out
+    color — yellow and cyan stay readable instead of blending into the background.
+    """
+    return [colorsys.hls_to_rgb(i / n, 0.38, 0.85) for i in range(n)]
+
 
 def _normalize_keyword(keyword: str) -> str:
     return keyword.lower()
@@ -961,16 +972,14 @@ def save_wordcloud_figure(
     pts_per_data_unit = fig_width_pts / data_range_x if data_range_x > 0 else 1.0
 
     modularity_meta = _modularity_meta(resolution)
+    palette = _distinct_colors(len(drawable))
 
     for idx, cid in enumerate(drawable):
         freqs = cluster_freqs[cid]
         local_max = max(freqs.values())
 
-        # Cluster colour
-        meta = modularity_meta.get(cid, {})
-        cluster_color = meta.get("color", "#AAAAAA")
-        if cluster_color == "#AAAAAA":
-            cluster_color = plt.get_cmap("tab10")(int(cid) % 10)
+        # Cluster colour — one unique color per cluster, never repeating
+        cluster_color = palette[idx]
 
         # Node positions for this cluster
         mask_members = memberships == cid
