@@ -76,7 +76,7 @@ YEAR = 2020
 RESOLUTIONS: list[float] = [0.001, 0.002]
 # YEAR = 2026
 # RESOLUTIONS: list[float] = [0.0004, 0.001]
-TD_IDF_SAVING_PATH = KEYWORDS_LEVEL_DATA_PATH / f"until_{YEAR}_wordcloud_test_noverlap_colors_2"
+TD_IDF_SAVING_PATH = KEYWORDS_LEVEL_DATA_PATH / f"until_{YEAR}_wordcloud_noverlap"
 TD_IDF_SAVING_PATH.mkdir(parents=True, exist_ok=True)
 TOP_N_CLUSTERS = 15
 # RESOLUTIONS: list[float] = [round(0.001 + i * 0.001, 3) for i in range(1, 9)]
@@ -1073,7 +1073,9 @@ def save_wordcloud_figure(
     ax.set_title(f"Cluster wordclouds  |  resolution={resolution}", fontsize=14, pad=12)
     plt.tight_layout()
 
-    svg_path = out_dir / f"cluster_wordclouds_at_{resolution}.svg"
+    wordclouds_dir = TD_IDF_SAVING_PATH / "wordclouds"
+    wordclouds_dir.mkdir(parents=True, exist_ok=True)
+    svg_path = wordclouds_dir / f"until_{YEAR}_wordcloud_at_{resolution}_{TOP_N_CLUSTERS}_clusters.svg"
     fig.savefig(svg_path, format="svg", bbox_inches="tight")
     plt.close(fig)
     logger.info(f"[res={resolution}] Saved vector wordcloud figure → {svg_path}")
