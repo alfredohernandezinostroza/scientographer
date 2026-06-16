@@ -58,8 +58,8 @@ if EXECUTE:
     logger.info("Executing the DAG!")
 
 # ── Resolution sweep ──────────────────────────────────────────────────────────
-# YEAR = 1960
-# RESOLUTIONS: list[float] = [0.005]
+YEAR = 1960
+RESOLUTIONS: list[float] = [0.005]
 # YEAR = 1980
 # RESOLUTIONS: list[float] = [0.001, 0.012]
 # YEAR = 1990
@@ -72,13 +72,14 @@ if EXECUTE:
 # RESOLUTIONS: list[float] = [0.0006, 0.002]
 # YEAR = 2015
 # RESOLUTIONS: list[float] = [0.0009, 0.003]
-YEAR = 2020
-RESOLUTIONS: list[float] = [0.001, 0.002]
+# YEAR = 2020
+# RESOLUTIONS: list[float] = [0.001, 0.002]
 # YEAR = 2026
 # RESOLUTIONS: list[float] = [0.0004, 0.001]
 TD_IDF_SAVING_PATH = KEYWORDS_LEVEL_DATA_PATH / f"until_{YEAR}_wordcloud_noverlap"
 TD_IDF_SAVING_PATH.mkdir(parents=True, exist_ok=True)
-TOP_N_CLUSTERS = 15
+TOP_N_CLUSTERS = 5
+MIN_CLUSTER_SIZE = 1
 # RESOLUTIONS: list[float] = [round(0.001 + i * 0.001, 3) for i in range(1, 9)]
 
 # ── Per-resolution output directory helper ────────────────────────────────────
@@ -133,7 +134,7 @@ def _main() -> int:
         synonym_dict_path=RAW_DATA_PATH / f"keyword_synonyms_{SYNONYMS_THRESHOLD}_with_transitivity.json",
         top_n_histogram=40,
         keyword_dividing_character="|",
-        min_cluster_size=10, # >= to this number will be included
+        min_cluster_size=MIN_CLUSTER_SIZE, # >= to this number will be included
         # wordcloud inputs
         forceatlas2_iterations=500,
         top_n_clusters=TOP_N_CLUSTERS,
