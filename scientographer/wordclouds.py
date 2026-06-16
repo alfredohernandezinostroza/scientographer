@@ -76,7 +76,7 @@ YEAR = 2020
 RESOLUTIONS: list[float] = [0.001, 0.002]
 # YEAR = 2026
 # RESOLUTIONS: list[float] = [0.0004, 0.001]
-TD_IDF_SAVING_PATH = KEYWORDS_LEVEL_DATA_PATH / f"until_{YEAR}_wordcloud_noverlap_2"
+TD_IDF_SAVING_PATH = KEYWORDS_LEVEL_DATA_PATH / f"until_{YEAR}_wordcloud_noverlap"
 TD_IDF_SAVING_PATH.mkdir(parents=True, exist_ok=True)
 TOP_N_CLUSTERS = 15
 # RESOLUTIONS: list[float] = [round(0.001 + i * 0.001, 3) for i in range(1, 9)]
@@ -140,11 +140,12 @@ def _main() -> int:
         top_n_words=20,
     )
 
-    # tfidf_outputs = [f"save_combined_plot_{name}" for name in _res_node_names]
+    tfidf_outputs = [f"save_combined_plot_{name}" for name in _res_node_names]
     wordcloud_outputs = [f"save_wordcloud_figure_{name}" for name in _res_node_names]
     frequency_wordcloud_outputs = [f"save_frequency_wordcloud_figure_{name}" for name in _res_node_names]
     # outputs = tfidf_outputs + wordcloud_outputs
-    outputs = wordcloud_outputs + frequency_wordcloud_outputs
+    # outputs = wordcloud_outputs + frequency_wordcloud_outputs
+    outputs = wordcloud_outputs + frequency_wordcloud_outputs + tfidf_outputs
 
     import __main__
 
@@ -1187,18 +1188,26 @@ def save_frequency_wordcloud_figure(
 ) -> dict:
     """
     Same non-overlapping cluster-wordcloud layout as `save_wordcloud_figure`,
-    but font sizes reflect raw keyword FREQUENCY (per-cluster term counts)
-    rather than TF-IDF scores — the more often a keyword appears in a cluster,
-    the larger it renders.
+    but font sizes reflect keyword FREQUENCY (per-cluster term counts) rather
+    than TF-IDF scores — the more often a keyword appears in a cluster, the
+    larger it renders.
+
+    Raw counts span a huge dynamic range (e.g. a top keyword at 650 vs a tail
+    of 1–20), which made the renderer drop the long tail (font size falls below
+    WordCloud's min_font_size) and shrink low-count clusters to near invisibility.
+    We therefore weight by ``log1p(count)``: it is monotonic — so "more frequent
+    = bigger" still holds, within *and* across clusters — but compresses the
+    range enough that every selected word stays legible.
 
     Returns file-metadata dict (datasaver contract).
     """
-    # Keep only the top_n_words most frequent keywords per cluster.
+    # Keep the top_n_words most frequent keywords per cluster, then weight by
+    # log1p(count) to tame the very large raw-count dynamic range.
     cluster_freqs: dict[float, dict[str, float]] = {}
     for cid, tally in cluster_keyword_counts.items():
         top = sorted(tally.items(), key=lambda kv: kv[1], reverse=True)[:top_n_words]
         if top:
-            cluster_freqs[float(cid)] = {kw: float(count) for kw, count in top}
+            cluster_freqs[float(cid)] = {kw: float(np.log1p(count)) for kw, count in top}
 
     wordclouds_dir = TD_IDF_SAVING_PATH / "wordclouds"
     svg_path = wordclouds_dir / f"frequency_until_{YEAR}_wordcloud_at_{resolution}_{TOP_N_CLUSTERS}_clusters.svg"
