@@ -11,6 +11,9 @@ PROCESSED_DATA_PATH.mkdir(exist_ok=True)
 GRAPH_LEVEL_DATA_PATH = Path("data","graph_level_data")
 GRAPH_LEVEL_DATA_PATH.mkdir(exist_ok=True)
 
+KEYWORDS_LEVEL_DATA_PATH = Path("data","keywords_level_data")
+KEYWORDS_LEVEL_DATA_PATH.mkdir(exist_ok=True)
+
 FIGURES_PATH = Path("reports","figures")
 FIGURES_PATH.mkdir(exist_ok=True)
 
