@@ -336,20 +336,31 @@ def _voronoi_finite_polygons(centroids: np.ndarray, bounding_box: tuple) -> list
     return cells
 
 
-def _convex_hull_polygon(points: np.ndarray) -> Polygon:
+def _convex_hull_polygon(points: np.ndarray, min_radius: float = 1.0) -> Polygon:
     """
     Return the shapely Polygon for the convex hull of `points` (N×2).
     Falls back gracefully for degenerate cases (1 or 2 points).
+
+    `min_radius` sets a minimum footprint: a hull (or degenerate fallback box)
+    whose smaller side is below 2*min_radius is buffered out to roughly that
+    size. Without this, single-node clusters collapse to a ~2-unit box and their
+    words render at ~1 pt in a graph spanning thousands of units. Callers pass a
+    fraction of the graph extent; the result is later clipped to the Voronoi
+    cell, so this never breaks the no-overlap guarantee.
     """
     if len(points) >= 3:
         try:
             hull = ConvexHull(points)
-            return Polygon(points[hull.vertices])
+            poly = Polygon(points[hull.vertices])
+            min_side = min(poly.bounds[2] - poly.bounds[0], poly.bounds[3] - poly.bounds[1])
+            if min_side < 2 * min_radius:
+                poly = poly.buffer(min_radius)
+            return poly
         except Exception:
             pass
-    # Degenerate: build a small square around the mean
+    # Degenerate (1–2 points): build a square around the mean
     cx, cy = points.mean(axis=0)
-    r = max(float(np.ptp(points, axis=0).max()), 1.0)
+    r = max(float(np.ptp(points, axis=0).max()), min_radius)
     return shapely_box(cx - r, cy - r, cx + r, cy + r)
 
 
@@ -358,6 +369,7 @@ def _build_voronoi_hull_mask(
     voronoi_cell: Polygon,
     mask_width: int,
     mask_height: int,
+    min_radius: float = 1.0,
 ) -> tuple[np.ndarray, dict]:
     """
     Build a WordCloud-compatible mask for one cluster.
@@ -383,7 +395,7 @@ def _build_voronoi_hull_mask(
         "px_per_data_x", "px_per_data_y"
         — everything needed to unproject pixel→data coordinates later.
     """
-    hull_poly = _convex_hull_polygon(cluster_points)
+    hull_poly = _convex_hull_polygon(cluster_points, min_radius=min_radius)
     region = hull_poly.intersection(voronoi_cell)
 
     if region.is_empty:
@@ -510,12 +522,17 @@ def _render_cluster_wordclouds(
 
     memberships = np.array(graph.vs[cluster_attr], dtype=float)
     unique_ids, counts = np.unique(memberships, return_counts=True)
-    top_indices = np.argsort(counts)[::-1][:top_n_clusters]
-    top_cluster_ids = set(unique_ids[top_indices].tolist())
+    node_count = dict(zip(unique_ids.tolist(), counts.tolist()))
 
-    drawable = sorted(top_cluster_ids & set(cluster_freqs.keys()))
+    # Rank by node count, but ONLY among clusters that actually have keywords.
+    # Ranking the full set first would let keyword-less clusters consume top-N
+    # slots whenever many clusters tie on node count (e.g. the many singletons
+    # in early years), starving the clusters that do have words to draw.
+    clusters_with_words = [cid for cid in cluster_freqs if cid in node_count]
+    ranked = sorted(clusters_with_words, key=lambda cid: node_count[cid], reverse=True)
+    drawable = sorted(ranked[:top_n_clusters])
     if not drawable:
-        logger.warning(f"[res={resolution}] No overlap between top clusters and keyword scores.")
+        logger.warning(f"[res={resolution}] No clusters with both node positions and keyword scores.")
         return utils.get_file_metadata(out_dir)
 
     logger.info(f"[res={resolution}] Drawing wordclouds for {len(drawable)} clusters: {drawable}")
@@ -525,9 +542,16 @@ def _render_cluster_wordclouds(
     all_y = np.array(graph.vs["y"], dtype=float)
 
     # Global bounding box used to clip Voronoi cells
-    pad = max(all_x.ptp(), all_y.ptp()) * 0.05
+    graph_extent = max(all_x.ptp(), all_y.ptp())
+    pad = graph_extent * 0.05
     bbox = (all_x.min() - pad, all_y.min() - pad,
             all_x.max() + pad, all_y.max() + pad)
+
+    # Minimum drawing footprint for tiny/degenerate clusters (e.g. singletons),
+    # as a fraction of the graph extent. Their hull is otherwise a ~2-unit box,
+    # which forces words to ~1 pt. Always clipped to the Voronoi cell below, so
+    # this can never cause clouds to overlap.
+    min_region_radius = 0.05 * graph_extent
 
     # Centroids of drawable clusters (in the order of `drawable`)
     centroids = np.array([
@@ -583,7 +607,7 @@ def _render_cluster_wordclouds(
         # Choose mask resolution proportional to the region's data-space area
         # so small clusters get fewer pixels (faster) and large ones get more.
         region_area = voronoi_cell.intersection(
-            _convex_hull_polygon(cluster_pts)
+            _convex_hull_polygon(cluster_pts, min_radius=min_region_radius)
         ).area
         # Scale: target ~1200 px on the longer axis of the full graph
         full_area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
@@ -593,7 +617,8 @@ def _render_cluster_wordclouds(
         wc_height_px = target_px
 
         wc_mask, transform = _build_voronoi_hull_mask(
-            cluster_pts, voronoi_cell, wc_width_px, wc_height_px
+            cluster_pts, voronoi_cell, wc_width_px, wc_height_px,
+            min_radius=min_region_radius,
         )
 
         # Check the mask has enough allowed pixels to be worth rendering
