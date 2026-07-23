@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Motor Learning Semantic Map</title>
+  <link rel="stylesheet" href="styles.css">
+
+  <!-- Tabulator -->
+  <link href="https://unpkg.com/tabulator-tables@6.3.1/dist/css/tabulator.min.css" rel="stylesheet">
+</head>
+<body>
+  <!-- Graph tab pane -->
+  <div id="view-graph" class="view active">
+    <div id="sigma-container"></div>
+
+    <!-- Floating cluster name labels -->
+    <div id="cluster-labels"></div>
+
+    <!-- Color scale for the "Integration" color mode (shown only in that mode) -->
+    <div id="integration-scale" hidden>
+      <span>more separate</span>
+      <span class="scale-bar"></span>
+      <span>more integrated</span>
+    </div>
+
+    <!-- Hover tooltip -->
+    <div id="tooltip" hidden></div>
+  </div>
+
+  <!-- Table tab pane -->
+  <!-- <div id="view-table" class="view">
+    <div id="table-wrap" class="panel">
+      <div class="table-filter-row">
+        <select id="table-filter-field">
+          <option value=""></option>
+          <option value="title">Paper</option>
+          <option value="authors">Author</option>
+          <option value="indegree">Citations</option>
+          <option value="year">Year</option>
+          <option value="journal">Journal</option>
+          <option value="doi">DOI</option>
+        </select>
+
+        <select id="table-filter-type">
+          <option value="like">Contains</option>
+          <option value="=">=</option>
+          <option value="<"><</option>
+          <option value="<="><=</option>
+          <option value=">">></option>
+          <option value=">=">>=</option>
+          <option value="!=">!=</option>
+        </select>
+
+        <input id="table-filter-value" type="text" placeholder="value to filter">
+        <button id="table-filter-clear">Clear Filter</button>
+      </div>
+
+      <div id="papers-table"></div>
+    </div>
+  </div> -->
+
+  <!-- Controls panel -->
+  <div id="controls" class="panel collapsed">
+    <button id="controls-toggle" class="icon-btn" type="button" aria-label="Show controls">⟩</button>
+    
+    <div class="topline">
+      <div class="titleblock">
+        <h1>Motor Learning Semantic Map</h1>
+        <p class="subtitle" id="subtitle">14,511 papers &middot; ForceAtlas layout of the citation graph</p>
+      </div>
+
+      <div class="tabs">
+        <button id="tab-graph" class="tab active" type="button">Graph</button>
+        <!-- <button id="tab-table" class="tab" type="button">Table</button> -->
+      </div>
+    </div>
+
+    <input id="search" type="search" placeholder="Search title, author, DOI...">
+    <ul id="search-results" hidden></ul>
+
+    <div class="selected-count" id="selected-count">Nodes selected: —</div>
+
+    <button id="apply-filters" class="primary" type="button">Filter</button>
+
+    <!-- Global filters (v1-like) -->
+    <input id="filter-title" type="search" placeholder="Filter by publication...">
+    <input id="filter-author" type="search" placeholder="Filter by author(s), comma-separated...">
+    <input id="filter-abstract" type="search" placeholder="Filter by abstracts...">
+    <input id="filter-journal" type="search" placeholder="Filter by journal...">
+    <input id="filter-keywords" type="search" placeholder="Filter by keywords, comma-separated...">
+    <!-- <input id="filter-mesh" type="search" placeholder="Filter by MeSH headers, comma-separated..."> -->
+
+    <div class="control-row">
+      <label>Year <span id="year-readout"></span></label>
+      <input id="year-min" type="range">
+      <input id="year-max" type="range">
+    </div>
+
+    <div class="control-row" hidden>
+      <label>Dataset</label>
+      <select id="dataset-select">
+        <option value="network">Citation network</option>
+      </select>
+    </div>
+
+    <div class="control-row" id="snapshot-row" hidden>
+      <label>Time</label>
+      <select id="snapshot-select"></select>
+    </div>
+
+    <div class="control-row">
+      <label>Color by</label>
+      <select id="color-by"></select>
+    </div>
+
+    <div class="control-row">
+      <label>Labels</label>
+      <select id="label-mode">
+        <option value="dynamic">Dynamic (zoom / hover)</option>
+        <option value="always">Always visible</option>
+      </select>
+    </div>
+
+    <div class="control-row checkbox-row">
+      <label><input id="bridge-toggle" type="checkbox"> Highlight bridge papers</label>
+    </div>
+
+    <div class="control-row checkbox-row">
+      <label><input id="edges-toggle" type="checkbox"> Show citation edges</label>
+    </div>
+
+    <div class="control-row checkbox-row">
+      <label><input id="intra-toggle" type="checkbox"> Intra-topic citation islands</label>
+    </div>
+
+    <!-- One <details> legend block per grouping is generated here per dataset. -->
+    <div id="legends"></div>
+
+    <details class="about">
+      <summary>About this map</summary>
+      <p>Each dot is a paper; dot size is total citation degree. Positions come
+         from the citation graph's layout (papers that cite each other are pulled
+         together), so position reflects <strong>citation structure</strong>.</p>
+      <p>Use <strong>Color by</strong> to recolor: the semantic
+         <strong>topic</strong> (from the text-embedding clustering written onto
+         the graph), the Leiden citation <strong>community</strong>, year, or
+         citation count.</p>
+      <p><strong>Hover</strong> any paper for its title, year and authors.
+         <strong>Click</strong> a paper to draw its citation links and open the
+         side panel. Toggle <strong>citation edges</strong> to see where the
+         citation graph crosses the layout &mdash; on the embedding maps, long
+         edges connect papers cited together but semantically distant.</p>
+      <p>Toggle <strong>Intra-topic citation islands</strong> to reveal where a
+         topic's papers split into separate citing groups: within each topic, the
+         citation links among its own papers are broken into connected
+         components, and every multi-paper component beyond the largest is
+         enlarged as an &ldquo;island&rdquo; so it stands out. When you
+         <strong>colour by topic/cluster</strong> the islands are also recoloured
+         (main body keeps the topic colour, islands get a bright palette, papers
+         citing nothing within the topic are greyed); when you colour by
+         <strong>community, year or citations</strong> that colouring is kept, so
+         you can see e.g. which community each island belongs to. Several islands
+         in one topic means papers that share a subject but form separate,
+         non-citing literatures.</p>
+    </details>
+  </div>
+
+  <!-- Right-side detail panel -->
+  <aside id="detail" class="panel" hidden>
+    <button id="detail-close" aria-label="Close" type="button">&times;</button>
+    <div id="detail-body"></div>
+  </aside>
+
+  <!-- Loading overlay -->
+  <div id="loading">Loading semantic map...</div>
+
+  <!-- Guided tour launcher -->
+  <button id="start-tour" type="button"><span class="tour-icon">?</span> Guided tour</button>
+
+  <!-- Tabulator JS -->
+  <script src="https://unpkg.com/tabulator-tables@6.3.1/dist/js/tabulator.min.js"></script>
+
+  <!-- App -->
+  <script type="module" src="main.js?v=18"></script>
+  <!-- Guided tour (independent of main.js; only reads the DOM) -->
+  <script type="module" src="tour.js?v=1"></script>
+</body>
+</html>
