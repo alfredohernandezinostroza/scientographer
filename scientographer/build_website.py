@@ -9,7 +9,8 @@ graph's own layout (``x``/``y`` node attributes), colourable by semantic
 edges, search, filters, and per-topic/community detail panels.
 
 Everything is derived from ONE GraphML plus (optionally) the per-topic metrics
-from ``topic_community_analysis.py``; no text-embedding UMAP parquet is needed,
+from ``topic_community_analysis.py`` and the resolution-quality metrics from
+``community_quality_metrics.py``; no text-embedding UMAP parquet is needed,
 because positions come from the graph layout and cluster keyword labels are
 computed by TF-IDF over the nodes' own keyword fields. This consolidates the
 Mariana project's ``build_web_data*.py`` scripts into one Hamilton DAG.
@@ -19,12 +20,17 @@ Output (default ``reports/website/``): a directory ready to serve over HTTP ::
     reports/website/
       index.html  main.js  styles.css  tour.js   (vendored frontend, copied)
       network_data/
-        nodes.json         per-paper records (position, colour, metadata)
-        clusters.json      topic legend (keywords, centroid, community metrics)
-        communities.json   citation-community legend (top papers/authors/keywords)
-        abstracts.json     {node_id: abstract}, lazily loaded
-        edges_out.bin      directed citation edges, CSR uint32 (out-neighbours)
-        edges_in.bin       directed citation edges, CSR uint32 (in-neighbours)
+        nodes.json                     per-paper records (position, colour, metadata,
+                                        + this paper's community id at every resolution)
+        clusters.json                  topic legend (keywords, centroid, community metrics)
+        communities_by_resolution.json citation-community legend per Leiden/CPM resolution,
+                                        merged with community_quality_metrics.py's true
+                                        (full-network) per-community quality metrics
+        resolution_metrics.json        whole-graph quality metrics vs. resolution (for the
+                                        Metrics tab's small-multiple charts)
+        abstracts.json      {node_id: abstract}, lazily loaded
+        edges_out.bin       directed citation edges, CSR uint32 (out-neighbours)
+        edges_in.bin        directed citation edges, CSR uint32 (in-neighbours)
 
 Serve with::
 
@@ -48,11 +54,18 @@ from pathlib import Path
 from typing import Final, Optional
 from collections import Counter, defaultdict
 
+import pandas as pd
+
 from hamilton.function_modifiers import datasaver, unpack_fields
 from hamilton import driver
 import hamilton.log_setup
 
 from motor_learning_network.constants import GRAPH_LEVEL_DATA_PATH, FIGURES_PATH
+from motor_learning_network.community_quality_metrics import (
+    RESOLUTIONS,
+    PER_COMMUNITY_PARQUET,
+    PER_PARTITION_PARQUET,
+)
 
 ###################
 ##   Constants   ##
@@ -226,6 +239,12 @@ def _label_from_keywords(top_keywords: list[dict], fallback: str) -> str:
     return ", ".join(k["keyword"] for k in top_keywords[:3]) if top_keywords else fallback
 
 
+def _resolution_communities(a: dict) -> dict[str, int]:
+    """This paper's community id at every swept Leiden/CPM resolution, read
+    from the graph's `cpm_communities_at_res=<r>` attributes."""
+    return {str(r): _to_int(a.get(f"cpm_communities_at_res={r}"), OUTLIER) for r in RESOLUTIONS}
+
+
 ##################
 ##     Main     ##
 ##################
@@ -233,6 +252,8 @@ def _main() -> int:
     inputs = dict(
         graphml_path=GRAPH_LEVEL_DATA_PATH / "citation_network_with_topics_new.graphml",
         topic_metrics_path=GRAPH_LEVEL_DATA_PATH / "topic_community" / "topic_community_metrics.json",
+        per_community_metrics_path=PER_COMMUNITY_PARQUET,
+        per_partition_metrics_path=PER_PARTITION_PARQUET,
     )
     outputs = ["assembled_website"]
     import __main__
@@ -300,8 +321,9 @@ def node_records(raw_nodes: list) -> list[dict]:
             "doi": (a.get("name") or "").strip(),
             "cluster": topic,                                # semantic grouping
             "color": _cluster_color(topic),
-            "community": community,                          # citation grouping
+            "community": community,                          # citation grouping (at COMMUNITY_RESOLUTION)
             "community_color": _cluster_color(community) if named else OUTLIER_COLOR,
+            "communities": _resolution_communities(a),       # same grouping at every swept resolution
             "x": round(_to_float(a.get("x"), 0.0), 3),
             "y": round(_to_float(a.get("y"), 0.0), 3),
             "size": round(_to_float(a.get("size"), 1.0), 3),
@@ -352,36 +374,98 @@ def clusters_legend(node_records: list[dict], topic_metrics: dict) -> dict:
     return clusters
 
 
-def communities_legend(node_records: list[dict]) -> dict:
-    """Legend for the citation `community` grouping: only communities at least
-    MIN_NAMED_GROUP_SIZE are emitted (mirroring 'only the largest are named'),
-    each with a keyword-derived label, centroid, size, and top lists."""
-    top_lists = _top_lists_by_group(node_records, "community")
-    agg: dict[int, dict] = defaultdict(lambda: {"size": 0, "sx": 0.0, "sy": 0.0})
-    for r in node_records:
-        g = agg[r["community"]]
-        g["size"] += 1
-        g["sx"] += r["x"]
-        g["sy"] += r["y"]
+def per_community_quality_df(per_community_metrics_path: Path) -> pd.DataFrame:
+    """Per-(resolution, community) quality metrics from community_quality_metrics.py
+    -- the true values computed on the full, unfiltered citation network (this
+    site only plots the subset of papers that also have a semantic topic)."""
+    return pd.read_parquet(per_community_metrics_path)
 
-    communities = {}
-    for cid in sorted(agg):
-        if cid < 0 or agg[cid]["size"] < MIN_NAMED_GROUP_SIZE:
-            continue
-        lists = top_lists.get(cid, {})
-        kws = lists.get("top_keywords", [])
-        a = agg[cid]
-        communities[str(cid)] = {
-            "id": cid,
-            "name": _label_from_keywords(kws, f"Community {cid}"),
-            "color": _cluster_color(cid),
-            "centroid": [round(a["sx"] / a["size"], 3), round(a["sy"] / a["size"], 3)],
-            "size": a["size"],
-            "top_papers": lists.get("top_papers", []),
-            "top_authors": lists.get("top_authors", []),
-            "top_keywords": kws,
-        }
-    return communities
+
+def per_partition_quality_df(per_partition_metrics_path: Path) -> pd.DataFrame:
+    """Per-resolution partition-level quality metrics (modularity, constant
+    Potts model score, surprise, significance, cross-seed stability, adjacent-
+    resolution plateau detection, ...) from community_quality_metrics.py."""
+    return pd.read_parquet(per_partition_metrics_path)
+
+
+def community_quality_lookup(per_community_quality_df: pd.DataFrame) -> dict:
+    """resolution (str) -> community_id (str) -> quality metrics, for merging
+    the true full-network numbers into each resolution's community legend."""
+    quality_fields = [
+        "community_size", "conductance", "conductance_out", "conductance_in",
+        "internal_edge_density", "internal_directed_edge_count", "boundary_edge_count",
+    ]
+    lookup: dict[str, dict[str, dict]] = defaultdict(dict)
+    for row in per_community_quality_df.itertuples(index=False):
+        lookup[str(row.resolution)][str(int(row.community_id))] = {f: getattr(row, f) for f in quality_fields}
+    return dict(lookup)
+
+
+def resolution_metrics_records(
+    per_partition_quality_df: pd.DataFrame, per_community_quality_df: pd.DataFrame
+) -> list[dict]:
+    """The whole-graph metrics vs. resolution, as a flat list of records (one
+    per resolution) for the Metrics tab's small-multiple charts. NaN (the
+    plateau-neighbor NMI at the first/last resolution) becomes null so this
+    survives json.dump/JSON.parse; a resolution's median per-community
+    conductance is added since that's what centers the Integration color scale."""
+    median_conductance = per_community_quality_df.groupby("resolution")["conductance"].median()
+    records = []
+    for row in per_partition_quality_df.sort_values("resolution").itertuples(index=False):
+        record = {k: (None if isinstance(v, float) and math.isnan(v) else v) for k, v in row._asdict().items()}
+        record["median_conductance"] = float(median_conductance.get(row.resolution, 0.0))
+        records.append(record)
+    return records
+
+
+def communities_legend_by_resolution(node_records: list[dict], community_quality_lookup: dict) -> dict:
+    """Per-resolution version of the citation-community legend: for each of the
+    swept Leiden/CPM resolutions, the same top-papers/authors/keywords/centroid
+    legend as before (only communities >= MIN_NAMED_GROUP_SIZE, mirroring 'only
+    the largest are named'), merged with the true full-network quality metrics
+    from community_quality_metrics.py. `size` is the count within this site's
+    plotted subset (for centroids/top-lists); `true_size` (from the quality
+    lookup) is added when it differs, since the full network has papers this
+    site doesn't plot (no semantic topic assigned)."""
+    result = {}
+    for resolution in RESOLUTIONS:
+        res_key = str(resolution)
+        quality_for_res = community_quality_lookup.get(res_key, {})
+        recs_at_res = [{**r, "community": r["communities"].get(res_key, OUTLIER)} for r in node_records]
+        top_lists = _top_lists_by_group(recs_at_res, "community")
+
+        agg: dict[int, dict] = defaultdict(lambda: {"size": 0, "sx": 0.0, "sy": 0.0})
+        for r in recs_at_res:
+            g = agg[r["community"]]
+            g["size"] += 1
+            g["sx"] += r["x"]
+            g["sy"] += r["y"]
+
+        communities = {}
+        for cid in sorted(agg):
+            if cid < 0 or agg[cid]["size"] < MIN_NAMED_GROUP_SIZE:
+                continue
+            lists = top_lists.get(cid, {})
+            kws = lists.get("top_keywords", [])
+            a = agg[cid]
+            entry = {
+                "id": cid,
+                "name": _label_from_keywords(kws, f"Community {cid}"),
+                "color": _cluster_color(cid),
+                "centroid": [round(a["sx"] / a["size"], 3), round(a["sy"] / a["size"], 3)],
+                "size": a["size"],
+                "top_papers": lists.get("top_papers", []),
+                "top_authors": lists.get("top_authors", []),
+                "top_keywords": kws,
+            }
+            quality = quality_for_res.get(str(cid))
+            if quality is not None:
+                entry["quality"] = quality
+                if int(quality["community_size"]) != a["size"]:
+                    entry["true_size"] = int(quality["community_size"])
+            communities[str(cid)] = entry
+        result[res_key] = communities
+    return result
 
 
 def _data_dir() -> Path:
@@ -410,11 +494,26 @@ def save_clusters_json(clusters_legend: dict) -> dict:
 
 
 @datasaver()
-def save_communities_json(communities_legend: dict) -> dict:
-    path = _data_dir() / "communities.json"
+def save_communities_by_resolution_json(communities_legend_by_resolution: dict) -> dict:
+    path = _data_dir() / "communities_by_resolution.json"
+    payload = {"default_resolution": str(COMMUNITY_RESOLUTION), "by_resolution": communities_legend_by_resolution}
     with open(path, "w", encoding="utf-8") as f:
-        json.dump(communities_legend, f, ensure_ascii=False, separators=(",", ":"))
-    return {"path": str(path), "n_communities": len(communities_legend)}
+        json.dump(payload, f, ensure_ascii=False, separators=(",", ":"))
+    n_communities_total = sum(len(v) for v in communities_legend_by_resolution.values())
+    return {
+        "path": str(path),
+        "n_resolutions": len(communities_legend_by_resolution),
+        "n_communities_total": n_communities_total,
+    }
+
+
+@datasaver()
+def save_resolution_metrics_json(resolution_metrics_records: list[dict]) -> dict:
+    path = _data_dir() / "resolution_metrics.json"
+    payload = {"default_resolution": str(COMMUNITY_RESOLUTION), "resolutions": resolution_metrics_records}
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, separators=(",", ":"))
+    return {"path": str(path), "n_resolutions": len(resolution_metrics_records)}
 
 
 @datasaver()
@@ -439,7 +538,8 @@ def save_edges_bins(node_records: list[dict], edges: list) -> dict:
 def assembled_website(
     save_nodes_json: dict,
     save_clusters_json: dict,
-    save_communities_json: dict,
+    save_communities_by_resolution_json: dict,
+    save_resolution_metrics_json: dict,
     save_abstracts_json: dict,
     save_edges_bins: dict,
 ) -> dict:
@@ -453,7 +553,8 @@ def assembled_website(
         "data_dir": str(WEBSITE_DIR / DATA_SUBDIR),
         "nodes": save_nodes_json["n_nodes"],
         "clusters": save_clusters_json["n_clusters"],
-        "communities": save_communities_json["n_communities"],
+        "communities_total": save_communities_by_resolution_json["n_communities_total"],
+        "resolutions": save_resolution_metrics_json["n_resolutions"],
         "abstracts": save_abstracts_json["n_abstracts"],
         "edges": save_edges_bins["n_edges"],
     }

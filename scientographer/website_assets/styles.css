@@ -598,6 +598,65 @@ details.about p {
   font-size: 11px;
 }
 
+/* ── Metrics tab (community-quality metrics vs. resolution) ──────────────── */
+#metrics-wrap {
+  top: 16px;
+  left: 16px;
+  right: 16px;
+  bottom: 16px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+.metrics-head { margin-bottom: 6px; }
+.metrics-head h2 { margin: 0 0 4px; font-size: 15px; font-weight: 600; }
+.metrics-head p.meta {
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0 0 12px;
+  max-width: 640px;
+}
+
+#metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 14px;
+}
+
+.metric-tile {
+  background: #161a22;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  padding: 10px 12px 6px;
+}
+.metric-tile-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+.metric-tile-hint {
+  font-size: 10.5px;
+  color: var(--text-dim);
+  line-height: 1.4;
+  margin: 2px 0 6px;
+}
+.metric-chart {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.metric-axis { stroke: var(--panel-border); stroke-width: 1; }
+.metric-gridline { stroke: var(--panel-border); stroke-width: 1; opacity: 0.4; }
+.metric-threshold { stroke: #ffb14e; stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.8; }
+.metric-band { fill: #ffb14e; opacity: 0.10; }
+.metric-line { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; }
+.metric-dot { fill: var(--accent); }
+.metric-tick { fill: var(--text-dim); font-size: 8px; }
+.metric-axis-title { fill: var(--text-dim); font-size: 8.5px; font-weight: 600; }
+.metric-crosshair { stroke: var(--text-dim); stroke-width: 1; stroke-dasharray: 2 2; }
+.metric-capture { fill: transparent; }
+
 /* ── Table view ───────────────────────────────────────────────────────── */
 #table-wrap {
   top: 16px;
