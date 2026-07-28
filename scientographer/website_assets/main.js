@@ -26,15 +26,21 @@ import { Sigma } from "https://cdn.jsdelivr.net/npm/sigma@2.4.0/+esm";
 // GraphML: positions come from the graphml's layout (x/y), the semantic "topic"
 // grouping from the graphml `topic` attribute, and the citation "community"
 // grouping from the graphml `cpm_communities_at_res=*` attribute. The bundle
-// (nodes.json / clusters.json / communities.json / abstracts.json / edges_*.bin)
-// lives in the `network_data/` sibling directory.
+// (nodes.json / clusters.json / communities_by_resolution.json /
+// resolution_metrics.json / abstracts.json / edges_*.bin) lives in the
+// `network_data/` sibling directory.
+// Note: the "community" grouping has no static `file` -- unlike every other
+// grouping, it's resolution-indexed (communities_by_resolution.json, one
+// legend per swept Leiden/CPM resolution), so its `state.groupData.community`
+// is populated by setupResolutionMetrics()/applyCommunityResolution() instead
+// of the generic per-grouping fetch loop in loadDataset().
 const DATASETS = {
   network: {
     label: "Citation network",
     dir: "network_data",
     subtitle: "Citation-network layout",
     groupings: [
-      { key: "community", label: "Community", legendLabel: "Communities", file: "communities.json", nodeField: "community", colorField: "community_color", noneLabel: "No community", citation: true },
+      { key: "community", label: "Community", legendLabel: "Communities", nodeField: "community", colorField: "community_color", noneLabel: "No community", citation: true },
       { key: "cluster", label: "Topic", legendLabel: "Topics", file: "clusters.json", nodeField: "cluster", colorField: "color", noneLabel: "No topic", semantic: true },
     ],
   },
@@ -77,10 +83,14 @@ const state = {
   _intraLayerBuilt: false,
   topicComponents: null, // { compRank, compSizeOf } — see computeTopicComponents
 
-  // Community integration ("Color by → Integration"): per Leiden community, how
-  // much it cites outside itself vs chance. Computed at runtime over the CSR
-  // edges; reset when the dataset changes. See computeCommunityIntegration.
-  communityIntegration: null, // { byId: {cid: {...}}, lo, mid, hi, Q, internalShare }
+  // Resolution-indexed citation-community data (community_quality_metrics.py
+  // via build_website.py): communities_by_resolution.json (per-resolution
+  // legend + true full-network quality metrics) and resolution_metrics.json
+  // (whole-graph metrics vs. resolution, for the Metrics tab). Both null if
+  // the dataset doesn't provide them. See setupResolutionMetrics.
+  communitiesByResolution: null, // { default_resolution, by_resolution: {res: {cid: {...}}} }
+  resolutionMetrics: null, // { default_resolution, resolutions: [{resolution, modularity, ...}] }
+  communityResolution: null, // the currently active resolution (string key into by_resolution)
 
   // "Until-year" time snapshots: the active dataset's snapshots.json (per-cutoff
   // re-layouts using only papers up to that year; colour/grouping is unchanged).
@@ -105,7 +115,7 @@ const state = {
 };
 
 // Sentinel id for the "ungrouped" bucket (no topic / no community): papers
-// whose group isn't a named entry in topics.json / communities.json.
+// whose group isn't a named entry in the active grouping's data.
 const NONE_ID = "__none__";
 
 // Groupings declared by the active dataset.
@@ -152,6 +162,7 @@ async function main() {
   initYearControls();
   initDatasetSelector();
   initSnapshotControl();
+  initCommunityResolutionControl();
 
   await loadDataset(DEFAULT_DATASET);
 
@@ -164,7 +175,10 @@ async function loadDataset(name) {
   const cfg = DATASETS[name];
   state.dataset = name;
 
-  const groupingFetches = cfg.groupings.map((g) =>
+  // "community" has no static file (see DATASETS) -- its data is resolution-
+  // indexed and populated below by setupResolutionMetrics().
+  const fileGroupings = cfg.groupings.filter((g) => g.file);
+  const groupingFetches = fileGroupings.map((g) =>
     fetch(`${cfg.dir}/${g.file}`).then((r) => r.json())
   );
   const [nodesPayload, outBuf, inBuf, ...groupingPayloads] = await Promise.all([
@@ -183,10 +197,8 @@ async function loadDataset(name) {
   // Per-grouping data + a fresh (empty) mute set.
   state.groupData = {};
   state.muted = {};
-  cfg.groupings.forEach((g, i) => {
-    state.groupData[g.key] = groupingPayloads[i];
-    state.muted[g.key] = new Set();
-  });
+  cfg.groupings.forEach((g) => { state.muted[g.key] = new Set(); });
+  fileGroupings.forEach((g, i) => { state.groupData[g.key] = groupingPayloads[i]; });
   state.colorBy = cfg.groupings[0].key;
 
   // Reset transient view state and the abstracts cache (per-dataset).
@@ -200,13 +212,18 @@ async function loadDataset(name) {
   // clear in buildGraph() already dropped the intra edge layer.
   state.topicComponents = null;
   state._intraLayerBuilt = false;
-  state.communityIntegration = null; // belongs to the previous dataset's communities
   state.snapshotData = null; // belongs to the previous dataset
   state.snapshot = null; // back to the full "now" layout
 
   document.getElementById("subtitle").innerHTML = cfg.subtitle;
 
   buildIndex();
+  // Populates state.groupData.community (resolution-indexed; must run before
+  // buildLegends()/renderGroupLabels() below) plus the Metrics tab + resolution
+  // selector. A no-op (leaves "community" grouping empty) if the dataset
+  // doesn't provide communities_by_resolution.json.
+  await setupResolutionMetrics(cfg);
+
   buildGraph(); // clears + repopulates the graph (and any edge layers)
   if (!state.renderer) {
     initSigma();
@@ -391,6 +408,111 @@ function groupCentroid(key, gid) {
   }
   return c.centroid;
 }
+
+// ── Resolution-indexed citation communities ─────────────────────────────────
+// One-time: wire the "Community resolution" dropdown (options are rebuilt per
+// dataset in setupResolutionMetrics).
+function initCommunityResolutionControl() {
+  const sel = document.getElementById("community-resolution");
+  if (!sel) return;
+  sel.addEventListener("change", (e) => applyCommunityResolution(e.target.value));
+}
+
+// Per-dataset: fetch communities_by_resolution.json + resolution_metrics.json
+// (both optional -- a dataset without community_quality_metrics.py output
+// simply keeps the "community" grouping empty and hides the Metrics tab /
+// resolution selector). On success, seeds state.groupData.community with the
+// default resolution's legend (this must happen before buildLegends() /
+// renderGroupLabels() in loadDataset) and renders the Metrics tab's charts.
+async function setupResolutionMetrics(cfg) {
+  state.communitiesByResolution = null;
+  state.resolutionMetrics = null;
+  state.communityResolution = null;
+  state.groupData.community = {}; // safe default: no named communities
+
+  const tab = document.getElementById("tab-metrics");
+  const row = document.getElementById("community-resolution-row");
+  const sel = document.getElementById("community-resolution");
+  if (tab) tab.hidden = true;
+  if (row) row.hidden = true;
+
+  let commByRes = null, resMetrics = null;
+  try {
+    [commByRes, resMetrics] = await Promise.all([
+      fetch(`${cfg.dir}/communities_by_resolution.json`).then((r) => (r.ok ? r.json() : null)),
+      fetch(`${cfg.dir}/resolution_metrics.json`).then((r) => (r.ok ? r.json() : null)),
+    ]);
+  } catch {
+    commByRes = null;
+    resMetrics = null;
+  }
+  if (!commByRes || !resMetrics || !Object.keys(commByRes.by_resolution || {}).length) return;
+
+  state.communitiesByResolution = commByRes;
+  state.resolutionMetrics = resMetrics;
+
+  const resolutions = Object.keys(commByRes.by_resolution).sort((a, b) => parseFloat(a) - parseFloat(b));
+  const defaultRes = commByRes.default_resolution && commByRes.by_resolution[commByRes.default_resolution]
+    ? commByRes.default_resolution
+    : resolutions[0];
+
+  if (sel) {
+    sel.innerHTML = resolutions
+      .map((r) => `<option value="${r}">${r} (${Object.keys(commByRes.by_resolution[r]).length.toLocaleString()} communities)</option>`)
+      .join("");
+    sel.value = defaultRes;
+  }
+
+  // Seed groupData directly (no need to rewrite per-node community/
+  // community_color: build_website.py already baked those at this same
+  // default resolution). applyCommunityResolution() handles later switches.
+  state.communityResolution = defaultRes;
+  state.groupData.community = commByRes.by_resolution[defaultRes];
+
+  if (row) row.hidden = false;
+  if (tab) tab.hidden = false;
+  renderResolutionMetricsPanel();
+}
+
+// Switch which resolution's Leiden/CPM communities colour the map: recomputes
+// every node's `community`/`community_color`, swaps the legend data, and
+// (unless called during initial setup) refreshes the map + open panels.
+function applyCommunityResolution(resolution) {
+  const commByRes = state.communitiesByResolution;
+  const legend = commByRes && commByRes.by_resolution[resolution];
+  if (!legend) return;
+
+  state.communityResolution = resolution;
+  for (const r of state.nodesData.nodes) {
+    const cid = r.communities && r.communities[resolution] != null ? r.communities[resolution] : -1;
+    r.community = cid;
+    const entry = legend[String(cid)];
+    r.community_color = entry ? entry.color : OUTLIER_COLOR_JS;
+  }
+  state.groupData.community = legend;
+  state.muted.community = new Set();
+
+  const sel = document.getElementById("community-resolution");
+  if (sel && sel.value !== resolution) sel.value = resolution;
+
+  if (!state.renderer) return; // called before the graph exists (initial load)
+
+  buildLegend("community");
+  if (state.colorBy === "community" || state.colorBy === "integration") renderGroupLabels();
+  // A community/integration detail panel showing the previous resolution's
+  // data would now be stale -- safest to close it rather than show a mismatch.
+  const detail = document.getElementById("detail");
+  if (detail && !detail.hidden) {
+    hideDetail();
+    clearSelection();
+  }
+  state.renderer.refresh();
+  scheduleRefilter();
+}
+
+// Mirrors OUTLIER_COLOR in build_website.py, for papers with no community at
+// the newly-selected resolution.
+const OUTLIER_COLOR_JS = "#cccccc";
 
 // ── CSR helpers ───────────────────────────────────────────────────────────
 function parseCSR(buf) {
@@ -748,8 +870,29 @@ function renderGroupLabels() {
 }
 
 // ── Hover tooltip ─────────────────────────────────────────────────────────
-function initHover() {
+// Shared by node hover (below) and the Metrics-tab chart crosshairs.
+function showTooltip(html) {
   const tt = document.getElementById("tooltip");
+  tt.innerHTML = html;
+  tt.hidden = false;
+}
+function hideTooltipEl() {
+  document.getElementById("tooltip").hidden = true;
+}
+function positionTooltipAt(e) {
+  const tt = document.getElementById("tooltip");
+  if (tt.hidden) return;
+  const pad = 14;
+  let x = e.clientX + pad;
+  let y = e.clientY + pad;
+  const r = tt.getBoundingClientRect();
+  if (x + r.width > window.innerWidth) x = e.clientX - r.width - pad;
+  if (y + r.height > window.innerHeight) y = e.clientY - r.height - pad;
+  tt.style.left = x + "px";
+  tt.style.top = y + "px";
+}
+
+function initHover() {
   const container = document.getElementById("sigma-container");
 
   state.renderer.on("enterNode", ({ node }) => {
@@ -758,30 +901,20 @@ function initHover() {
     const auths = (r.authors || "").split("|");
     const shown = auths.slice(0, 3).join(", ");
     const more = auths.length > 3 ? " et al." : "";
-    tt.innerHTML =
+    showTooltip(
       `<strong>${escapeHtml(r.title)}</strong>` +
-      `<div class="tt-meta">${r.year ?? ""}${r.year ? " &middot; " : ""}${escapeHtml(shown)}${more}</div>`;
-    tt.hidden = false;
+      `<div class="tt-meta">${r.year ?? ""}${r.year ? " &middot; " : ""}${escapeHtml(shown)}${more}</div>`
+    );
     state.renderer.refresh();
   });
 
   state.renderer.on("leaveNode", () => {
     state.hoveredNode = null;
-    tt.hidden = true;
+    hideTooltipEl();
     state.renderer.refresh();
   });
 
-  container.addEventListener("mousemove", (e) => {
-    if (tt.hidden) return;
-    const pad = 14;
-    let x = e.clientX + pad;
-    let y = e.clientY + pad;
-    const r = tt.getBoundingClientRect();
-    if (x + r.width > window.innerWidth) x = e.clientX - r.width - pad;
-    if (y + r.height > window.innerHeight) y = e.clientY - r.height - pad;
-    tt.style.left = x + "px";
-    tt.style.top = y + "px";
-  });
+  container.addEventListener("mousemove", positionTooltipAt);
 }
 
 // ── Selection (click → draw incident edges + open detail) ────────────────
@@ -949,108 +1082,71 @@ function buildIntraTopicLayer() {
 }
 
 // ── Community integration (color mode + detail readout) ─────────────────────
-// For the dataset's Leiden citation-community grouping, measure how much each
-// community cites outside itself (citations treated as undirected):
-//   vol  = total citation degree (in+out) of the community's papers
-//   cut  = citations with exactly one endpoint in the community (its boundary)
-//   phi  = conductance = cut / min(vol, 2M-vol)        (low = isolated/insular)
-//   exp  = config-model expected conductance = (2M-vol)/2M   (~chance)
-//   Rext = phi / exp = outward connectivity vs chance  (1.0 = random)
-// Plus the partition's global modularity Q. O(nodes + edges); cached on state.
-// Coral (isolated) → slate → teal (integrated), diverging around the median phi.
+// For the dataset's Leiden citation-community grouping, how much each
+// community cites outside itself, at the currently selected resolution.
+// Sourced directly from community_quality_metrics.py's backend-computed,
+// DIRECTED, per-resolution metrics (conductance + its outward/inward
+// decomposition) via state.groupData.community[cid].quality and
+// state.resolutionMetrics -- no runtime graph traversal needed.
+// Coral (self-contained) → slate → teal (integrated), diverging around the
+// resolution's median conductance.
 const INTEG_RAMP = [[216, 90, 48], [90, 102, 122], [29, 158, 117]];
 
-function computeCommunityIntegration() {
-  state.communityIntegration = null;
-  const cg = citationGrouping();
-  if (!cg) return;
-  const field = cg.nodeField;
-  const data = cg.data;
-  const nodes = state.nodesData.nodes;
-  const n = nodes.length;
-  const out = state.outCSR, inn = state.inCSR;
-  const M = out.targets.length;       // total directed citations
-  const twoM = 2 * M;
-  const named = (cid) => data[String(cid)] != null;
-
-  const vol = new Map(), cut = new Map(), internal = new Map();
-  const bump = (m, k) => m.set(k, (m.get(k) || 0) + 1);
-
-  for (let i = 0; i < n; i++) {
-    const c = nodes[i][field];
-    if (!named(c)) continue;
-    const deg = (out.offsets[i + 1] - out.offsets[i]) + (inn.offsets[i + 1] - inn.offsets[i]);
-    vol.set(c, (vol.get(c) || 0) + deg);
-  }
-  for (let i = 0; i < n; i++) {
-    const ci = nodes[i][field];
-    for (const t of csrNeighbors(out, i)) {
-      const ct = nodes[t][field];
-      if (ci === ct) {
-        if (named(ci)) bump(internal, ci);
-      } else {
-        if (named(ci)) bump(cut, ci);
-        if (named(ct)) bump(cut, ct);
-      }
-    }
-  }
-
-  const byId = {};
-  const phis = [];
-  let Q = 0, internalTotal = 0;
-  for (const cid of Object.keys(data)) {
-    const c = data[cid].id;
-    const v = vol.get(c) || 0, ct = cut.get(c) || 0, ic = internal.get(c) || 0;
-    const phi = ct / (Math.min(v, twoM - v) || 1);
-    const exp = twoM ? (twoM - v) / twoM : 1;
-    byId[c] = { phi, Rext: exp ? phi / exp : 0, cut: ct, vol: v, internal: ic };
-    if (v > 0) phis.push(phi);
-    Q += (M ? ic / M : 0) - Math.pow(v / (twoM || 1), 2);
-    internalTotal += ic;
-  }
-  phis.sort((a, b) => a - b);
-  const lo = phis[0] ?? 0, hi = phis[phis.length - 1] ?? 1;
-  const mid = phis.length ? phis[Math.floor(phis.length / 2)] : (lo + hi) / 2;
-  state.communityIntegration = { byId, lo, mid, hi, Q, internalShare: M ? internalTotal / M : 0 };
+// The whole-graph metrics row for the currently selected resolution (from
+// resolution_metrics.json), or null if unavailable.
+function currentResolutionMetrics() {
+  const rm = state.resolutionMetrics;
+  if (!rm || state.communityResolution == null) return null;
+  return rm.resolutions.find((r) => String(r.resolution) === String(state.communityResolution)) || null;
 }
 
 // Diverging color for a paper by its community's conductance, centered on the
-// field median so the map reads as relatively integrated (teal) vs separate (coral).
+// current resolution's median so the map reads as relatively self-contained
+// (coral) vs integrated (teal).
 function integrationColor(r) {
-  const ci = state.communityIntegration;
   const cg = citationGrouping();
-  if (!ci || !cg) return "#888";
-  const rec = ci.byId[r[cg.nodeField]];
-  if (!rec || rec.vol === 0) return "#3a4150"; // ungrouped / no citations
-  const { lo, mid, hi } = ci;
-  const t = rec.phi <= mid
-    ? (mid > lo ? 0.5 * (rec.phi - lo) / (mid - lo) : 0)
-    : (hi > mid ? 0.5 + 0.5 * (rec.phi - mid) / (hi - mid) : 1);
+  const rm = currentResolutionMetrics();
+  if (!cg || !rm) return "#888";
+  const entry = state.groupData.community[String(r[cg.nodeField])];
+  const q = entry && entry.quality;
+  if (!q) return "#3a4150"; // ungrouped, or too small/unnamed to have quality data
+  const mid = rm.median_conductance;
+  const t = q.conductance <= mid
+    ? (mid > 0 ? 0.5 * (q.conductance / mid) : 0)
+    : (mid < 1 ? 0.5 + 0.5 * (q.conductance - mid) / (1 - mid) : 1);
   return rampColor(INTEG_RAMP, clamp01(t));
 }
 
-// Detail-panel block for a citation community: its integration vs chance.
+// Detail-panel block for a citation community: its true (full-network),
+// directed conductance at the current resolution, vs the field as a whole.
 function integrationBlock(c) {
-  if (!state.communityIntegration) computeCommunityIntegration();
-  const ci = state.communityIntegration;
-  if (!ci) return "";
-  const rec = ci.byId[c.id];
-  if (!rec || rec.vol === 0) return "";
-  const ranked = Object.values(ci.byId).filter((x) => x.vol > 0).map((x) => x.Rext).sort((a, b) => b - a);
-  const rank = ranked.indexOf(rec.Rext) + 1;
-  const fold = rec.Rext > 0 ? 1 / rec.Rext : 0;
-  const verdict = rec.phi >= ci.mid ? "more integrated than most" : "more self-contained than most";
-  const pct = (x) => `${Math.round(x * 100)}%`;
+  const rm = currentResolutionMetrics();
+  const q = c.quality;
+  if (!q || !rm) return "";
+  const conductances = Object.values(state.groupData.community)
+    .map((x) => x.quality && x.quality.conductance)
+    .filter((x) => x != null)
+    .sort((a, b) => a - b);
+  const rank = conductances.indexOf(q.conductance) + 1;
+  const verdict = q.conductance <= rm.median_conductance ? "more self-contained than most" : "more integrated than most";
+  const pct = (x) => `${Math.round((x || 0) * 100)}%`;
+  const trueSizeNote = c.true_size
+    ? ` (${c.true_size.toLocaleString()} papers in the full network; this map plots a subset)`
+    : "";
   return `
-    <h3 title="How much this community cites beyond itself, from the citation graph.">Integration</h3>
-    <p class="meta">This community is <strong>${verdict}</strong> — about
-       <strong>${fold.toFixed(1)}×</strong> more self-contained than a degree-matched
-       random graph (ranked #${rank} of ${ranked.length} by outward connectivity).</p>
+    <h3 title="How much this community cites beyond itself, from the directed citation graph, at the selected resolution.">Integration</h3>
+    <p class="meta">This community is <strong>${verdict}</strong> at resolution
+       ${escapeHtml(String(state.communityResolution))} (ranked #${rank} of ${conductances.length}
+       by conductance)${trueSizeNote}.</p>
     <div class="cmx-stats">
-      <span title="Conductance: share of this community's citation links that cross its boundary. Lower = more insular.">Conductance φ: <strong>${rec.phi.toFixed(2)}</strong></span>
-      <span title="Boundary citations relative to a degree-matched random graph. 1.0 = chance; below 1 = more self-contained than chance.">Outward vs chance: <strong>${rec.Rext.toFixed(2)}×</strong></span>
+      <span title="Conductance: share of this community's directed citation links crossing its boundary (min(volume, 2M-volume) normalization). Lower = more insular.">Conductance: <strong>${q.conductance.toFixed(2)}</strong></span>
+      <span title="Of this community's own outgoing citations, the share leaving the community (citing outside literature).">Cites out: <strong>${pct(q.conductance_out)}</strong></span>
+      <span title="Of citations landing on this community, the share arriving from outside it.">Cited from outside: <strong>${pct(q.conductance_in)}</strong></span>
+      <span title="Internal citation density: share of this community's own possible directed links that are realized.">Internal density: <strong>${(q.internal_edge_density * 100).toFixed(1)}%</strong></span>
     </div>
-    <p class="meta">Field-wide: modularity Q = <strong>${ci.Q.toFixed(2)}</strong>; ${pct(ci.internalShare)} of all citations stay within a community.</p>
+    <p class="meta">Field-wide at this resolution: modularity <strong>${rm.modularity.toFixed(2)}</strong>;
+       ${pct(rm.intra_community_edge_fraction)} of all citations stay within a community across
+       <strong>${rm.number_of_communities.toLocaleString()}</strong> communities.</p>
   `;
 }
 
@@ -1388,7 +1484,6 @@ function isolateGroup(key, gid) {
 function initControls() {
   document.getElementById("color-by").addEventListener("change", (e) => {
     state.colorBy = e.target.value;
-    if (state.colorBy === "integration" && !state.communityIntegration) computeCommunityIntegration();
     renderGroupLabels();
     state.renderer.refresh();
   });
@@ -1433,7 +1528,7 @@ function buildColorByOptions() {
   const sel = document.getElementById("color-by");
   const opts = activeGroupings().map((g) => ({ value: g.key, label: g.label }));
   opts.push({ value: "year", label: "Year" }, { value: "indegree", label: "Citations" });
-  if (citationGrouping()) opts.push({ value: "integration", label: "Integration" });
+  if (citationGrouping() && state.resolutionMetrics) opts.push({ value: "integration", label: "Integration" });
   sel.innerHTML = opts
     .map((o) => `<option value="${o.value}">${escapeHtml(o.label)}</option>`)
     .join("");
@@ -1549,6 +1644,12 @@ function buildLegend(key) {
   const ul = state.legendEls[key];
   ul.innerHTML = "";
 
+  // Idempotent: buildLegend can now be re-invoked on the same grouping (e.g.
+  // applyCommunityResolution() rebuilding "community" on every resolution
+  // switch), so drop any button row from a previous call before adding a new one.
+  const prevBtnRow = ul.previousElementSibling;
+  if (prevBtnRow && prevBtnRow.classList.contains("legend-btn-row")) prevBtnRow.remove();
+
   const btnRow = document.createElement("div");
   btnRow.className = "legend-btn-row";
   btnRow.innerHTML = `
@@ -1625,15 +1726,27 @@ function refreshLegend(key) {
   }
 }
 
-// ── Tabs (Graph/Table) ───────────────────────────────────────────────────
+// ── Tabs (Graph/Metrics/Table) ───────────────────────────────────────────
 function initTabs() {
-  const tabGraph = document.getElementById("tab-graph");
-  const viewGraph = document.getElementById("view-graph");
-  tabGraph.addEventListener("click", () => {
-    tabGraph.classList.add("active");
-    viewGraph.classList.add("active");
-    state.renderer.refresh();
-  });
+  // Local (not module-level): main() calls initTabs() synchronously at boot,
+  // before the module has finished its top-to-bottom evaluation, so a
+  // module-level `const` positioned later in the file would still be in its
+  // temporal dead zone at that point.
+  const TABS = [
+    { tabId: "tab-graph", viewId: "view-graph" },
+    { tabId: "tab-metrics", viewId: "view-metrics" },
+  ];
+  for (const { tabId, viewId } of TABS) {
+    const tabEl = document.getElementById(tabId);
+    if (!tabEl) continue;
+    tabEl.addEventListener("click", () => {
+      for (const other of TABS) {
+        document.getElementById(other.tabId)?.classList.toggle("active", other.tabId === tabId);
+        document.getElementById(other.viewId)?.classList.toggle("active", other.viewId === viewId);
+      }
+      if (tabId === "tab-graph" && state.renderer) state.renderer.refresh();
+    });
+  }
 }
 
 function initControlsToggle() {
@@ -1793,6 +1906,241 @@ function loadAbstract(nodeId) {
       });
   }
   return state.abstractsPromise.then((obj) => obj[nodeId] || "");
+}
+
+// ── Resolution-metrics charts (Metrics tab, small multiples) ────────────────
+// Hand-rolled inline-SVG line charts (no charting library): one small chart
+// per whole-graph metric, all sharing the resolution x-axis, each with its own
+// auto-scaled y-axis (never a shared/dual axis -- these metrics have wildly
+// different scales and units). A crosshair + the app's existing tooltip give
+// exact per-resolution values on hover; clicking a point recolors the map by
+// that resolution's communities (applyCommunityResolution).
+const CHART_W = 300, CHART_H = 172;
+const CHART_PAD = { l: 46, r: 12, t: 12, b: 42 };
+
+function svgEl(tag, attrs) {
+  const el = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  for (const k in attrs) el.setAttribute(k, attrs[k]);
+  return el;
+}
+
+// Compact axis-tick numbers so wide values (counts, the Potts score, surprise)
+// fit the y-axis gutter: 1,949 -> "1.9k", 345,327 -> "345k". Small values fall
+// back to the chart's own formatter (which carries units like % / decimals).
+function compactNumber(y) {
+  const a = Math.abs(y);
+  if (a >= 1e6) return (y / 1e6).toFixed(a >= 1e7 ? 0 : 1).replace(/\.0$/, "") + "M";
+  if (a >= 1e4) return Math.round(y / 1e3) + "k";
+  if (a >= 1e3) return (y / 1e3).toFixed(1).replace(/\.0$/, "") + "k";
+  return null;
+}
+
+// points: [{x: "<resolution>", y: number|null}, ...] in resolution order.
+// `unit` labels the y-axis (rotated); the x-axis is always the CPM resolution.
+function renderLineChart(container, opts) {
+  const { title, hint, unit, points, format, thresholdY, bands, onPointClick } = opts;
+  const xs = points.map((p) => p.x);
+  const ys = points.map((p) => p.y).filter((y) => y != null);
+  if (!ys.length) return;
+  const yMin0 = Math.min(...ys), yMax0 = Math.max(...ys);
+  const span = yMax0 - yMin0 || Math.abs(yMax0) || 1;
+  const yMin = yMin0 - span * 0.12, yMax = yMax0 + span * 0.12;
+  const tickFormat = (y) => compactNumber(y) ?? format(y);
+
+  const plotW = CHART_W - CHART_PAD.l - CHART_PAD.r;
+  const plotH = CHART_H - CHART_PAD.t - CHART_PAD.b;
+  const xAt = (i) => CHART_PAD.l + (xs.length > 1 ? (i / (xs.length - 1)) * plotW : plotW / 2);
+  const yAt = (y) => CHART_PAD.t + plotH - ((y - yMin) / (yMax - yMin)) * plotH;
+  const axisBottom = CHART_PAD.t + plotH;
+
+  const wrap = document.createElement("div");
+  wrap.className = "metric-tile";
+  const head = document.createElement("div");
+  head.className = "metric-tile-title";
+  head.textContent = title;
+  wrap.appendChild(head);
+  if (hint) {
+    const p = document.createElement("div");
+    p.className = "metric-tile-hint";
+    p.textContent = hint;
+    wrap.appendChild(p);
+  }
+
+  const svg = svgEl("svg", { viewBox: `0 0 ${CHART_W} ${CHART_H}`, class: "metric-chart" });
+
+  for (const b of bands || []) {
+    svg.appendChild(svgEl("rect", {
+      x: xAt(b.i0) - 5, y: CHART_PAD.t, width: xAt(b.i1) - xAt(b.i0) + 10, height: plotH,
+      class: "metric-band",
+    }));
+  }
+
+  // ── Y axis: min/mid/max ticks (gridline + value label) + a rotated unit title.
+  const yTicks = [...new Set([yMax0, (yMin0 + yMax0) / 2, yMin0])];
+  for (const ty of yTicks) {
+    const y = yAt(ty);
+    svg.appendChild(svgEl("line", { x1: CHART_PAD.l, y1: y, x2: CHART_PAD.l + plotW, y2: y, class: "metric-gridline" }));
+    const lab = svgEl("text", { x: CHART_PAD.l - 5, y: y + 3, class: "metric-tick", "text-anchor": "end" });
+    lab.textContent = tickFormat(ty);
+    svg.appendChild(lab);
+  }
+  svg.appendChild(svgEl("line", { x1: CHART_PAD.l, y1: CHART_PAD.t, x2: CHART_PAD.l, y2: axisBottom, class: "metric-axis" }));
+  if (unit) {
+    const yTitle = svgEl("text", {
+      x: 11, y: CHART_PAD.t + plotH / 2, class: "metric-axis-title",
+      "text-anchor": "middle", transform: `rotate(-90 11 ${CHART_PAD.t + plotH / 2})`,
+    });
+    yTitle.textContent = unit;
+    svg.appendChild(yTitle);
+  }
+
+  // ── X axis: baseline, a tick per resolution, ~5 value labels, and a title.
+  svg.appendChild(svgEl("line", { x1: CHART_PAD.l, y1: axisBottom, x2: CHART_PAD.l + plotW, y2: axisBottom, class: "metric-axis" }));
+  const labelStep = Math.max(1, Math.ceil(xs.length / 5));
+  xs.forEach((xv, i) => {
+    svg.appendChild(svgEl("line", { x1: xAt(i), y1: axisBottom, x2: xAt(i), y2: axisBottom + 3, class: "metric-axis" }));
+    if (i % labelStep === 0 || i === xs.length - 1) {
+      const lab = svgEl("text", { x: xAt(i), y: axisBottom + 13, class: "metric-tick", "text-anchor": "middle" });
+      lab.textContent = xv;
+      svg.appendChild(lab);
+    }
+  });
+  const xTitle = svgEl("text", { x: CHART_PAD.l + plotW / 2, y: CHART_H - 3, class: "metric-axis-title", "text-anchor": "middle" });
+  xTitle.textContent = "Resolution";
+  svg.appendChild(xTitle);
+
+  if (thresholdY != null) {
+    const ty = yAt(thresholdY);
+    svg.appendChild(svgEl("line", { x1: CHART_PAD.l, y1: ty, x2: CHART_PAD.l + plotW, y2: ty, class: "metric-threshold" }));
+  }
+
+  let d = "";
+  points.forEach((p, i) => {
+    if (p.y == null) return;
+    d += (d ? "L" : "M") + xAt(i).toFixed(1) + "," + yAt(p.y).toFixed(1) + " ";
+  });
+  svg.appendChild(svgEl("path", { d, class: "metric-line" }));
+
+  points.forEach((p, i) => {
+    if (p.y == null) return;
+    svg.appendChild(svgEl("circle", { cx: xAt(i), cy: yAt(p.y), r: 2.4, class: "metric-dot" }));
+  });
+
+  // Crosshair + hover/click capture.
+  const crosshair = svgEl("line", {
+    x1: 0, y1: CHART_PAD.t, x2: 0, y2: CHART_PAD.t + plotH, class: "metric-crosshair",
+  });
+  crosshair.style.visibility = "hidden";
+  svg.appendChild(crosshair);
+
+  const capture = svgEl("rect", { x: 0, y: 0, width: CHART_W, height: CHART_H, class: "metric-capture" });
+  svg.appendChild(capture);
+
+  function nearestIndex(evt) {
+    const rect = svg.getBoundingClientRect();
+    const relX = ((evt.clientX - rect.left) / rect.width) * CHART_W;
+    const idx = Math.round(((relX - CHART_PAD.l) / plotW) * (xs.length - 1));
+    return Math.max(0, Math.min(xs.length - 1, idx));
+  }
+
+  capture.addEventListener("mousemove", (evt) => {
+    const idx = nearestIndex(evt);
+    crosshair.setAttribute("x1", xAt(idx));
+    crosshair.setAttribute("x2", xAt(idx));
+    crosshair.style.visibility = "visible";
+    const p = points[idx];
+    showTooltip(
+      `<strong>Resolution ${escapeHtml(xs[idx])}</strong>` +
+      `<div class="tt-meta">${escapeHtml(title)}: ${p.y != null ? format(p.y) : "n/a"}</div>`
+    );
+    positionTooltipAt(evt);
+  });
+  capture.addEventListener("mouseleave", () => {
+    crosshair.style.visibility = "hidden";
+    hideTooltipEl();
+  });
+  if (onPointClick) {
+    capture.style.cursor = "pointer";
+    capture.addEventListener("click", (evt) => onPointClick(xs[nearestIndex(evt)]));
+  }
+
+  wrap.appendChild(svg);
+  container.appendChild(wrap);
+}
+
+// Clicking any chart point recolors the map by that resolution's communities
+// (switching "Color by" to Community/Integration if it isn't already one of
+// those, so the effect is immediately visible).
+function onResolutionPointClick(resolution) {
+  applyCommunityResolution(resolution);
+  if (state.colorBy !== "community" && state.colorBy !== "integration") {
+    state.colorBy = "community";
+    const sel = document.getElementById("color-by");
+    if (sel) sel.value = "community";
+    renderGroupLabels();
+    state.renderer.refresh();
+  }
+}
+
+function renderResolutionMetricsPanel() {
+  const grid = document.getElementById("metrics-grid");
+  if (!grid || !state.resolutionMetrics) return;
+  grid.innerHTML = "";
+
+  const rows = state.resolutionMetrics.resolutions; // already sorted by resolution
+  const xs = rows.map((r) => String(r.resolution));
+  const series = (field) => rows.map((r, i) => ({ x: xs[i], y: r[field] }));
+
+  const pct = (y) => `${Math.round(y * 100)}%`;
+  const num = (y) => y.toLocaleString(undefined, { maximumFractionDigits: 2 });
+  const count = (y) => Math.round(y).toLocaleString();
+
+  // Contiguous runs of is_on_resolution_plateau, as [firstIdx, lastIdx] bands.
+  const plateauBands = [];
+  let start = null;
+  rows.forEach((r, i) => {
+    if (r.is_on_resolution_plateau && start === null) start = i;
+    if (!r.is_on_resolution_plateau && start !== null) { plateauBands.push({ i0: start, i1: i - 1 }); start = null; }
+  });
+  if (start !== null) plateauBands.push({ i0: start, i1: rows.length - 1 });
+
+  renderLineChart(grid, {
+    title: "Communities found", hint: "Number of Leiden/CPM communities detected",
+    unit: "communities", points: series("number_of_communities"), format: count, onPointClick: onResolutionPointClick,
+  });
+  renderLineChart(grid, {
+    title: "Modularity", hint: "Newman–Girvan modularity of the partition",
+    unit: "modularity (unitless)", points: series("modularity"), format: num, onPointClick: onResolutionPointClick,
+  });
+  renderLineChart(grid, {
+    title: "Constant Potts model score", hint: "The objective Leiden actually optimizes here",
+    unit: "score (unitless)", points: series("constant_potts_model_score"), format: num, onPointClick: onResolutionPointClick,
+  });
+  renderLineChart(grid, {
+    title: "Coverage", hint: "Share of all citations that stay within a community",
+    unit: "% of all citations", points: series("intra_community_edge_fraction"), format: pct, onPointClick: onResolutionPointClick,
+  });
+  renderLineChart(grid, {
+    title: "Surprise", hint: "How unlikely this partition's density is under a random null (higher = less likely by chance)",
+    unit: "surprise (nats)", points: series("surprise"), format: num, onPointClick: onResolutionPointClick,
+  });
+  renderLineChart(grid, {
+    title: "Significance", hint: "Density excess vs. a random graph, summed over communities (undirected only)",
+    unit: "significance (nats)", points: series("significance"), format: num, onPointClick: onResolutionPointClick,
+  });
+  renderLineChart(grid, {
+    title: "Adjacent-resolution stability", hint: "NMI between each resolution and the next — shaded = a stable plateau",
+    unit: "NMI (0–1)", points: rows.map((r, i) => ({ x: xs[i], y: r.resolution_plateau_nmi_with_next })),
+    format: num, thresholdY: 0.9, bands: plateauBands, onPointClick: onResolutionPointClick,
+  });
+  renderLineChart(grid, {
+    title: "Cross-seed NMI", hint: "Agreement with 5 Leiden re-runs at other random seeds (1.0 = perfectly reproducible)",
+    unit: "NMI (0–1)", points: series("cross_seed_normalized_mutual_information"), format: num, onPointClick: onResolutionPointClick,
+  });
+  renderLineChart(grid, {
+    title: "Cross-seed variation of information", hint: "Distance from those re-runs, in nats (lower = more reproducible)",
+    unit: "distance (nats)", points: series("cross_seed_variation_of_information"), format: num, onPointClick: onResolutionPointClick,
+  });
 }
 
 // ── Utils ─────────────────────────────────────────────────────────────────

@@ -60,6 +60,23 @@
     </div>
   </div> -->
 
+  <!-- Resolution-metrics tab pane: whole-graph clustering-quality metrics vs.
+       Leiden/CPM resolution (community_quality_metrics.py), rendered as a grid
+       of small-multiple charts. Hidden entirely if a dataset has no
+       resolution_metrics.json (see initMetricsTab). -->
+  <div id="view-metrics" class="view">
+    <div id="metrics-wrap" class="panel">
+      <div class="metrics-head">
+        <h2>Community-quality metrics by resolution</h2>
+        <p class="meta">How the Leiden/CPM partition's quality changes across the swept
+           resolutions &mdash; use this to judge which resolution(s) give the most robust,
+           meaningful community structure. Click any point to color the map by that
+           resolution's communities.</p>
+      </div>
+      <div id="metrics-grid"></div>
+    </div>
+  </div>
+
   <!-- Controls panel -->
   <div id="controls" class="panel collapsed">
     <button id="controls-toggle" class="icon-btn" type="button" aria-label="Show controls">⟩</button>
@@ -72,6 +89,7 @@
 
       <div class="tabs">
         <button id="tab-graph" class="tab active" type="button">Graph</button>
+        <button id="tab-metrics" class="tab" type="button" hidden>Metrics</button>
         <!-- <button id="tab-table" class="tab" type="button">Table</button> -->
       </div>
     </div>
@@ -112,6 +130,11 @@
     <div class="control-row">
       <label>Color by</label>
       <select id="color-by"></select>
+    </div>
+
+    <div class="control-row" id="community-resolution-row" hidden>
+      <label>Community resolution</label>
+      <select id="community-resolution"></select>
     </div>
 
     <div class="control-row">
@@ -163,6 +186,13 @@
          you can see e.g. which community each island belongs to. Several islands
          in one topic means papers that share a subject but form separate,
          non-citing literatures.</p>
+      <p>The Leiden/CPM citation communities were swept across several
+         resolutions; use <strong>Community resolution</strong> to switch which
+         one colours the map (a higher resolution splits papers into more,
+         smaller communities). The <strong>Metrics</strong> tab shows how
+         clustering quality (modularity, stability across reseeding, etc.)
+         changes across that sweep, to help judge which resolution is most
+         meaningful.</p>
     </details>
   </div>
 
@@ -182,7 +212,7 @@
   <script src="https://unpkg.com/tabulator-tables@6.3.1/dist/js/tabulator.min.js"></script>
 
   <!-- App -->
-  <script type="module" src="main.js?v=18"></script>
+  <script type="module" src="main.js?v=19"></script>
   <!-- Guided tour (independent of main.js; only reads the DOM) -->
   <script type="module" src="tour.js?v=1"></script>
 </body>
