@@ -393,7 +393,8 @@ def community_quality_lookup(per_community_quality_df: pd.DataFrame) -> dict:
     the true full-network numbers into each resolution's community legend."""
     quality_fields = [
         "community_size", "conductance", "conductance_out", "conductance_in",
-        "internal_edge_density", "internal_directed_edge_count", "boundary_edge_count",
+        "internal_edge_density", "internal_edge_surprise",
+        "internal_directed_edge_count", "boundary_edge_count",
     ]
     lookup: dict[str, dict[str, dict]] = defaultdict(dict)
     for row in per_community_quality_df.itertuples(index=False):
@@ -401,21 +402,55 @@ def community_quality_lookup(per_community_quality_df: pd.DataFrame) -> dict:
     return dict(lookup)
 
 
-def resolution_metrics_records(
-    per_partition_quality_df: pd.DataFrame, per_community_quality_df: pd.DataFrame
-) -> list[dict]:
-    """The whole-graph metrics vs. resolution, as a flat list of records (one
-    per resolution) for the Metrics tab's small-multiple charts. NaN (the
+def resolution_metrics_records(per_partition_quality_df: pd.DataFrame) -> list[dict]:
+    """The whole-graph metrics vs. resolution, as a flat list of records (one per
+    resolution) for the Metrics tab's charts and health summary. NaN (the
     plateau-neighbor NMI at the first/last resolution) becomes null so this
-    survives json.dump/JSON.parse; a resolution's median per-community
-    conductance is added since that's what centers the Integration color scale."""
-    median_conductance = per_community_quality_df.groupby("resolution")["conductance"].median()
+    survives json.dump/JSON.parse.
+
+    This used to add its own `median_conductance`, taken over ALL communities --
+    which is 1.0 at 8 of the 9 resolutions, because a singleton's every incident
+    edge is a boundary edge and singletons are the majority of communities. That
+    value centers the Integration colour scale, so it pinned the whole scale to
+    one half of the ramp. The population-explicit summaries computed in
+    community_quality_metrics.py (over substantive communities) are used instead
+    and flow through automatically with the rest of the parquet columns."""
     records = []
     for row in per_partition_quality_df.sort_values("resolution").itertuples(index=False):
-        record = {k: (None if isinstance(v, float) and math.isnan(v) else v) for k, v in row._asdict().items()}
-        record["median_conductance"] = float(median_conductance.get(row.resolution, 0.0))
-        records.append(record)
+        records.append({
+            k: (None if isinstance(v, float) and not math.isfinite(v) else v)
+            for k, v in row._asdict().items()
+        })
     return records
+
+
+def community_distribution_records(per_community_quality_df: pd.DataFrame) -> dict:
+    """Every community's health metrics at every resolution, as parallel numeric
+    arrays per resolution, for the Metrics tab's distribution views (size-band
+    composition, percentile ribbons, histograms, size-vs-health scatter).
+
+    The community legend only carries the ~90 communities big enough to name, so
+    the artifact mass -- the ~50-70% of communities that are singletons -- never
+    reaches the browser at all. These views exist precisely to show it, so they
+    need every community. Parallel arrays (rather than one object per community)
+    keep that ~20k-row payload small; values are rounded since they only drive
+    binning and plotting."""
+    def _rounded(values, digits: int) -> list:
+        # JSON has no Infinity/NaN literal -- json.dump would emit one anyway and
+        # JSON.parse then rejects the whole file, silently disabling these views.
+        return [round(float(v), digits) if math.isfinite(v) else None for v in values]
+
+    by_resolution: dict[str, dict] = {}
+    for resolution, group in per_community_quality_df.groupby("resolution"):
+        group = group.sort_values("community_size", ascending=False)
+        by_resolution[str(resolution)] = {
+            "community_id": [int(v) for v in group["community_id"]],
+            "community_size": [int(v) for v in group["community_size"]],
+            "conductance": _rounded(group["conductance"], 4),
+            "internal_edge_density": _rounded(group["internal_edge_density"], 5),
+            "internal_edge_surprise": _rounded(group["internal_edge_surprise"], 2),
+        }
+    return {"default_resolution": str(COMMUNITY_RESOLUTION), "by_resolution": by_resolution}
 
 
 def communities_legend_by_resolution(node_records: list[dict], community_quality_lookup: dict) -> dict:
@@ -517,6 +552,20 @@ def save_resolution_metrics_json(resolution_metrics_records: list[dict]) -> dict
 
 
 @datasaver()
+def save_community_distributions_json(community_distribution_records: dict) -> dict:
+    path = _data_dir() / "community_distributions.json"
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(community_distribution_records, f, ensure_ascii=False, separators=(",", ":"))
+    n_communities_total = sum(
+        len(v["community_id"]) for v in community_distribution_records["by_resolution"].values())
+    return {
+        "path": str(path),
+        "n_resolutions": len(community_distribution_records["by_resolution"]),
+        "n_communities_total": n_communities_total,
+    }
+
+
+@datasaver()
 def save_abstracts_json(abstracts: dict) -> dict:
     path = _data_dir() / "abstracts.json"
     with open(path, "w", encoding="utf-8") as f:
@@ -540,6 +589,7 @@ def assembled_website(
     save_clusters_json: dict,
     save_communities_by_resolution_json: dict,
     save_resolution_metrics_json: dict,
+    save_community_distributions_json: dict,
     save_abstracts_json: dict,
     save_edges_bins: dict,
 ) -> dict:
@@ -555,6 +605,7 @@ def assembled_website(
         "clusters": save_clusters_json["n_clusters"],
         "communities_total": save_communities_by_resolution_json["n_communities_total"],
         "resolutions": save_resolution_metrics_json["n_resolutions"],
+        "communities_profiled": save_community_distributions_json["n_communities_total"],
         "abstracts": save_abstracts_json["n_abstracts"],
         "edges": save_edges_bins["n_edges"],
     }
