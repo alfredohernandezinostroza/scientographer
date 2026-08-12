@@ -92,6 +92,15 @@ const state = {
   resolutionMetrics: null, // { default_resolution, resolutions: [{resolution, modularity, ...}] }
   communityResolution: null, // the currently active resolution (string key into by_resolution)
 
+  // community_distributions.json: EVERY community's health metrics per
+  // resolution as parallel arrays -- including the singletons and 2-3 paper
+  // fragments that are too small to be named in the legend, which is exactly
+  // the population the health views exist to expose. null if not provided.
+  communityDistributions: null, // { default_resolution, by_resolution: {res: {community_size:[], ...}} }
+  healthHistogramMetric: "internal_edge_surprise", // metric shown in the histogram
+  healthScatterMetric: "internal_edge_surprise", // y-axis metric of the size-vs-health scatter
+  healthExcludeSingletons: true, // singletons are ~half the rows and pile up at one value
+
   // "Until-year" time snapshots: the active dataset's snapshots.json (per-cutoff
   // re-layouts using only papers up to that year; colour/grouping is unchanged).
   // state.snapshot === null means the full "now" layout (base node x/y). Reset on
@@ -165,6 +174,12 @@ async function main() {
   initCommunityResolutionControl();
 
   await loadDataset(DEFAULT_DATASET);
+
+  // Must come after an await: initHealthControls() reads HEALTH_METRICS, a
+  // module-level const declared further down the file, so calling it in this
+  // function's synchronous prologue (which runs during module evaluation) would
+  // hit it in the temporal dead zone and throw ReferenceError.
+  initHealthControls();
 
   document.getElementById("loading")?.classList.add("hidden");
 }
@@ -436,20 +451,26 @@ async function setupResolutionMetrics(cfg) {
   if (tab) tab.hidden = true;
   if (row) row.hidden = true;
 
-  let commByRes = null, resMetrics = null;
+  let commByRes = null, resMetrics = null, distributions = null;
   try {
-    [commByRes, resMetrics] = await Promise.all([
+    [commByRes, resMetrics, distributions] = await Promise.all([
       fetch(`${cfg.dir}/communities_by_resolution.json`).then((r) => (r.ok ? r.json() : null)),
       fetch(`${cfg.dir}/resolution_metrics.json`).then((r) => (r.ok ? r.json() : null)),
+      // Optional: every community's health metrics, including the ones too small
+      // to appear in the legend. Absent => the per-community health views are
+      // skipped but the whole-graph charts still render.
+      fetch(`${cfg.dir}/community_distributions.json`).then((r) => (r.ok ? r.json() : null)),
     ]);
   } catch {
     commByRes = null;
     resMetrics = null;
+    distributions = null;
   }
   if (!commByRes || !resMetrics || !Object.keys(commByRes.by_resolution || {}).length) return;
 
   state.communitiesByResolution = commByRes;
   state.resolutionMetrics = resMetrics;
+  state.communityDistributions = distributions;
 
   const resolutions = Object.keys(commByRes.by_resolution).sort((a, b) => parseFloat(a) - parseFloat(b));
   const defaultRes = commByRes.default_resolution && commByRes.by_resolution[commByRes.default_resolution]
@@ -472,6 +493,7 @@ async function setupResolutionMetrics(cfg) {
   if (row) row.hidden = false;
   if (tab) tab.hidden = false;
   renderResolutionMetricsPanel();
+  renderCommunityHealthPanel();
 }
 
 // Switch which resolution's Leiden/CPM communities colour the map: recomputes
@@ -494,6 +516,10 @@ function applyCommunityResolution(resolution) {
 
   const sel = document.getElementById("community-resolution");
   if (sel && sel.value !== resolution) sel.value = resolution;
+
+  // Keep the Metrics tab's per-resolution health views in step with the map.
+  renderSelectedResolutionHealth();
+  renderHealthSummaryStrip();
 
   if (!state.renderer) return; // called before the graph exists (initial load)
 
@@ -1100,6 +1126,17 @@ function currentResolutionMetrics() {
   return rm.resolutions.find((r) => String(r.resolution) === String(state.communityResolution)) || null;
 }
 
+// Conductance the diverging Integration scale is centered on. Deliberately the
+// median over SUBSTANTIVE communities: a median over all communities is 1.0 at
+// almost every resolution (a singleton's every incident edge is a boundary edge,
+// and singletons are the majority), which pinned the whole ramp to its coral
+// half and made every community report as "more self-contained than most".
+// The communities coloured on the map are the substantive ones anyway.
+function centerConductance(rm) {
+  return rm.conductance_median_over_substantive_communities
+    ?? rm.conductance_median_over_communities_with_at_least_2_nodes;
+}
+
 // Diverging color for a paper by its community's conductance, centered on the
 // current resolution's median so the map reads as relatively self-contained
 // (coral) vs integrated (teal).
@@ -1110,7 +1147,7 @@ function integrationColor(r) {
   const entry = state.groupData.community[String(r[cg.nodeField])];
   const q = entry && entry.quality;
   if (!q) return "#3a4150"; // ungrouped, or too small/unnamed to have quality data
-  const mid = rm.median_conductance;
+  const mid = centerConductance(rm);
   const t = q.conductance <= mid
     ? (mid > 0 ? 0.5 * (q.conductance / mid) : 0)
     : (mid < 1 ? 0.5 + 0.5 * (q.conductance - mid) / (1 - mid) : 1);
@@ -1128,7 +1165,7 @@ function integrationBlock(c) {
     .filter((x) => x != null)
     .sort((a, b) => a - b);
   const rank = conductances.indexOf(q.conductance) + 1;
-  const verdict = q.conductance <= rm.median_conductance ? "more self-contained than most" : "more integrated than most";
+  const verdict = q.conductance <= centerConductance(rm) ? "more self-contained than most" : "more integrated than most";
   const pct = (x) => `${Math.round((x || 0) * 100)}%`;
   const trueSizeNote = c.true_size
     ? ` (${c.true_size.toLocaleString()} papers in the full network; this map plots a subset)`
@@ -1938,11 +1975,15 @@ function compactNumber(y) {
 // points: [{x: "<resolution>", y: number|null}, ...] in resolution order.
 // `unit` labels the y-axis (rotated); the x-axis is always the CPM resolution.
 function renderLineChart(container, opts) {
-  const { title, hint, unit, points, format, thresholdY, bands, onPointClick } = opts;
+  const { title, hint, unit, points, format, thresholdY, bands, band, onPointClick } = opts;
   const xs = points.map((p) => p.x);
   const ys = points.map((p) => p.y).filter((y) => y != null);
   if (!ys.length) return;
-  const yMin0 = Math.min(...ys), yMax0 = Math.max(...ys);
+  // A percentile ribbon has to be inside the y range or it clips.
+  const bandValues = (band || [])
+    .flatMap((b) => [b.lo, b.hi])
+    .filter((v) => v != null);
+  const yMin0 = Math.min(...ys, ...bandValues), yMax0 = Math.max(...ys, ...bandValues);
   const span = yMax0 - yMin0 || Math.abs(yMax0) || 1;
   const yMin = yMin0 - span * 0.12, yMax = yMax0 + span * 0.12;
   const tickFormat = (y) => compactNumber(y) ?? format(y);
@@ -2014,6 +2055,21 @@ function renderLineChart(container, opts) {
     svg.appendChild(svgEl("line", { x1: CHART_PAD.l, y1: ty, x2: CHART_PAD.l + plotW, y2: ty, class: "metric-threshold" }));
   }
 
+  // Percentile ribbon behind the median line (drawn first so the line wins).
+  if (band && bandValues.length) {
+    const upper = [], lower = [];
+    band.forEach((b, i) => {
+      if (b.lo == null || b.hi == null) return;
+      upper.push(`${xAt(i).toFixed(1)},${yAt(b.hi).toFixed(1)}`);
+      lower.unshift(`${xAt(i).toFixed(1)},${yAt(b.lo).toFixed(1)}`);
+    });
+    if (upper.length) {
+      svg.appendChild(svgEl("path", {
+        d: `M${upper.join("L")}L${lower.join("L")}Z`, class: "metric-ribbon",
+      }));
+    }
+  }
+
   let d = "";
   points.forEach((p, i) => {
     if (p.y == null) return;
@@ -2049,9 +2105,12 @@ function renderLineChart(container, opts) {
     crosshair.setAttribute("x2", xAt(idx));
     crosshair.style.visibility = "visible";
     const p = points[idx];
+    const b = band && band[idx];
     showTooltip(
       `<strong>Resolution ${escapeHtml(xs[idx])}</strong>` +
-      `<div class="tt-meta">${escapeHtml(title)}: ${p.y != null ? format(p.y) : "n/a"}</div>`
+      `<div class="tt-meta">${escapeHtml(title)}: ${p.y != null ? format(p.y) : "n/a"}</div>` +
+      (b && b.lo != null && b.hi != null
+        ? `<div class="tt-meta">25th–75th percentile: ${format(b.lo)} – ${format(b.hi)}</div>` : "")
     );
     positionTooltipAt(evt);
   });
@@ -2141,6 +2200,579 @@ function renderResolutionMetricsPanel() {
     title: "Cross-seed variation of information", hint: "Distance from those re-runs, in nats (lower = more reproducible)",
     unit: "distance (nats)", points: series("cross_seed_variation_of_information"), format: num, onPointClick: onResolutionPointClick,
   });
+}
+
+// ── Per-community health: real communities or artifacts? ──────────────────
+// Most "communities" Leiden reports are singletons or 2-3 paper fragments, and
+// no descriptive metric flags them: a 2-paper mutually-citing clique has
+// internal edge density 1.0, which looks perfect. These views separate the
+// artifact mass from the real structure, using the size-aware
+// internal_edge_surprise score plus size composition.
+//
+// Size bands are ORDERED, so they take a sequential single-hue ramp (dim ->
+// bright on this dark surface), not categorical hues. Validated for lightness
+// monotonicity and >= 3:1 contrast against the panel surface.
+const SUBSTANTIVE_MIN_SIZE = 30;
+const SIZE_BANDS = [
+  { key: "singleton", label: "Singleton (1 paper)", color: "#586b92" },
+  { key: "tiny", label: "Tiny (2–3)", color: "#4a7cc0" },
+  { key: "small", label: "Small (4–29)", color: "#5aa2e8" },
+  { key: "substantive", label: `Substantive (${SUBSTANTIVE_MIN_SIZE}+)`, color: "#96d3ff" },
+];
+
+function sizeBandIndex(size) {
+  if (size <= 1) return 0;
+  if (size <= 3) return 1;
+  if (size < SUBSTANTIVE_MIN_SIZE) return 2;
+  return 3;
+}
+
+const HEALTH_METRICS = {
+  internal_edge_surprise: {
+    label: "Internal edge surprise",
+    unit: "surprise (nats)",
+    hint: "How unlikely this community's internal citations are by chance. Size-aware: a 2-paper clique scores ~7 even at density 1.0.",
+    format: (y) => y.toLocaleString(undefined, { maximumFractionDigits: 1 }),
+    logY: true,
+  },
+  internal_edge_density: {
+    label: "Internal edge density",
+    unit: "density (0–1)",
+    hint: "Internal citations over possible ordered pairs. Misleadingly perfect for tiny communities.",
+    format: (y) => y.toFixed(3),
+    logY: false,
+  },
+  conductance: {
+    label: "Conductance",
+    unit: "conductance (0–1)",
+    hint: "Share of the community's citation links that cross its boundary. Lower = more insular. Exactly 1.0 for every singleton.",
+    format: (y) => y.toFixed(3),
+    logY: false,
+  },
+};
+
+// The distribution arrays for the active resolution, as an array of per-community
+// objects (small enough at ~2.5k communities to materialize on each render).
+function currentDistribution() {
+  const cd = state.communityDistributions;
+  if (!cd || state.communityResolution == null) return null;
+  const d = cd.by_resolution[String(state.communityResolution)];
+  if (!d) return null;
+  return d.community_size.map((size, i) => ({
+    community_id: d.community_id[i],
+    community_size: size,
+    conductance: d.conductance[i],
+    internal_edge_density: d.internal_edge_density[i],
+    internal_edge_surprise: d.internal_edge_surprise[i],
+  }));
+}
+
+function percentileOfSorted(sorted, p) {
+  if (!sorted.length) return null;
+  const idx = (sorted.length - 1) * p;
+  const lo = Math.floor(idx), hi = Math.ceil(idx);
+  return lo === hi ? sorted[lo] : sorted[lo] + (sorted[hi] - sorted[lo]) * (idx - lo);
+}
+
+// ── Composition: how much of each partition is artifact? ──────────────────
+// Stacked bar per resolution, segments in fixed band order, 2px surface gaps.
+function renderStackedBars(container, opts) {
+  const { title, hint, rows, onBarClick } = opts;
+  const W = 300, H = 200, PAD = { l: 46, r: 12, t: 12, b: 42 };
+  const plotW = W - PAD.l - PAD.r, plotH = H - PAD.t - PAD.b;
+
+  const wrap = document.createElement("div");
+  wrap.className = "metric-tile metric-tile-wide";
+  const head = document.createElement("div");
+  head.className = "metric-tile-title";
+  head.textContent = title;
+  wrap.appendChild(head);
+  if (hint) {
+    const p = document.createElement("div");
+    p.className = "metric-tile-hint";
+    p.textContent = hint;
+    wrap.appendChild(p);
+  }
+
+  const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, class: "metric-chart" });
+  const maxTotal = Math.max(...rows.map((r) => r.total));
+  const yAt = (v) => PAD.t + plotH - (v / maxTotal) * plotH;
+  const bandW = plotW / rows.length;
+  const barW = Math.min(26, bandW * 0.62);
+
+  // Y axis: 0 / mid / max communities.
+  for (const tv of [maxTotal, maxTotal / 2, 0]) {
+    const y = yAt(tv);
+    svg.appendChild(svgEl("line", { x1: PAD.l, y1: y, x2: PAD.l + plotW, y2: y, class: "metric-gridline" }));
+    const lab = svgEl("text", { x: PAD.l - 5, y: y + 3, class: "metric-tick", "text-anchor": "end" });
+    lab.textContent = compactNumber(tv) ?? String(Math.round(tv));
+    svg.appendChild(lab);
+  }
+  const yTitle = svgEl("text", {
+    x: 11, y: PAD.t + plotH / 2, class: "metric-axis-title",
+    "text-anchor": "middle", transform: `rotate(-90 11 ${PAD.t + plotH / 2})`,
+  });
+  yTitle.textContent = "communities";
+  svg.appendChild(yTitle);
+  svg.appendChild(svgEl("line", { x1: PAD.l, y1: PAD.t + plotH, x2: PAD.l + plotW, y2: PAD.t + plotH, class: "metric-axis" }));
+
+  const labelStep = Math.max(1, Math.ceil(rows.length / 5));
+  rows.forEach((row, i) => {
+    const cx = PAD.l + bandW * (i + 0.5);
+    let cursor = 0;
+    SIZE_BANDS.forEach((band, b) => {
+      const count = row.counts[b];
+      if (!count) return;
+      const y0 = yAt(cursor), y1 = yAt(cursor + count);
+      // 2px surface gap between stacked segments (skill: spacers), never
+      // shrinking a segment out of existence.
+      const h = Math.max(1, y0 - y1 - (cursor > 0 ? 2 : 0));
+      const rect = svgEl("rect", {
+        x: cx - barW / 2, y: y1, width: barW, height: h, rx: 1,
+        fill: band.color, class: "metric-bar-seg",
+      });
+      rect.addEventListener("mouseenter", () => showTooltip(
+        `<strong>Resolution ${escapeHtml(row.resolution)}</strong>` +
+        `<div class="tt-meta">${escapeHtml(band.label)}: ${count.toLocaleString()} of ` +
+        `${row.total.toLocaleString()} communities (${(100 * count / row.total).toFixed(1)}%)</div>` +
+        `<div class="tt-meta">holding ${row.nodeShares[b].toFixed(1)}% of papers</div>`));
+      rect.addEventListener("mousemove", positionTooltipAt);
+      rect.addEventListener("mouseleave", hideTooltipEl);
+      if (onBarClick) {
+        rect.style.cursor = "pointer";
+        rect.addEventListener("click", () => onBarClick(row.resolution));
+      }
+      svg.appendChild(rect);
+      cursor += count;
+    });
+    if (i % labelStep === 0 || i === rows.length - 1) {
+      const lab = svgEl("text", { x: cx, y: PAD.t + plotH + 13, class: "metric-tick", "text-anchor": "middle" });
+      lab.textContent = row.resolution;
+      svg.appendChild(lab);
+    }
+  });
+  const xTitle = svgEl("text", { x: PAD.l + plotW / 2, y: H - 3, class: "metric-axis-title", "text-anchor": "middle" });
+  xTitle.textContent = "Resolution";
+  svg.appendChild(xTitle);
+  wrap.appendChild(svg);
+
+  // Legend: identity is never colour-alone.
+  const legend = document.createElement("div");
+  legend.className = "metric-band-legend";
+  legend.innerHTML = SIZE_BANDS.map((b) =>
+    `<span class="mbl-item"><i style="background:${b.color}"></i>${escapeHtml(b.label)}</span>`).join("");
+  wrap.appendChild(legend);
+  container.appendChild(wrap);
+}
+
+// ── Histogram of one metric at the selected resolution ────────────────────
+function renderHistogram(container, opts) {
+  const { title, hint, values, unit, format, excludedNote } = opts;
+  const W = 300, H = 190, PAD = { l: 46, r: 12, t: 12, b: 42 };
+  const plotW = W - PAD.l - PAD.r, plotH = H - PAD.t - PAD.b;
+  if (!values.length) return;
+
+  const lo = Math.min(...values), hi = Math.max(...values);
+  const nBins = 24;
+  const span = hi - lo || 1;
+  const counts = new Array(nBins).fill(0);
+  for (const v of values) {
+    counts[Math.min(nBins - 1, Math.floor(((v - lo) / span) * nBins))] += 1;
+  }
+  const maxCount = Math.max(...counts);
+
+  const wrap = document.createElement("div");
+  wrap.className = "metric-tile";
+  const head = document.createElement("div");
+  head.className = "metric-tile-title";
+  head.textContent = title;
+  wrap.appendChild(head);
+  if (hint) {
+    const p = document.createElement("div");
+    p.className = "metric-tile-hint";
+    p.textContent = hint;
+    wrap.appendChild(p);
+  }
+
+  const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, class: "metric-chart" });
+  const yAt = (c) => PAD.t + plotH - (c / maxCount) * plotH;
+  for (const tv of [maxCount, maxCount / 2, 0]) {
+    const y = yAt(tv);
+    svg.appendChild(svgEl("line", { x1: PAD.l, y1: y, x2: PAD.l + plotW, y2: y, class: "metric-gridline" }));
+    const lab = svgEl("text", { x: PAD.l - 5, y: y + 3, class: "metric-tick", "text-anchor": "end" });
+    lab.textContent = compactNumber(tv) ?? String(Math.round(tv));
+    svg.appendChild(lab);
+  }
+  const yTitle = svgEl("text", {
+    x: 11, y: PAD.t + plotH / 2, class: "metric-axis-title",
+    "text-anchor": "middle", transform: `rotate(-90 11 ${PAD.t + plotH / 2})`,
+  });
+  yTitle.textContent = "communities";
+  svg.appendChild(yTitle);
+
+  const barW = plotW / nBins;
+  counts.forEach((c, i) => {
+    if (!c) return;
+    const y = yAt(c);
+    const rect = svgEl("rect", {
+      x: PAD.l + i * barW + 1, y, width: Math.max(1, barW - 2),
+      height: PAD.t + plotH - y, rx: 1, class: "metric-hist-bar",
+    });
+    const binLo = lo + (i / nBins) * span, binHi = lo + ((i + 1) / nBins) * span;
+    rect.addEventListener("mouseenter", () => showTooltip(
+      `<strong>${format(binLo)} – ${format(binHi)}</strong>` +
+      `<div class="tt-meta">${c.toLocaleString()} communities (${(100 * c / values.length).toFixed(1)}%)</div>`));
+    rect.addEventListener("mousemove", positionTooltipAt);
+    rect.addEventListener("mouseleave", hideTooltipEl);
+    svg.appendChild(rect);
+  });
+
+  svg.appendChild(svgEl("line", { x1: PAD.l, y1: PAD.t + plotH, x2: PAD.l + plotW, y2: PAD.t + plotH, class: "metric-axis" }));
+  [[lo, PAD.l, "start"], [hi, PAD.l + plotW, "end"]].forEach(([v, x, anchor]) => {
+    const lab = svgEl("text", { x, y: PAD.t + plotH + 13, class: "metric-tick", "text-anchor": anchor });
+    lab.textContent = format(v);
+    svg.appendChild(lab);
+  });
+  const xTitle = svgEl("text", { x: PAD.l + plotW / 2, y: H - 3, class: "metric-axis-title", "text-anchor": "middle" });
+  xTitle.textContent = unit;
+  svg.appendChild(xTitle);
+  wrap.appendChild(svg);
+
+  const note = document.createElement("div");
+  note.className = "metric-tile-note";
+  note.textContent = `${values.length.toLocaleString()} communities shown` + (excludedNote ? ` · ${excludedNote}` : "");
+  wrap.appendChild(note);
+  container.appendChild(wrap);
+}
+
+// ── Size vs health scatter: the clearest real-vs-artifact separation ───────
+function renderScatter(container, opts) {
+  const { title, hint, points, yUnit, yFormat, logY, thresholdY, thresholdLabel, excludedNote } = opts;
+  const W = 300, H = 200, PAD = { l: 46, r: 12, t: 12, b: 42 };
+  const plotW = W - PAD.l - PAD.r, plotH = H - PAD.t - PAD.b;
+  if (!points.length) return;
+
+  // x is log10(size): community sizes span 1 -> ~2,400, so a linear axis would
+  // pile every small community onto the left edge.
+  const xs = points.map((p) => Math.log10(Math.max(1, p.community_size)));
+  const xLo = Math.min(...xs), xHi = Math.max(...xs);
+  const yTransform = (v) => (logY ? Math.log10(Math.max(v, 0.1)) : v);
+  const ys = points.map((p) => yTransform(p.y));
+  const yLo = Math.min(...ys), yHi = Math.max(...ys);
+  const xAt = (v) => PAD.l + ((v - xLo) / (xHi - xLo || 1)) * plotW;
+  const yAt = (v) => PAD.t + plotH - ((v - yLo) / (yHi - yLo || 1)) * plotH;
+
+  const wrap = document.createElement("div");
+  wrap.className = "metric-tile metric-tile-wide";
+  const head = document.createElement("div");
+  head.className = "metric-tile-title";
+  head.textContent = title;
+  wrap.appendChild(head);
+  if (hint) {
+    const p = document.createElement("div");
+    p.className = "metric-tile-hint";
+    p.textContent = hint;
+    wrap.appendChild(p);
+  }
+
+  const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, class: "metric-chart" });
+  for (const t of [1, 0.5, 0]) {
+    const y = PAD.t + plotH * (1 - t);
+    svg.appendChild(svgEl("line", { x1: PAD.l, y1: y, x2: PAD.l + plotW, y2: y, class: "metric-gridline" }));
+    const raw = yLo + (yHi - yLo) * t;
+    const lab = svgEl("text", { x: PAD.l - 5, y: y + 3, class: "metric-tick", "text-anchor": "end" });
+    const value = logY ? Math.pow(10, raw) : raw;
+    lab.textContent = compactNumber(value) ?? yFormat(value);
+    svg.appendChild(lab);
+  }
+  const yTitle = svgEl("text", {
+    x: 11, y: PAD.t + plotH / 2, class: "metric-axis-title",
+    "text-anchor": "middle", transform: `rotate(-90 11 ${PAD.t + plotH / 2})`,
+  });
+  yTitle.textContent = yUnit + (logY ? ", log" : "");
+  svg.appendChild(yTitle);
+
+  if (thresholdY != null && thresholdY > 0) {
+    const ty = yAt(yTransform(thresholdY));
+    if (ty > PAD.t && ty < PAD.t + plotH) {
+      svg.appendChild(svgEl("line", { x1: PAD.l, y1: ty, x2: PAD.l + plotW, y2: ty, class: "metric-threshold" }));
+      const lab = svgEl("text", { x: PAD.l + plotW, y: ty - 3, class: "metric-tick", "text-anchor": "end" });
+      lab.textContent = thresholdLabel || "";
+      svg.appendChild(lab);
+    }
+  }
+
+  for (const p of points) {
+    const band = SIZE_BANDS[sizeBandIndex(p.community_size)];
+    const dot = svgEl("circle", {
+      cx: xAt(Math.log10(Math.max(1, p.community_size))), cy: yAt(yTransform(p.y)),
+      r: 2.2, fill: band.color, class: "metric-scatter-dot",
+    });
+    dot.addEventListener("mouseenter", () => showTooltip(
+      `<strong>Community ${p.community_id}</strong>` +
+      `<div class="tt-meta">${p.community_size.toLocaleString()} papers · ${escapeHtml(band.label)}</div>` +
+      `<div class="tt-meta">${escapeHtml(yUnit)}: ${yFormat(p.y)}</div>`));
+    dot.addEventListener("mousemove", positionTooltipAt);
+    dot.addEventListener("mouseleave", hideTooltipEl);
+    svg.appendChild(dot);
+  }
+
+  svg.appendChild(svgEl("line", { x1: PAD.l, y1: PAD.t + plotH, x2: PAD.l + plotW, y2: PAD.t + plotH, class: "metric-axis" }));
+  for (const tick of [xLo, (xLo + xHi) / 2, xHi]) {
+    const lab = svgEl("text", { x: xAt(tick), y: PAD.t + plotH + 13, class: "metric-tick", "text-anchor": "middle" });
+    lab.textContent = Math.round(Math.pow(10, tick)).toLocaleString();
+    svg.appendChild(lab);
+  }
+  const xTitle = svgEl("text", { x: PAD.l + plotW / 2, y: H - 3, class: "metric-axis-title", "text-anchor": "middle" });
+  xTitle.textContent = "Community size (papers, log)";
+  svg.appendChild(xTitle);
+  wrap.appendChild(svg);
+
+  const legend = document.createElement("div");
+  legend.className = "metric-band-legend";
+  legend.innerHTML = SIZE_BANDS.map((b) =>
+    `<span class="mbl-item"><i style="background:${b.color}"></i>${escapeHtml(b.label)}</span>`).join("");
+  wrap.appendChild(legend);
+  if (excludedNote) {
+    const note = document.createElement("div");
+    note.className = "metric-tile-note";
+    note.textContent = excludedNote;
+    wrap.appendChild(note);
+  }
+  container.appendChild(wrap);
+}
+
+// ── Headline health numbers for the selected resolution ───────────────────
+function renderHealthSummaryStrip() {
+  const host = document.getElementById("health-summary");
+  if (!host) return;
+  const rm = currentResolutionMetrics();
+  if (!rm) { host.innerHTML = ""; return; }
+
+  const pct = (v) => (v == null ? "—" : `${(100 * v).toFixed(1)}%`);
+  const n = (v) => (v == null ? "—" : Math.round(v).toLocaleString());
+  const singletonShareOfCommunities = rm.number_of_communities
+    ? rm.number_of_singleton_communities / rm.number_of_communities : null;
+
+  const tiles = [
+    {
+      value: n(rm.number_of_statistically_dense_communities),
+      of: `of ${n(rm.number_of_communities)} communities`,
+      label: "Denser than chance",
+      note: `Bonferroni-corrected p &lt; 0.05 (surprise &ge; ${rm.statistical_density_surprise_threshold != null ? rm.statistical_density_surprise_threshold.toFixed(1) : "—"} nats)`,
+    },
+    {
+      value: pct(rm.share_of_nodes_in_statistically_dense_communities),
+      of: "of all papers",
+      label: "Live in those communities",
+      note: "The artifact mass is large in count but small in corpus share",
+    },
+    {
+      value: pct(singletonShareOfCommunities),
+      of: `= ${pct(rm.share_of_nodes_in_singleton_communities)} of papers`,
+      label: "Singletons",
+      note: "Why counting communities misleads: most communities, few papers",
+    },
+    {
+      value: rm.conductance_median_over_substantive_communities != null
+        ? rm.conductance_median_over_substantive_communities.toFixed(3) : "—",
+      of: `over ${n(rm.number_of_substantive_communities)} substantive communities`,
+      label: "Median conductance",
+      note: "Over all communities this reads 1.0 — the singleton artifact",
+    },
+  ];
+
+  host.innerHTML = tiles.map((t) => `
+    <div class="health-tile">
+      <div class="ht-value">${t.value}</div>
+      <div class="ht-of">${t.of}</div>
+      <div class="ht-label">${t.label}</div>
+      <div class="ht-note">${t.note}</div>
+    </div>`).join("");
+}
+
+// ── Across-resolution health table (also the required table view) ─────────
+function renderHealthTable() {
+  const host = document.getElementById("health-table");
+  if (!host || !state.resolutionMetrics) return;
+  const rows = state.resolutionMetrics.resolutions;
+  const pct = (v) => (v == null ? "—" : `${(100 * v).toFixed(1)}%`);
+  const num = (v, d = 3) => (v == null ? "—" : v.toFixed(d));
+
+  host.innerHTML = `
+    <table class="health-table">
+      <caption>Per-community health summarized per resolution. Every column names its
+        population — an aggregate over <em>all</em> communities is dominated by singletons.</caption>
+      <thead><tr>
+        <th>Resolution</th><th>Communities</th><th>Denser than chance</th>
+        <th>Papers in those</th><th>Singletons</th><th>Papers in singletons</th>
+        <th>Median conductance (substantive)</th><th>Median density (size&nbsp;&ge;&nbsp;2)</th>
+        <th>Papers in substantive</th>
+      </tr></thead>
+      <tbody>${rows.map((r) => {
+        const active = String(r.resolution) === String(state.communityResolution);
+        return `<tr class="${active ? "active" : ""}">
+          <th scope="row">${r.resolution}</th>
+          <td>${(r.number_of_communities || 0).toLocaleString()}</td>
+          <td>${(r.number_of_statistically_dense_communities || 0).toLocaleString()}
+              (${pct(r.share_of_communities_that_are_statistically_dense)})</td>
+          <td>${pct(r.share_of_nodes_in_statistically_dense_communities)}</td>
+          <td>${(r.number_of_singleton_communities || 0).toLocaleString()}</td>
+          <td>${pct(r.share_of_nodes_in_singleton_communities)}</td>
+          <td>${num(r.conductance_median_over_substantive_communities)}</td>
+          <td>${num(r.internal_edge_density_median_over_communities_with_at_least_2_nodes)}</td>
+          <td>${pct(r.share_of_nodes_in_substantive_communities)}</td>
+        </tr>`;
+      }).join("")}</tbody>
+    </table>`;
+}
+
+// ── Interactive views for the selected resolution ─────────────────────────
+function renderSelectedResolutionHealth() {
+  const grid = document.getElementById("health-selected-grid");
+  if (!grid) return;
+  const dist = currentDistribution();
+  if (!dist) { grid.innerHTML = ""; return; }
+
+  const singletonCount = dist.filter((d) => d.community_size === 1).length;
+  const shown = state.healthExcludeSingletons
+    ? dist.filter((d) => d.community_size > 1) : dist;
+  const excludedNote = state.healthExcludeSingletons && singletonCount
+    ? `${singletonCount.toLocaleString()} singletons excluded`
+    : null;
+  grid.innerHTML = "";
+
+  const histMetric = HEALTH_METRICS[state.healthHistogramMetric];
+  renderHistogram(grid, {
+    title: `${histMetric.label} — distribution at resolution ${state.communityResolution}`,
+    hint: histMetric.hint,
+    values: shown.map((d) => d[state.healthHistogramMetric]),
+    unit: histMetric.unit,
+    format: histMetric.format,
+    excludedNote,
+  });
+
+  const rm = currentResolutionMetrics();
+  const scatterMetric = HEALTH_METRICS[state.healthScatterMetric];
+  renderScatter(grid, {
+    title: `Size vs. ${scatterMetric.label.toLowerCase()} at resolution ${state.communityResolution}`,
+    hint: "Each dot is one community. Real communities climb with size; artifacts sit low and to the left.",
+    points: shown.map((d) => ({ ...d, y: d[state.healthScatterMetric] })),
+    yUnit: scatterMetric.unit,
+    yFormat: scatterMetric.format,
+    logY: scatterMetric.logY,
+    thresholdY: state.healthScatterMetric === "internal_edge_surprise" && rm
+      ? rm.statistical_density_surprise_threshold : null,
+    thresholdLabel: "denser than chance ↑",
+    excludedNote,
+  });
+}
+
+// ── Panel orchestration ───────────────────────────────────────────────────
+function renderCommunityHealthPanel() {
+  const section = document.getElementById("view-health-section");
+  if (!section) return;
+  if (!state.communityDistributions || !state.resolutionMetrics) {
+    section.hidden = true;
+    return;
+  }
+  section.hidden = false;
+
+  // Composition + percentile ribbons across resolutions (static).
+  const acrossGrid = document.getElementById("health-across-grid");
+  if (acrossGrid) {
+    acrossGrid.innerHTML = "";
+    const byRes = state.communityDistributions.by_resolution;
+    const resolutions = Object.keys(byRes).sort((a, b) => parseFloat(a) - parseFloat(b));
+
+    const rows = resolutions.map((res) => {
+      const sizes = byRes[res].community_size;
+      const counts = [0, 0, 0, 0];
+      const nodes = [0, 0, 0, 0];
+      let totalNodes = 0;
+      for (const s of sizes) {
+        const b = sizeBandIndex(s);
+        counts[b] += 1;
+        nodes[b] += s;
+        totalNodes += s;
+      }
+      return {
+        resolution: res, counts, total: sizes.length,
+        nodeShares: nodes.map((v) => (totalNodes ? 100 * v / totalNodes : 0)),
+      };
+    });
+    renderStackedBars(acrossGrid, {
+      title: "What each partition is made of",
+      hint: "Communities by size band. Most are singletons or 2–3 paper fragments — the artifact mass that never reaches the map's legend.",
+      rows,
+      onBarClick: onResolutionPointClick,
+    });
+
+    // Percentile ribbons over substantive communities only, so the bands track
+    // real structure rather than the singleton pile.
+    for (const key of ["internal_edge_surprise", "internal_edge_density", "conductance"]) {
+      const meta = HEALTH_METRICS[key];
+      const points = resolutions.map((res) => {
+        const d = byRes[res];
+        const vals = [];
+        for (let i = 0; i < d.community_size.length; i += 1) {
+          if (d.community_size[i] >= SUBSTANTIVE_MIN_SIZE) vals.push(d[key][i]);
+        }
+        vals.sort((a, b) => a - b);
+        return {
+          x: res,
+          y: percentileOfSorted(vals, 0.5),
+          lo: percentileOfSorted(vals, 0.25),
+          hi: percentileOfSorted(vals, 0.75),
+        };
+      });
+      renderLineChart(acrossGrid, {
+        title: `${meta.label} of substantive communities`,
+        hint: `Median with the 25th–75th percentile band, over communities of ${SUBSTANTIVE_MIN_SIZE}+ papers only.`,
+        unit: meta.unit,
+        points,
+        band: points,
+        format: meta.format,
+        onPointClick: onResolutionPointClick,
+      });
+    }
+  }
+
+  renderHealthSummaryStrip();
+  renderHealthTable();
+  renderSelectedResolutionHealth();
+}
+
+// Metric pickers + singleton toggle for the selected-resolution views.
+function initHealthControls() {
+  const hist = document.getElementById("health-histogram-metric");
+  const scatter = document.getElementById("health-scatter-metric");
+  const toggle = document.getElementById("health-exclude-singletons");
+  const options = Object.entries(HEALTH_METRICS)
+    .map(([k, m]) => `<option value="${k}">${m.label}</option>`).join("");
+  if (hist) {
+    hist.innerHTML = options;
+    hist.value = state.healthHistogramMetric;
+    hist.addEventListener("change", (e) => {
+      state.healthHistogramMetric = e.target.value;
+      renderSelectedResolutionHealth();
+    });
+  }
+  if (scatter) {
+    scatter.innerHTML = options;
+    scatter.value = state.healthScatterMetric;
+    scatter.addEventListener("change", (e) => {
+      state.healthScatterMetric = e.target.value;
+      renderSelectedResolutionHealth();
+    });
+  }
+  if (toggle) {
+    toggle.checked = state.healthExcludeSingletons;
+    toggle.addEventListener("change", (e) => {
+      state.healthExcludeSingletons = e.target.checked;
+      renderSelectedResolutionHealth();
+    });
+  }
 }
 
 // ── Utils ─────────────────────────────────────────────────────────────────

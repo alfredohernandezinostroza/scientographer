@@ -74,6 +74,41 @@
            resolution's communities.</p>
       </div>
       <div id="metrics-grid"></div>
+
+      <!-- Per-community health: are the detected communities real, or artifacts?
+           Driven by community_distributions.json (every community, including the
+           singletons that never reach the map legend). Hidden if absent. -->
+      <section id="view-health-section" hidden>
+        <div class="metrics-head">
+          <h2>Are these real communities, or artifacts?</h2>
+          <p class="meta">Most of what Leiden reports as a &ldquo;community&rdquo; at any resolution
+             is a single paper or a 2&ndash;3 paper fragment, and no descriptive metric flags them
+             &mdash; a 2-paper mutually-citing pair has internal edge density 1.0, which looks
+             perfect. <strong>Internal edge surprise</strong> is size-aware, so it separates
+             genuinely cohesive communities from trivially dense ones.</p>
+        </div>
+
+        <div id="health-summary"></div>
+
+        <h3 class="health-subhead">Across resolutions</h3>
+        <div id="health-across-grid" class="metrics-grid-like"></div>
+
+        <h3 class="health-subhead">At the selected resolution</h3>
+        <div class="health-controls">
+          <label>Histogram of
+            <select id="health-histogram-metric"></select>
+          </label>
+          <label>Scatter y-axis
+            <select id="health-scatter-metric"></select>
+          </label>
+          <label class="health-check">
+            <input id="health-exclude-singletons" type="checkbox"> Exclude singletons
+          </label>
+        </div>
+        <div id="health-selected-grid" class="metrics-grid-like"></div>
+
+        <div id="health-table"></div>
+      </section>
     </div>
   </div>
 

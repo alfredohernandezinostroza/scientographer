@@ -656,6 +656,136 @@ details.about p {
 .metric-axis-title { fill: var(--text-dim); font-size: 8.5px; font-weight: 600; }
 .metric-crosshair { stroke: var(--text-dim); stroke-width: 1; stroke-dasharray: 2 2; }
 .metric-capture { fill: transparent; }
+.metric-ribbon { fill: var(--accent); opacity: 0.16; }
+.metric-tile-note {
+  font-size: 9.5px;
+  color: var(--text-dim);
+  padding: 2px 0 4px;
+}
+
+/* ── Per-community health section ──────────────────────────────────────── */
+#view-health-section {
+  margin-top: 26px;
+  padding-top: 18px;
+  border-top: 1px solid var(--panel-border);
+}
+.health-subhead {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-dim);
+  margin: 18px 0 10px;
+}
+.metrics-grid-like {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 14px;
+}
+/* Composition + scatter carry a legend, so they get more room. */
+.metric-tile-wide { grid-column: span 2; }
+@media (max-width: 760px) { .metric-tile-wide { grid-column: span 1; } }
+
+/* Headline numbers: the summary the charts below unpack. */
+#health-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin-bottom: 6px;
+}
+.health-tile {
+  background: #161a22;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.ht-value { font-size: 22px; font-weight: 650; color: var(--text); line-height: 1.1; }
+.ht-of { font-size: 10px; color: var(--text-dim); margin-top: 1px; }
+.ht-label { font-size: 11.5px; font-weight: 600; color: var(--text); margin-top: 6px; }
+.ht-note { font-size: 9.5px; color: var(--text-dim); line-height: 1.4; margin-top: 3px; }
+
+.health-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.health-controls label {
+  font-size: 11px;
+  color: var(--text-dim);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.health-controls select {
+  background: #11151c;
+  color: var(--text);
+  border: 1px solid var(--panel-border);
+  border-radius: 5px;
+  padding: 3px 6px;
+  font-size: 11px;
+}
+.health-controls select:focus { border-color: var(--accent); }
+.health-check { cursor: pointer; }
+
+/* Size-band legend: identity never rests on colour alone. */
+.metric-band-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  padding: 4px 0 6px;
+}
+.mbl-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 9.5px;
+  color: var(--text-dim);
+}
+.mbl-item i {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  flex: none;
+}
+
+.metric-bar-seg { stroke: none; }
+.metric-hist-bar { fill: var(--accent); opacity: 0.85; }
+.metric-scatter-dot { fill-opacity: 0.7; }
+
+#health-table { margin-top: 22px; overflow-x: auto; }
+table.health-table {
+  border-collapse: collapse;
+  font-size: 11px;
+  min-width: 720px;
+}
+table.health-table caption {
+  caption-side: top;
+  text-align: left;
+  font-size: 10.5px;
+  color: var(--text-dim);
+  line-height: 1.4;
+  padding-bottom: 8px;
+  max-width: 640px;
+}
+table.health-table th,
+table.health-table td {
+  border-bottom: 1px solid var(--panel-border);
+  padding: 5px 10px 5px 0;
+  text-align: right;
+  white-space: nowrap;
+}
+table.health-table thead th {
+  color: var(--text-dim);
+  font-weight: 600;
+  font-size: 10px;
+  vertical-align: bottom;
+}
+table.health-table tbody th[scope="row"] { text-align: left; color: var(--text); }
+table.health-table tbody td { color: var(--text-dim); }
+table.health-table tr.active th[scope="row"],
+table.health-table tr.active td { color: var(--text); background: rgba(78, 161, 255, 0.08); }
 
 /* ── Table view ───────────────────────────────────────────────────────── */
 #table-wrap {
