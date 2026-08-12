@@ -10,6 +10,13 @@ from motor_learning_network.community_quality_metrics import (
     _directed_conductance,
     _directed_internal_edge_density,
     _directed_surprise,
+    _community_surprise,
+    _parallel_edge_count,
+    _self_loop_count,
+    _statistical_density_surprise_threshold,
+    _percentile_summary,
+    _summarize_community_metrics,
+    SUBSTANTIVE_COMMUNITY_MIN_SIZE,
     _intra_community_edge_fraction,
     _kl_divergence_term,
     _significance,
@@ -192,3 +199,172 @@ def test_resolution_plateau_flags_false_when_partitions_differ():
     flags = _resolution_plateau_flags(memberships, resolutions, threshold=0.9)
     assert flags[0.1]["is_on_resolution_plateau"] is False
     assert flags[0.2]["is_on_resolution_plateau"] is False
+
+
+# ── per-community surprise (the "real community or artifact?" score) ──────────
+def test_community_surprise_singleton_is_zero():
+    """A singleton has no internal pairs, so nothing to be surprised about."""
+    assert _community_surprise(0, 1, n_vertices=1000, total_directed_edges=5000) == 0.0
+
+
+def test_community_surprise_zero_without_internal_edges():
+    assert _community_surprise(0, 10, n_vertices=1000, total_directed_edges=5000) == 0.0
+
+
+def test_community_surprise_rewards_density_at_equal_size():
+    """Same size, more internal edges -> strictly harder to explain by chance."""
+    sparse = _community_surprise(5, 20, n_vertices=1000, total_directed_edges=5000)
+    dense = _community_surprise(50, 20, n_vertices=1000, total_directed_edges=5000)
+    assert 0 < sparse < dense
+
+
+def test_community_surprise_ranks_big_dense_above_small_saturated():
+    """The whole point: a normal 2-paper community (a single A->B citation) sits
+    at density 0.5 -- the maximum any community can reach in a citation DAG, so
+    it looks maximally dense -- yet must score far below a large well-connected
+    community, because one edge landing in one of two slots is unremarkable."""
+    small_saturated = _community_surprise(2, 1, n_vertices=1000, total_directed_edges=5000)
+    large_community = _community_surprise(200, 100, n_vertices=1000, total_directed_edges=5000)
+    # A lone citation already saturates a 2-node community's density ceiling.
+    assert _directed_internal_edge_density(
+        {"size": 2, "internal_directed_edge_count": 1}) == 0.5
+    assert small_saturated < large_community
+
+
+def test_community_surprise_stays_finite_with_parallel_edges():
+    """A parallel (duplicate) edge can push a community's internal edge count
+    above the number of ordered pairs it has -- the real network has a 2-paper
+    community with 3 internal edges. Unclamped this asks the hypergeometric for
+    P(X >= impossible) = 0 and yields inf, which is also unrepresentable in JSON
+    and would break the whole metrics payload."""
+    surprise = _community_surprise(3, 2, n_vertices=1000, total_directed_edges=5000)
+    assert math.isfinite(surprise)
+    # Clamped to the 2 available ordered pairs, so it matches the saturated case.
+    assert surprise == pytest.approx(
+        _community_surprise(2, 2, n_vertices=1000, total_directed_edges=5000))
+
+
+def test_directed_surprise_stays_finite_when_internal_exceeds_possible():
+    s = _directed_surprise(
+        n_vertices=10, total_directed_edges=40, community_sizes=[3, 3], total_internal_edges=99)
+    assert math.isfinite(s)
+
+
+def test_parallel_edge_count_detects_duplicate_citation():
+    g = ig.Graph(directed=True)
+    g.add_vertices(3)
+    g.add_edges([(0, 1), (0, 1), (1, 2)])  # 0->1 recorded twice
+    assert _parallel_edge_count(g) == 1
+
+
+def test_self_loop_count_detects_self_citation():
+    g = ig.Graph(directed=True)
+    g.add_vertices(3)
+    g.add_edges([(0, 1), (1, 1), (1, 2)])  # 1->1 is a paper citing itself
+    assert _self_loop_count(g) == 1
+
+
+def test_self_loop_makes_internal_edges_exceed_ordered_pairs():
+    """The real shape behind the impossible density 1.5: a 2-node community with
+    a reciprocal pair plus a self-loop holds 3 internal edges but only 2 ordered
+    pairs exist."""
+    g = ig.Graph(directed=True)
+    g.add_vertices(2)
+    g.add_edges([(0, 1), (1, 0), (0, 0)])
+    counts = _directed_community_edge_counts(g, np.array([0, 0]))
+    assert counts[0]["internal_directed_edge_count"] == 3
+    assert _directed_internal_edge_density(counts[0]) == pytest.approx(1.5)
+
+
+def test_parallel_edge_count_zero_for_simple_graph():
+    g = ig.Graph(directed=True)
+    g.add_vertices(3)
+    g.add_edges([(0, 1), (1, 2), (0, 2)])
+    assert _parallel_edge_count(g) == 0
+
+
+def test_statistical_density_threshold_grows_with_number_of_communities():
+    """Bonferroni correction: more communities tested -> stricter per-community bar."""
+    few = _statistical_density_surprise_threshold(10)
+    many = _statistical_density_surprise_threshold(10_000)
+    assert few < many
+    assert few == pytest.approx(math.log(10 / 0.05))
+
+
+# ── summarizing per-community metrics up to partition level ───────────────────
+def test_percentile_summary_empty_population_is_nan():
+    summary = _percentile_summary([])
+    assert all(math.isnan(v) for v in summary.values())
+
+
+def test_percentile_summary_orders_percentiles():
+    summary = _percentile_summary([1.0, 2.0, 3.0, 4.0])
+    assert summary["p25"] <= summary["median"] <= summary["p75"]
+
+
+def _community_row(community_id, size, internal_edges, conductance, density, surprise):
+    return {
+        "community_id": community_id, "community_size": size,
+        "internal_directed_edge_count": internal_edges, "conductance": conductance,
+        "internal_edge_density": density, "internal_edge_surprise": surprise,
+    }
+
+
+def test_summary_excludes_singletons_from_population_statistics():
+    """The bug this guards against: singletons have conductance 1.0 by definition,
+    so a median over ALL communities reports the artifact mass rather than the
+    partition. Here 3 singletons outnumber 2 real communities."""
+    per_community = [
+        _community_row(0, 1, 0, 1.0, 0.0, 0.0),
+        _community_row(1, 1, 0, 1.0, 0.0, 0.0),
+        _community_row(2, 1, 0, 1.0, 0.0, 0.0),
+        _community_row(3, 40, 400, 0.2, 0.25, 500.0),
+        _community_row(4, 60, 900, 0.3, 0.25, 900.0),
+    ]
+    summary = _summarize_community_metrics(per_community)
+
+    # Median over the non-trivial population sees only the two real communities.
+    assert summary["conductance_median_over_communities_with_at_least_2_nodes"] == pytest.approx(0.25)
+    assert summary["number_of_singleton_communities"] == 3
+    # 3 of 5 communities (60%) but only 3 of 103 nodes (~2.9%) -- the contrast
+    # that makes count-weighted summaries misleading.
+    assert summary["share_of_nodes_in_singleton_communities"] == pytest.approx(3 / 103)
+
+
+def test_summary_node_weighting_keeps_singletons_from_dominating():
+    """One big clean community plus many singletons: the node-weighted mean must
+    follow the big community, not the singleton count."""
+    per_community = [_community_row(i, 1, 0, 1.0, 0.0, 0.0) for i in range(99)]
+    per_community.append(_community_row(99, 901, 9000, 0.1, 0.5, 5000.0))
+    summary = _summarize_community_metrics(per_community)
+
+    # 99 of 100 communities are singletons with conductance 1.0, yet they hold
+    # under 10% of the nodes, so the node-weighted mean stays near 0.1.
+    assert summary["node_weighted_mean_conductance"] == pytest.approx(
+        (99 * 1.0 * 1 + 0.1 * 901) / 1000)
+    assert summary["node_weighted_mean_conductance"] < 0.2
+
+
+def test_summary_substantive_population_uses_size_cutoff():
+    small = _community_row(0, SUBSTANTIVE_COMMUNITY_MIN_SIZE - 1, 10, 0.9, 0.1, 20.0)
+    big = _community_row(1, SUBSTANTIVE_COMMUNITY_MIN_SIZE, 100, 0.1, 0.2, 300.0)
+    summary = _summarize_community_metrics([small, big])
+
+    assert summary["number_of_substantive_communities"] == 1
+    # Only `big` qualifies, so the substantive median is its own value.
+    assert summary["conductance_median_over_substantive_communities"] == pytest.approx(0.1)
+    assert summary["share_of_internal_edges_in_substantive_communities"] == pytest.approx(100 / 110)
+
+
+def test_summary_counts_statistically_dense_communities():
+    threshold = _statistical_density_surprise_threshold(3)
+    per_community = [
+        _community_row(0, 10, 5, 0.5, 0.05, threshold - 1.0),   # below the bar
+        _community_row(1, 20, 200, 0.2, 0.5, threshold + 1.0),  # above
+        _community_row(2, 30, 500, 0.1, 0.6, threshold + 100),  # well above
+    ]
+    summary = _summarize_community_metrics(per_community)
+
+    assert summary["number_of_statistically_dense_communities"] == 2
+    assert summary["share_of_communities_that_are_statistically_dense"] == pytest.approx(2 / 3)
+    assert summary["share_of_nodes_in_statistically_dense_communities"] == pytest.approx(50 / 60)

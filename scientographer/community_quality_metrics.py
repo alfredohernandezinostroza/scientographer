@@ -11,7 +11,12 @@ optimizing. This module reads that graph and adds, per resolution:
     edge fraction (coverage), community count, cross-seed stability, and
     resolution-plateau detection;
   - per-community metrics: size, conductance (+ its directed out/in
-    components), internal edge density, internal/boundary edge counts.
+    components), internal edge density, internal edge surprise (a size-aware
+    "is this a real community or an artifact?" score), internal/boundary edge
+    counts;
+  - summaries of those per-community metrics back up to partition level, each
+    one naming its population or weighting -- see _summarize_community_metrics
+    for why the naive aggregates are actively misleading here.
 
 Edge direction is a first-class property of a citation network (a paper can
 only cite already-published work), so every metric uses a directed
@@ -81,6 +86,17 @@ STABILITY_SEEDS: Final[tuple[int, ...]] = (1, 2, 3, 4, 5)
 # flagged as sitting on the same "natural" community scale.
 PLATEAU_NMI_THRESHOLD: Final[float] = 0.9
 
+# A community this size or larger is treated as "substantive" when summarizing
+# per-community metrics. Matches the cutoff the website already uses to decide
+# which communities are worth naming in the legend, so the numbers reported here
+# describe the same communities a reader actually sees on the map.
+SUBSTANTIVE_COMMUNITY_MIN_SIZE: Final[int] = 30
+
+# Family-wise error rate for calling a single community "statistically denser
+# than chance". Bonferroni-corrected across the communities of a partition, so
+# the per-community surprise cutoff is log(number_of_communities / this).
+STATISTICAL_DENSITY_FAMILYWISE_ALPHA: Final[float] = 0.05
+
 INPUT_GRAPHML: Final[Path] = GRAPH_LEVEL_DATA_PATH / "citation_network_full_low_res.graphml"
 OUTPUT_GRAPHML: Final[Path] = GRAPH_LEVEL_DATA_PATH / "citation_network_with_community_metrics.graphml"
 OUTPUT_DIR: Final[Path] = GRAPH_LEVEL_DATA_PATH / "community_quality_metrics"
@@ -102,6 +118,27 @@ def _reciprocal_edge_pair_count(graph: ig.Graph) -> int:
     and this should be ~0; any nonzero count is a data anomaly, not signal."""
     edge_set = {(e.source, e.target) for e in graph.es}
     return sum(1 for u, v in edge_set if u != v and (v, u) in edge_set) // 2
+
+
+def _parallel_edge_count(graph: ig.Graph) -> int:
+    """Count duplicate directed edges (the same citation u->v recorded more than
+    once). Should be 0: a paper cites another paper once. Verified zero on this
+    network -- kept as a standing integrity check, since a parallel edge would
+    inflate a community's internal edge count exactly like a self-loop does."""
+    return graph.ecount() - len({(e.source, e.target) for e in graph.es})
+
+
+def _self_loop_count(graph: ig.Graph) -> int:
+    """Count self-citations (an edge from a paper to itself). Should be 0.
+
+    These are the reason a community's internal edge count can exceed the number
+    of ordered pairs it has: a 2-paper community with edges u->v, v->u AND a
+    self-loop holds 3 internal directed edges against only 2 possible ordered
+    pairs, reporting an impossible internal_edge_density of 1.5 and driving the
+    surprise tail to P(X >= impossible) = 0, i.e. an infinite score. Counted so
+    the anomaly is recorded rather than silently absorbed -- singletons hide it
+    completely, since a singleton's density and surprise are defined as 0."""
+    return sum(1 for e in graph.es if e.source == e.target)
 
 
 def _directed_community_edge_counts(graph: ig.Graph, membership: np.ndarray) -> dict[int, dict]:
@@ -184,8 +221,125 @@ def _directed_surprise(n_vertices: int, total_directed_edges: int,
     m_intra = sum(n * (n - 1) for n in community_sizes)
     if m_total <= 0 or m_intra <= 0:
         return 0.0
-    log_p = hypergeom.logsf(total_internal_edges - 1, m_total, m_intra, total_directed_edges)
+    # The hypergeometric cannot draw more successes than there are success
+    # states, so observing MORE internal edges than there are ordered pairs
+    # would ask for P(X >= impossible) = 0 and return -inf. That happens when a
+    # community contains a self-citation, whose self-loop counts as an internal
+    # edge but adds no ordered pair; see self_loop_count. Clamping keeps the tail
+    # finite, and at the clamp the score is already the maximum surprise this
+    # statistic can express.
+    observed = min(total_internal_edges, m_intra, total_directed_edges)
+    log_p = hypergeom.logsf(observed - 1, m_total, m_intra, total_directed_edges)
     return float(-log_p)
+
+
+def _community_surprise(internal_edges: int, community_size: int,
+                        n_vertices: int, total_directed_edges: int) -> float:
+    """Per-community surprise: the same hypergeometric-tail statistic as
+    _directed_surprise, but scoring a *single* community -- how unlikely it is
+    that this community alone would hold at least its observed internal edges if
+    the graph's edges were scattered at random over ordered pairs. Higher = harder
+    to explain by chance = more likely a real community.
+
+    This is the size-aware "is it real?" score the descriptive metrics can't
+    give. Density is a poor discriminator because it saturates trivially for
+    tiny groups: in a citation DAG a community's density is capped at 0.5 (a
+    fully connected DAG on n papers has n(n-1)/2 edges over n(n-1) ordered
+    pairs), and a single A->B citation between two papers already sits at that
+    ceiling -- yet that describes an enormous fraction of ALL citation pairs and
+    says nothing about whether the two form a real community. (Density only
+    exceeds 0.5 via reciprocal citations or self-loops, both of which are rare
+    data anomalies in this DAG, not real structure.) Surprise corrects for size:
+    that 2-paper community scores only a few nats and fails the bar, while a
+    303-paper community with 2,266 internal edges scores ~7,474. A singleton has
+    no internal pairs and scores 0.
+    """
+    return _directed_surprise(n_vertices, total_directed_edges, [community_size], internal_edges)
+
+
+def _statistical_density_surprise_threshold(number_of_communities: int) -> float:
+    """Surprise (in nats) a community must clear to count as denser than chance,
+    Bonferroni-corrected across the partition's communities: -log(alpha / n)."""
+    if number_of_communities < 1:
+        return float("inf")
+    return math.log(number_of_communities / STATISTICAL_DENSITY_FAMILYWISE_ALPHA)
+
+
+def _percentile_summary(values: list[float]) -> dict[str, float]:
+    """p25/median/p75 of a metric, or NaN when the population is empty."""
+    if not values:
+        return {"p25": float("nan"), "median": float("nan"), "p75": float("nan")}
+    array = np.asarray(values, dtype=float)
+    return {
+        "p25": float(np.percentile(array, 25)),
+        "median": float(np.percentile(array, 50)),
+        "p75": float(np.percentile(array, 75)),
+    }
+
+
+def _summarize_community_metrics(per_community: list[dict]) -> dict:
+    """Summarize per-community metrics up to partition level.
+
+    Node counts come from the community sizes themselves: every vertex belongs to
+    exactly one community, so they already sum to the vertex count.
+
+    Necessary because the obvious aggregates are dominated by the artifact mass:
+    most "communities" at every resolution are singletons, and a singleton has
+    conductance exactly 1.0 (every incident edge is a boundary edge) and internal
+    edge density exactly 0.0 (no internal pairs). So a plain median conductance
+    over all communities reads 1.0 -- it reports the singletons, not the
+    partition -- and a plain mean internal density even reverses its trend across
+    the resolution sweep purely because the singleton share changes (Simpson's
+    paradox), not because communities get denser.
+
+    Every statistic here therefore names its population (all communities /
+    communities with at least 2 nodes / substantive communities) or its weighting
+    (node-weighted = each community weighted by its size, i.e. what the average
+    *paper* experiences, so thousands of singletons can't outvote the corpus).
+    """
+    summary: dict = {}
+    sizes = [c["community_size"] for c in per_community]
+    total_nodes = sum(sizes) or 1
+    total_internal_edges = sum(c["internal_directed_edge_count"] for c in per_community) or 1
+
+    non_trivial = [c for c in per_community if c["community_size"] >= 2]
+    substantive = [c for c in per_community if c["community_size"] >= SUBSTANTIVE_COMMUNITY_MIN_SIZE]
+
+    for metric_name in ("conductance", "internal_edge_density", "internal_edge_surprise"):
+        for population_label, population in (
+            ("over_communities_with_at_least_2_nodes", non_trivial),
+            ("over_substantive_communities", substantive),
+        ):
+            percentiles = _percentile_summary([c[metric_name] for c in population])
+            for percentile_label, percentile_value in percentiles.items():
+                key = f"{metric_name}_{percentile_label}_{population_label}"
+                summary[key] = percentile_value
+        # Node-weighted mean over all communities: singletons still count, but
+        # only for the one node they contain.
+        weighted = sum(c[metric_name] * c["community_size"] for c in per_community)
+        summary[f"node_weighted_mean_{metric_name}"] = weighted / total_nodes
+
+    summary["mean_internal_edge_density_over_communities_with_at_least_2_nodes"] = float(
+        np.mean([c["internal_edge_density"] for c in non_trivial])) if non_trivial else 0.0
+
+    singletons = [c for c in per_community if c["community_size"] == 1]
+    summary["number_of_singleton_communities"] = len(singletons)
+    summary["share_of_nodes_in_singleton_communities"] = len(singletons) / total_nodes
+    summary["number_of_substantive_communities"] = len(substantive)
+    summary["share_of_nodes_in_substantive_communities"] = (
+        sum(c["community_size"] for c in substantive) / total_nodes)
+    summary["share_of_internal_edges_in_substantive_communities"] = (
+        sum(c["internal_directed_edge_count"] for c in substantive) / total_internal_edges)
+
+    threshold = _statistical_density_surprise_threshold(len(per_community))
+    dense = [c for c in per_community if c["internal_edge_surprise"] >= threshold]
+    summary["statistical_density_surprise_threshold"] = threshold
+    summary["number_of_statistically_dense_communities"] = len(dense)
+    summary["share_of_communities_that_are_statistically_dense"] = (
+        len(dense) / len(per_community) if per_community else 0.0)
+    summary["share_of_nodes_in_statistically_dense_communities"] = (
+        sum(c["community_size"] for c in dense) / total_nodes)
+    return summary
 
 
 def _intra_community_edge_fraction(total_internal_edges: int, total_directed_edges: int) -> float:
@@ -378,6 +532,30 @@ def undirected_networkx_graph(citation_network: ig.Graph) -> nx.Graph:
     return citation_network.to_networkx().to_undirected()
 
 
+def parallel_edge_count(citation_network: ig.Graph) -> int:
+    count = _parallel_edge_count(citation_network)
+    if count:
+        logger.warning(
+            "citation network has %d parallel (duplicate) directed edges; a paper "
+            "cites another paper once, so these are a data anomaly and they inflate "
+            "the affected communities' internal edge counts", count)
+    else:
+        logger.info("citation network has zero parallel edges, as expected")
+    return count
+
+
+def self_loop_count(citation_network: ig.Graph) -> int:
+    count = _self_loop_count(citation_network)
+    if count:
+        logger.warning(
+            "citation network has %d self-citation loops; these count as internal "
+            "edges but add no ordered pair, so they can push a small community's "
+            "internal edge density above 1", count)
+    else:
+        logger.info("citation network has zero self-loops, as expected")
+    return count
+
+
 def reciprocal_edge_pair_count(citation_network: ig.Graph) -> int:
     count = _reciprocal_edge_pair_count(citation_network)
     if count:
@@ -449,6 +627,9 @@ def community_quality_metrics_for_resolution(
             "conductance_out": conductances["conductance_out"],
             "conductance_in": conductances["conductance_in"],
             "internal_edge_density": _directed_internal_edge_density(counts),
+            "internal_edge_surprise": _community_surprise(
+                counts["internal_directed_edge_count"], counts["size"],
+                n_vertices, total_directed_edges),
         })
 
     stability = _cross_seed_stability(
@@ -469,6 +650,7 @@ def community_quality_metrics_for_resolution(
             [m["internal_edge_density"] for m in per_community])) if per_community else 0.0,
         "intra_community_edge_fraction": _intra_community_edge_fraction(
             total_internal_edges, total_directed_edges),
+        **_summarize_community_metrics(per_community),
         **stability,
         **plateau,
     }
@@ -478,6 +660,17 @@ def community_quality_metrics_for_resolution(
         resolution, len(edge_counts), per_partition["modularity"],
         per_partition["constant_potts_model_score"], per_partition["surprise"],
         per_partition["significance"],
+    )
+    logger.info(
+        "resolution=%s health: %d/%d communities statistically dense (holding %.1f%% of papers), "
+        "%d singletons (%.1f%% of communities but only %.1f%% of papers), "
+        "median conductance over substantive communities=%.3f",
+        resolution, per_partition["number_of_statistically_dense_communities"], len(edge_counts),
+        100 * per_partition["share_of_nodes_in_statistically_dense_communities"],
+        per_partition["number_of_singleton_communities"],
+        100 * per_partition["number_of_singleton_communities"] / max(len(edge_counts), 1),
+        100 * per_partition["share_of_nodes_in_singleton_communities"],
+        per_partition["conductance_median_over_substantive_communities"],
     )
     return {"resolution": resolution, "per_community": per_community, "per_partition": per_partition}
 
@@ -504,6 +697,8 @@ def citation_network_with_community_metrics(
     community_quality_metrics_all_resolutions: list[dict],
     community_memberships_by_resolution: list[np.ndarray],
     reciprocal_edge_pair_count: int,
+    parallel_edge_count: int,
+    self_loop_count: int,
 ) -> ig.Graph:
     """Copy of the input graph with per-community metrics broadcast onto
     node columns and partition-level scalars stored as typed graph
@@ -512,10 +707,13 @@ def citation_network_with_community_metrics(
     graph["metrics_edge_directedness"] = "directed"
     graph["significance_edge_directedness"] = "undirected_no_standard_directed_definition"
     graph["reciprocal_edge_pair_count"] = int(reciprocal_edge_pair_count)
+    graph["parallel_edge_count"] = int(parallel_edge_count)
+    graph["self_loop_count"] = int(self_loop_count)
 
     node_metric_names = [
         "community_size", "conductance", "conductance_out", "conductance_in",
-        "internal_edge_density", "internal_directed_edge_count", "boundary_edge_count",
+        "internal_edge_density", "internal_edge_surprise",
+        "internal_directed_edge_count", "boundary_edge_count",
     ]
 
     for bundle, membership in zip(community_quality_metrics_all_resolutions, community_memberships_by_resolution):
