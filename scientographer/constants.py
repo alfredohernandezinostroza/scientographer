@@ -17,6 +17,16 @@ KEYWORDS_LEVEL_DATA_PATH.mkdir(exist_ok=True)
 FIGURES_PATH = Path("reports","figures")
 FIGURES_PATH.mkdir(exist_ok=True)
 
+# Root for the retrieved full-text corpus (PDFs / XML). This lives OUTSIDE the repo
+# because it runs to tens of GB and the repo volume is nearly full, while /raid has
+# room. Small derived tables (manifests, parquet) still live under data/ so they can
+# be DVC-tracked normally. Override with FULL_TEXT_DATA_ROOT in .env if the corpus
+# needs to move; nothing here is created eagerly, since the volume may not be mounted
+# on every machine that imports this module.
+EXTERNAL_DATA_ROOT = Path(
+    os.getenv("FULL_TEXT_DATA_ROOT", "/raid/fredi_dbs/papers-motor-learning-network")
+)
+
 DEFAULT_UI_PROJECT_ID = 1
 
 read_dotenv = dotenv.load_dotenv(Path(__file__).parent.parent / '.env')
