@@ -43,3 +43,28 @@ TEAM_NAME = os.getenv('TEAM_NAME')
 GOOGLE_DRIVE_FOLDER_ID = os.getenv('GOOGLE_DRIVE_FOLDER_ID')
 OPENCITATIONS_ACCESS_TOKEN = os.getenv('OPENCITATIONS_ACCESS_TOKEN')
 OPENALEX_API_KEY = os.getenv('OPENALEX_API_KEY')
+
+# Elsevier / ScienceDirect TDM. Deliberately no assert: the publisher routes are
+# optional, so this module must still import on machines that never enable them.
+# The key only *identifies* the caller -- it does not by itself grant access to
+# subscribed content; that needs entitlement via an institutional IP or InstToken.
+ELSEVIER_API_KEY = os.getenv('ELSEVIER_API_KEY')
+ELSEVIER_INSTITUTIONAL_TOKEN = os.getenv('ELSEVIER_INSTITUTIONAL_TOKEN')
+
+# Wiley text-and-data-mining. Sent as the Wiley-TDM-Client-Token header; issued by
+# the library rather than self-served, and normally still IP-restricted.
+WILEY_TDM_TOKEN = os.getenv('WILEY_TDM_TOKEN')
+
+# Springer Nature issues separate keys per API product rather than one key: the
+# Metadata API covers bibliographic records for the whole catalogue, while the
+# Open Access API is the one that returns full text -- and only for open content.
+# Neither reaches subscribed full text on its own; that needs a TDM agreement.
+SPRINGER_NATURE_METADATA = os.getenv('SPRINGER_NATURE_METADATA')
+SPRINGER_NATURE_OPEN_ACCESS = os.getenv('SPRINGER_NATURE_OPEN_ACCESS')
+
+# Taylor & Francis matters more than Wiley for this corpus (Journal of Motor
+# Behavior, Research Quarterly for Exercise and Sport), but unlike Elsevier and
+# Springer they are not known to self-serve a TDM key -- access is normally an
+# institutional agreement, and the generic Crossref TDM + IP-entitlement route may
+# cover them without any key at all. Slot declared; leave unset until confirmed.
+TAYLOR_AND_FRANCIS_TDM_TOKEN = os.getenv('TAYLOR_AND_FRANCIS_TDM_TOKEN')
