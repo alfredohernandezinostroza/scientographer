@@ -65,6 +65,18 @@ SPRINGER_NATURE_OPEN_ACCESS = os.getenv('SPRINGER_NATURE_OPEN_ACCESS')
 # Taylor & Francis matters more than Wiley for this corpus (Journal of Motor
 # Behavior, Research Quarterly for Exercise and Sport), but unlike Elsevier and
 # Springer they are not known to self-serve a TDM key -- access is normally an
-# institutional agreement, and the generic Crossref TDM + IP-entitlement route may
-# cover them without any key at all. Slot declared; leave unset until confirmed.
+# institutional agreement. Measured 2026-08-14: 7 of 8 sampled T&F papers declare no
+# Crossref TDM link at all, and the one that does returns 403, so the generic
+# Crossref + IP-entitlement route does NOT cover them from this network.
 TAYLOR_AND_FRANCIS_TDM_TOKEN = os.getenv('TAYLOR_AND_FRANCIS_TDM_TOKEN')
+
+# SOCKS5 proxy for publisher requests that need institutional IP entitlement, supplied
+# by an unprivileged `openconnect --script-tun` + ocproxy tunnel (see
+# docs/ENTITLEMENT_SURVEY.md). Empty means "go direct", which is the right default:
+# the free routes and the Wiley/Springer routes are all measured to work without it,
+# so nothing breaks when no tunnel is running.
+#
+# Use socks5h:// rather than socks5:// so DNS is resolved *through* the tunnel. With
+# plain socks5:// the publisher hostname is resolved locally, which both leaks the real
+# network and can return a CDN address that never had entitlement in the first place.
+INSTITUTIONAL_PROXY_URL = os.getenv('INSTITUTIONAL_PROXY_URL', '')
