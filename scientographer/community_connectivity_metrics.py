@@ -1,0 +1,347 @@
+"""Well-connectedness (minimum-edge-cut) diagnostic for the Leiden/CPM communities.
+
+``get_network_communities_and_stats.py`` runs Leiden with the constant Potts
+model (CPM) across several resolutions and writes the resulting community
+assignments as per-vertex ``cpm_communities_at_res=<resolution>`` columns.
+``community_quality_metrics.py`` scores those communities on *density* (internal
+edge density, internal edge surprise) and *boundary tightness* (conductance).
+
+This module adds an orthogonal structural test those metrics miss:
+**well-connectedness**. Following Park, Tabatabaee, ... Warnow, "Identifying
+Well-Connected Communities in Real-World and Synthetic Networks" (COMPLEX
+NETWORKS 2023), a community of ``n`` nodes is *poorly connected* if its global
+minimum edge cut is ``<= f(n)`` with ``f(n) = log10(n)`` -- i.e. deleting a
+handful of edges splits it in two. A community can be dense (high surprise) yet
+still be poorly connected: two dense blobs joined by a single citation have a
+minimum cut of 1. The paper's central empirical finding is that Leiden-CPM at
+*small* resolutions -- exactly this project's regime (0.001-0.009) -- produces
+the fewest well-connected communities, so this is where the test bites.
+
+This is a diagnostic only: it measures well-connectedness, it does not re-cluster
+(no Connectivity Modifier remediation). Our network is tiny (~23k nodes), so the
+global minimum cut of every community at every resolution is cheap via igraph's
+native ``Graph.mincut`` (Stoer-Wagner); no external tool is needed.
+
+Directedness: minimum edge cut / well-connectedness is defined on an undirected
+simple graph. Each community's induced subgraph is projected to undirected and
+simplified before cutting -- matching the paper, which strips self-loops and
+parallel edges. In this network that collapse also merges the handful of
+reciprocal citation pairs (a temporal-DAG anomaly) into single undirected edges.
+
+Outputs (data/graph_level_data/community_connectivity_metrics/):
+  community_connectivity_metrics_per_community.parquet
+    long form: resolution x community_id x {size, minimum_edge_cut_size,
+    well_connectedness_threshold, is_well_connected, ...}
+  community_connectivity_metrics_per_partition.parquet
+    long form: resolution x {number_of_communities, fraction_well_connected_*, ...}
+"""
+
+import sys
+import math
+import logging
+from pathlib import Path
+from typing import Final
+from collections import defaultdict
+
+import numpy as np
+import pandas as pd
+import igraph as ig
+
+from hamilton.function_modifiers import dataloader, datasaver, value, source, group, parameterize
+from hamilton.io import utils
+from hamilton_sdk import adapters
+from hamilton import driver
+import hamilton.log_setup
+
+from motor_learning_network.constants import (
+    GRAPH_LEVEL_DATA_PATH,
+    FIGURES_PATH,
+    DEFAULT_UI_PROJECT_ID,
+    DEFAULT_UI_USERNAME,
+    TEAM_NAME,
+)
+
+###################
+##   Constants   ##
+###################
+CURRENT_FILE_NAME = Path(__file__).stem
+hamilton.log_setup.setup_logging(logging.INFO)
+logger = logging.getLogger(__name__)
+
+EXECUTE = True
+
+# Must match the resolution sweep in get_network_communities_and_stats.py --
+# these select which `cpm_communities_at_res=<r>` columns to read.
+RESOLUTIONS: Final[list[float]] = [round(i * 0.001, 3) for i in range(1, 10)]
+
+# A community this size or larger is treated as "substantive" when summarizing
+# per-community metrics. Matches community_quality_metrics.py and the cutoff the
+# website uses to decide which communities are worth naming, so the well-
+# connected fractions reported here describe the communities a reader actually
+# sees on the map, not the singleton artifact mass.
+SUBSTANTIVE_COMMUNITY_MIN_SIZE: Final[int] = 30
+
+INPUT_GRAPHML: Final[Path] = GRAPH_LEVEL_DATA_PATH / "citation_network_full_low_res.graphml"
+OUTPUT_DIR: Final[Path] = GRAPH_LEVEL_DATA_PATH / "community_connectivity_metrics"
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+PER_COMMUNITY_PARQUET: Final[Path] = OUTPUT_DIR / "community_connectivity_metrics_per_community.parquet"
+PER_PARTITION_PARQUET: Final[Path] = OUTPUT_DIR / "community_connectivity_metrics_per_partition.parquet"
+
+
+#####################
+##  Aux Functions  ##
+#####################
+def _community_attribute_name(resolution: float) -> str:
+    return f"cpm_communities_at_res={resolution}"
+
+
+def _well_connectedness_threshold(community_size: int) -> float:
+    """f(n) = log10(n), the paper's mild well-connectedness bar: a community is
+    well-connected only if its minimum edge cut *exceeds* this. Undefined for a
+    community with fewer than two nodes (no cut exists), reported as NaN."""
+    if community_size < 2:
+        return float("nan")
+    return math.log10(community_size)
+
+
+def _community_vertex_groups(membership: np.ndarray) -> dict[int, list[int]]:
+    """Map each community id to the list of vertex indices assigned to it."""
+    groups: dict[int, list[int]] = defaultdict(list)
+    for vertex_index, community_id in enumerate(membership):
+        groups[int(community_id)].append(vertex_index)
+    return groups
+
+
+def _minimum_edge_cut_of_community(graph: ig.Graph, vertex_ids: list[int]) -> dict:
+    """Global minimum edge cut of one community's induced subgraph.
+
+    The subgraph is projected to undirected and simplified first, so the cut is
+    computed on the simple undirected structure the paper's f(n) is defined for:
+    ``to_undirected(mode="collapse")`` merges each reciprocal citation pair
+    (A->B and B->A) and any parallel edge into a single undirected edge, and
+    ``simplify`` then drops self-citation loops. Both are rare data anomalies in
+    this temporal-DAG citation network, not real connectivity.
+
+    Returns the community size, its internal undirected edge count, the minimum
+    edge cut size (``igraph.Graph.mincut`` -- unweighted global min cut,
+    Stoer-Wagner), and the cut's balance (smaller-side node fraction: ~1/n for a
+    single-node cut, ~0.5 for an even split). A community with fewer than two
+    nodes has no cut, reported as NaN. A disconnected community has a minimum cut
+    of 0 (correctly poorly connected)."""
+    subgraph = graph.induced_subgraph(vertex_ids)
+    subgraph.to_undirected(mode="collapse")
+    subgraph.simplify(multiple=True, loops=True)
+
+    community_size = subgraph.vcount()
+    internal_undirected_edge_count = subgraph.ecount()
+    if community_size < 2:
+        return {
+            "community_size": community_size,
+            "internal_undirected_edge_count": internal_undirected_edge_count,
+            "minimum_edge_cut_size": float("nan"),
+            "minimum_cut_balance": float("nan"),
+        }
+
+    cut = subgraph.mincut()
+    smaller_side = min(len(side) for side in cut.partition)
+    return {
+        "community_size": community_size,
+        "internal_undirected_edge_count": internal_undirected_edge_count,
+        "minimum_edge_cut_size": float(cut.value),
+        "minimum_cut_balance": smaller_side / community_size,
+    }
+
+
+def _is_well_connected(minimum_edge_cut_size: float, well_connectedness_threshold: float) -> bool:
+    """A community is well-connected iff its minimum edge cut strictly exceeds
+    f(n). Communities with no defined cut (fewer than two nodes) are not
+    well-connected."""
+    if math.isnan(minimum_edge_cut_size) or math.isnan(well_connectedness_threshold):
+        return False
+    return minimum_edge_cut_size > well_connectedness_threshold
+
+
+def _summarize_connectivity_metrics(per_community: list[dict]) -> dict:
+    """Summarize per-community well-connectedness up to partition level.
+
+    Each statistic names its population or weighting, for the same reason as
+    community_quality_metrics._summarize_community_metrics: most communities at
+    every resolution are singletons, which can never be well-connected (no cut
+    exists), so a bare "fraction well-connected over all communities" would just
+    report the singleton share. The reported fractions therefore range over
+    communities with at least two nodes, over substantive communities (size
+    >= SUBSTANTIVE_COMMUNITY_MIN_SIZE), or weight each community by its size
+    (node-weighted = the share of *papers* that sit in a well-connected
+    community, so thousands of singletons can't outvote the corpus)."""
+    total_nodes = sum(c["community_size"] for c in per_community) or 1
+
+    non_trivial = [c for c in per_community if c["community_size"] >= 2]
+    substantive = [c for c in per_community if c["community_size"] >= SUBSTANTIVE_COMMUNITY_MIN_SIZE]
+
+    def fraction_well_connected(population: list[dict]) -> float:
+        if not population:
+            return float("nan")
+        return sum(1 for c in population if c["is_well_connected"]) / len(population)
+
+    substantive_cut_sizes = [c["minimum_edge_cut_size"] for c in substantive]
+
+    return {
+        "number_of_communities": len(per_community),
+        "number_of_communities_with_at_least_2_nodes": len(non_trivial),
+        "number_of_substantive_communities": len(substantive),
+        # Only communities with >= 2 nodes can be well-connected, so counting
+        # over that population equals counting over all communities.
+        "number_of_well_connected_communities": sum(1 for c in per_community if c["is_well_connected"]),
+        "fraction_well_connected_over_communities_with_at_least_2_nodes": fraction_well_connected(non_trivial),
+        "fraction_well_connected_over_substantive_communities": fraction_well_connected(substantive),
+        "node_weighted_fraction_well_connected": (
+            sum(c["community_size"] for c in per_community if c["is_well_connected"]) / total_nodes),
+        "median_minimum_edge_cut_size_over_substantive_communities": (
+            float(np.median(substantive_cut_sizes)) if substantive_cut_sizes else float("nan")),
+    }
+
+
+##################
+##     Main     ##
+##################
+def _main() -> int:
+    # Building the HamiltonTracker validates against a local UI server; only
+    # construct it when the UI adapter below is actually enabled.
+    # UI_CONFIG = adapters.HamiltonTracker(
+    #     project_id=DEFAULT_UI_PROJECT_ID,
+    #     username=DEFAULT_UI_USERNAME,
+    #     dag_name=CURRENT_FILE_NAME,
+    #     tags={"environment": "DEV", "team": TEAM_NAME, "version": "0.1"},
+    # )
+    inputs = dict(
+        citation_network_path=INPUT_GRAPHML,
+    )
+    outputs = [
+        "save_per_community_connectivity_metrics",
+        "save_per_partition_connectivity_metrics",
+    ]
+    import __main__
+    dr = (
+        driver.Builder()
+        .with_modules(__main__)
+        # .with_adapters(UI_CONFIG)
+        .build()
+    )
+    dr.validate_execution(outputs, inputs=inputs)
+    dr.display_all_functions(
+        FIGURES_PATH / f"{CURRENT_FILE_NAME}_all_functions.png",
+        keep_dot=True, deduplicate_inputs=True,
+    )
+    dr.visualize_execution(
+        outputs, inputs=inputs,
+        output_file_path=FIGURES_PATH / f"{CURRENT_FILE_NAME}.png",
+        keep_dot=False, deduplicate_inputs=True,
+    )
+    if EXECUTE:
+        dr.execute(outputs, inputs=inputs)
+    return 0
+
+
+#########################
+##    DAG Definition   ##
+#########################
+@dataloader()
+def citation_network(citation_network_path: Path) -> tuple[ig.Graph, dict]:
+    graph = ig.Graph.Read_GraphML(str(citation_network_path))
+    metadata = utils.get_file_metadata(citation_network_path)
+    return graph, metadata
+
+
+@parameterize(**{
+    f"community_membership_at_resolution_{r}": {"resolution": value(r)} for r in RESOLUTIONS
+})
+def community_membership_for_resolution(citation_network: ig.Graph, resolution: float) -> np.ndarray:
+    """Per-vertex community id at this resolution, read from the graph's
+    existing `cpm_communities_at_res=<r>` attribute (stored as floats)."""
+    attribute_name = _community_attribute_name(resolution)
+    return np.array([int(float(v)) for v in citation_network.vs[attribute_name]])
+
+
+@parameterize(**{
+    f"community_connectivity_metrics_at_resolution_{r}": {
+        "resolution": value(r),
+        "community_membership": source(f"community_membership_at_resolution_{r}"),
+    } for r in RESOLUTIONS
+})
+def community_connectivity_metrics_for_resolution(
+    citation_network: ig.Graph,
+    resolution: float,
+    community_membership: np.ndarray,
+) -> dict:
+    """Well-connectedness metrics for one resolution's existing partition: the
+    minimum edge cut of every community versus f(n) = log10(n), plus the
+    partition-level fractions of communities that are well-connected."""
+    groups = _community_vertex_groups(community_membership)
+
+    per_community = []
+    for community_id, vertex_ids in groups.items():
+        cut = _minimum_edge_cut_of_community(citation_network, vertex_ids)
+        threshold = _well_connectedness_threshold(cut["community_size"])
+        per_community.append({
+            "resolution": resolution,
+            "community_id": community_id,
+            "community_size": cut["community_size"],
+            "internal_undirected_edge_count": cut["internal_undirected_edge_count"],
+            "minimum_edge_cut_size": cut["minimum_edge_cut_size"],
+            "well_connectedness_threshold": threshold,
+            "is_well_connected": _is_well_connected(cut["minimum_edge_cut_size"], threshold),
+            "minimum_cut_balance": cut["minimum_cut_balance"],
+        })
+
+    per_partition = {
+        "resolution": resolution,
+        **_summarize_connectivity_metrics(per_community),
+    }
+    logger.info(
+        "resolution=%s: %d communities, %d/%d substantive are well-connected "
+        "(%.1f%%), node-weighted %.1f%% of papers sit in a well-connected community",
+        resolution, per_partition["number_of_communities"],
+        sum(1 for c in per_community
+            if c["community_size"] >= SUBSTANTIVE_COMMUNITY_MIN_SIZE and c["is_well_connected"]),
+        per_partition["number_of_substantive_communities"],
+        100 * per_partition["fraction_well_connected_over_substantive_communities"],
+        100 * per_partition["node_weighted_fraction_well_connected"],
+    )
+    return {"resolution": resolution, "per_community": per_community, "per_partition": per_partition}
+
+
+@parameterize(community_connectivity_metrics_all_resolutions={
+    "bundles": group(*[source(f"community_connectivity_metrics_at_resolution_{r}") for r in RESOLUTIONS])
+})
+def community_connectivity_metrics_all_resolutions(bundles: list[dict]) -> list[dict]:
+    return bundles
+
+
+def per_community_connectivity_metrics_df(
+    community_connectivity_metrics_all_resolutions: list[dict],
+) -> pd.DataFrame:
+    rows = [row for bundle in community_connectivity_metrics_all_resolutions for row in bundle["per_community"]]
+    return pd.DataFrame(rows)
+
+
+def per_partition_connectivity_metrics_df(
+    community_connectivity_metrics_all_resolutions: list[dict],
+) -> pd.DataFrame:
+    rows = [bundle["per_partition"] for bundle in community_connectivity_metrics_all_resolutions]
+    return pd.DataFrame(rows)
+
+
+@datasaver()
+def save_per_community_connectivity_metrics(per_community_connectivity_metrics_df: pd.DataFrame) -> dict:
+    per_community_connectivity_metrics_df.to_parquet(PER_COMMUNITY_PARQUET)
+    return utils.get_file_metadata(PER_COMMUNITY_PARQUET)
+
+
+@datasaver()
+def save_per_partition_connectivity_metrics(per_partition_connectivity_metrics_df: pd.DataFrame) -> dict:
+    per_partition_connectivity_metrics_df.to_parquet(PER_PARTITION_PARQUET)
+    return utils.get_file_metadata(PER_PARTITION_PARQUET)
+
+
+if __name__ == "__main__":
+    sys.exit(_main())
