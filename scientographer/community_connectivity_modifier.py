@@ -75,6 +75,10 @@ from motor_learning_network.community_connectivity_metrics import (
     _community_vertex_groups,
     _well_connectedness_threshold,
 )
+from motor_learning_network.community_resolution_bands import (
+    LOW_RES_GRAPHML,
+    merge_higher_band_communities,
+)
 
 ###################
 ##   Constants   ##
@@ -96,7 +100,7 @@ CM_MIN_CLUSTER_SIZE: Final[int] = 11
 CM_RECLUSTER_SEED: Final[int] = 0
 CM_RECLUSTER_ITERATIONS: Final[int] = 2
 
-INPUT_GRAPHML: Final[Path] = GRAPH_LEVEL_DATA_PATH / "citation_network_full_low_res.graphml"
+INPUT_GRAPHML: Final[Path] = LOW_RES_GRAPHML
 OUTPUT_DIR: Final[Path] = GRAPH_LEVEL_DATA_PATH / "community_connectivity_modifier"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 MEMBERSHIP_PARQUET: Final[Path] = OUTPUT_DIR / "connectivity_modifier_membership.parquet"
@@ -232,7 +236,10 @@ def _main() -> int:
 #########################
 @dataloader()
 def citation_network(citation_network_path: Path) -> tuple[ig.Graph, dict]:
+    # citation_network_path is the low-res base; graft on the mid/high
+    # `cpm_communities_at_res=*` columns so this graph carries all of RESOLUTIONS.
     graph = ig.Graph.Read_GraphML(str(citation_network_path))
+    merge_higher_band_communities(graph)
     metadata = utils.get_file_metadata(citation_network_path)
     return graph, metadata
 
