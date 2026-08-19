@@ -90,6 +90,12 @@ const state = {
   // the dataset doesn't provide them. See setupResolutionMetrics.
   communitiesByResolution: null, // { default_resolution, by_resolution: {res: {cid: {...}}} }
   resolutionMetrics: null, // { default_resolution, resolutions: [{resolution, modularity, ...}] }
+  // The same whole-graph metrics recomputed on the Connectivity-Modifier-remediated
+  // partition (community_quality_metrics_after_connectivity_modifier.py), overlaid as
+  // an "after CM" second series; and the well-connectedness diagnostic + CM before/after
+  // summary (connectivity_metrics.json) driving the connectivity panels. Both null if absent.
+  resolutionMetricsAfterCm: null, // { default_resolution, resolutions: [{resolution, modularity, ...}] }
+  connectivityMetrics: null, // { default_resolution, resolutions: [{resolution, fraction_well_connected_*, node_coverage_*, ...}] }
   communityResolution: null, // the currently active resolution (string key into by_resolution)
 
   // community_distributions.json: EVERY community's health metrics per
@@ -451,26 +457,40 @@ async function setupResolutionMetrics(cfg) {
   if (tab) tab.hidden = true;
   if (row) row.hidden = true;
 
+  state.resolutionMetricsAfterCm = null;
+  state.connectivityMetrics = null;
+
   let commByRes = null, resMetrics = null, distributions = null;
+  let resMetricsAfterCm = null, connectivityMetrics = null;
   try {
-    [commByRes, resMetrics, distributions] = await Promise.all([
+    [commByRes, resMetrics, distributions, resMetricsAfterCm, connectivityMetrics] = await Promise.all([
       fetch(`${cfg.dir}/communities_by_resolution.json`).then((r) => (r.ok ? r.json() : null)),
       fetch(`${cfg.dir}/resolution_metrics.json`).then((r) => (r.ok ? r.json() : null)),
       // Optional: every community's health metrics, including the ones too small
       // to appear in the legend. Absent => the per-community health views are
       // skipped but the whole-graph charts still render.
       fetch(`${cfg.dir}/community_distributions.json`).then((r) => (r.ok ? r.json() : null)),
+      // Optional: the same whole-graph metrics after Connectivity-Modifier
+      // remediation (a second "after CM" line), and the well-connectedness
+      // diagnostic + CM before/after summary. Absent => those overlays/panels
+      // are skipped, everything else renders unchanged.
+      fetch(`${cfg.dir}/resolution_metrics_after_cm.json`).then((r) => (r.ok ? r.json() : null)),
+      fetch(`${cfg.dir}/connectivity_metrics.json`).then((r) => (r.ok ? r.json() : null)),
     ]);
   } catch {
     commByRes = null;
     resMetrics = null;
     distributions = null;
+    resMetricsAfterCm = null;
+    connectivityMetrics = null;
   }
   if (!commByRes || !resMetrics || !Object.keys(commByRes.by_resolution || {}).length) return;
 
   state.communitiesByResolution = commByRes;
   state.resolutionMetrics = resMetrics;
   state.communityDistributions = distributions;
+  state.resolutionMetricsAfterCm = resMetricsAfterCm;
+  state.connectivityMetrics = connectivityMetrics;
 
   const resolutions = Object.keys(commByRes.by_resolution).sort((a, b) => parseFloat(a) - parseFloat(b));
   const defaultRes = commByRes.default_resolution && commByRes.by_resolution[commByRes.default_resolution]
@@ -1975,7 +1995,7 @@ function compactNumber(y) {
 // points: [{x: "<resolution>", y: number|null}, ...] in resolution order.
 // `unit` labels the y-axis (rotated); the x-axis is always the CPM resolution.
 function renderLineChart(container, opts) {
-  const { title, hint, unit, points, format, thresholdY, bands, band, onPointClick } = opts;
+  const { title, hint, unit, points, pointsAfter, legend, format, thresholdY, bands, band, onPointClick } = opts;
   const xs = points.map((p) => p.x);
   const ys = points.map((p) => p.y).filter((y) => y != null);
   if (!ys.length) return;
@@ -1983,7 +2003,10 @@ function renderLineChart(container, opts) {
   const bandValues = (band || [])
     .flatMap((b) => [b.lo, b.hi])
     .filter((v) => v != null);
-  const yMin0 = Math.min(...ys, ...bandValues), yMax0 = Math.max(...ys, ...bandValues);
+  // An optional "after CM" second series shares the x axis and must be inside the
+  // y range too, so both lines are visible at the same scale.
+  const ysAfter = (pointsAfter || []).map((p) => p.y).filter((y) => y != null);
+  const yMin0 = Math.min(...ys, ...ysAfter, ...bandValues), yMax0 = Math.max(...ys, ...ysAfter, ...bandValues);
   const span = yMax0 - yMin0 || Math.abs(yMax0) || 1;
   const yMin = yMin0 - span * 0.12, yMax = yMax0 + span * 0.12;
   const tickFormat = (y) => compactNumber(y) ?? format(y);
@@ -2082,6 +2105,21 @@ function renderLineChart(container, opts) {
     svg.appendChild(svgEl("circle", { cx: xAt(i), cy: yAt(p.y), r: 2.4, class: "metric-dot" }));
   });
 
+  // Optional "after CM" second series: a dashed line in a contrasting hue (identity
+  // by dash AND colour, never colour alone) sharing this chart's x/y mapping.
+  if (pointsAfter) {
+    let dAfter = "";
+    pointsAfter.forEach((p, i) => {
+      if (p.y == null) return;
+      dAfter += (dAfter ? "L" : "M") + xAt(i).toFixed(1) + "," + yAt(p.y).toFixed(1) + " ";
+    });
+    svg.appendChild(svgEl("path", { d: dAfter, class: "metric-line metric-line-after" }));
+    pointsAfter.forEach((p, i) => {
+      if (p.y == null) return;
+      svg.appendChild(svgEl("circle", { cx: xAt(i), cy: yAt(p.y), r: 2.4, class: "metric-dot metric-dot-after" }));
+    });
+  }
+
   // Crosshair + hover/click capture.
   const crosshair = svgEl("line", {
     x1: 0, y1: CHART_PAD.t, x2: 0, y2: CHART_PAD.t + plotH, class: "metric-crosshair",
@@ -2105,10 +2143,15 @@ function renderLineChart(container, opts) {
     crosshair.setAttribute("x2", xAt(idx));
     crosshair.style.visibility = "visible";
     const p = points[idx];
+    const pa = pointsAfter && pointsAfter[idx];
     const b = band && band[idx];
+    const valueLines = pointsAfter
+      ? `<div class="tt-meta">Before CM: ${p.y != null ? format(p.y) : "n/a"}</div>` +
+        `<div class="tt-meta">After CM: ${pa && pa.y != null ? format(pa.y) : "n/a"}</div>`
+      : `<div class="tt-meta">${escapeHtml(title)}: ${p.y != null ? format(p.y) : "n/a"}</div>`;
     showTooltip(
       `<strong>Resolution ${escapeHtml(xs[idx])}</strong>` +
-      `<div class="tt-meta">${escapeHtml(title)}: ${p.y != null ? format(p.y) : "n/a"}</div>` +
+      valueLines +
       (b && b.lo != null && b.hi != null
         ? `<div class="tt-meta">25th–75th percentile: ${format(b.lo)} – ${format(b.hi)}</div>` : "")
     );
@@ -2124,6 +2167,13 @@ function renderLineChart(container, opts) {
   }
 
   wrap.appendChild(svg);
+  if (legend && legend.length) {
+    const leg = document.createElement("div");
+    leg.className = "metric-band-legend";
+    leg.innerHTML = legend.map((item) =>
+      `<span class="mbl-item"><i style="background:${item.color}"></i>${escapeHtml(item.label)}</span>`).join("");
+    wrap.appendChild(leg);
+  }
   container.appendChild(wrap);
 }
 
@@ -2150,6 +2200,17 @@ function renderResolutionMetricsPanel() {
   const xs = rows.map((r) => String(r.resolution));
   const series = (field) => rows.map((r, i) => ({ x: xs[i], y: r[field] }));
 
+  // Optional "after CM" overlay: the same whole-graph metrics scored on the
+  // Connectivity-Modifier-remediated partition, matched to each resolution key so
+  // it stays aligned with the before series' x axis.
+  const afterRows = state.resolutionMetricsAfterCm && state.resolutionMetricsAfterCm.resolutions;
+  const afterByRes = afterRows ? new Map(afterRows.map((r) => [String(r.resolution), r])) : null;
+  const seriesAfter = (field) =>
+    afterByRes ? xs.map((x) => ({ x, y: afterByRes.get(x) ? (afterByRes.get(x)[field] ?? null) : null })) : undefined;
+  const beforeAfterLegend = afterByRes
+    ? [{ label: "Before CM", color: "var(--accent)" }, { label: "After CM", color: "var(--accent-after)" }]
+    : undefined;
+
   const pct = (y) => `${Math.round(y * 100)}%`;
   const num = (y) => y.toLocaleString(undefined, { maximumFractionDigits: 2 });
   const count = (y) => Math.round(y).toLocaleString();
@@ -2164,28 +2225,35 @@ function renderResolutionMetricsPanel() {
   if (start !== null) plateauBands.push({ i0: start, i1: rows.length - 1 });
 
   renderLineChart(grid, {
-    title: "Communities found", hint: "Number of Leiden/CPM communities detected",
+    title: "Communities found", hint: "Number of Leiden/CPM communities detected (the after-CM structure is in the well-connectedness panels below)",
     unit: "communities", points: series("number_of_communities"), format: count, onPointClick: onResolutionPointClick,
   });
   renderLineChart(grid, {
     title: "Modularity", hint: "Newman–Girvan modularity of the partition",
-    unit: "modularity (unitless)", points: series("modularity"), format: num, onPointClick: onResolutionPointClick,
+    unit: "modularity (unitless)", points: series("modularity"), pointsAfter: seriesAfter("modularity"),
+    legend: beforeAfterLegend, format: num, onPointClick: onResolutionPointClick,
   });
   renderLineChart(grid, {
     title: "Constant Potts model score", hint: "The objective Leiden actually optimizes here",
-    unit: "score (unitless)", points: series("constant_potts_model_score"), format: num, onPointClick: onResolutionPointClick,
+    unit: "score (unitless)", points: series("constant_potts_model_score"),
+    pointsAfter: seriesAfter("constant_potts_model_score"), legend: beforeAfterLegend,
+    format: num, onPointClick: onResolutionPointClick,
   });
   renderLineChart(grid, {
     title: "Coverage", hint: "Share of all citations that stay within a community",
-    unit: "% of all citations", points: series("intra_community_edge_fraction"), format: pct, onPointClick: onResolutionPointClick,
+    unit: "% of all citations", points: series("intra_community_edge_fraction"),
+    pointsAfter: seriesAfter("intra_community_edge_fraction"), legend: beforeAfterLegend,
+    format: pct, onPointClick: onResolutionPointClick,
   });
   renderLineChart(grid, {
     title: "Surprise", hint: "How unlikely this partition's density is under a random null (higher = less likely by chance)",
-    unit: "surprise (nats)", points: series("surprise"), format: num, onPointClick: onResolutionPointClick,
+    unit: "surprise (nats)", points: series("surprise"), pointsAfter: seriesAfter("surprise"),
+    legend: beforeAfterLegend, format: num, onPointClick: onResolutionPointClick,
   });
   renderLineChart(grid, {
     title: "Significance", hint: "Density excess vs. a random graph, summed over communities (undirected only)",
-    unit: "significance (nats)", points: series("significance"), format: num, onPointClick: onResolutionPointClick,
+    unit: "significance (nats)", points: series("significance"), pointsAfter: seriesAfter("significance"),
+    legend: beforeAfterLegend, format: num, onPointClick: onResolutionPointClick,
   });
   renderLineChart(grid, {
     title: "Adjacent-resolution stability", hint: "NMI between each resolution and the next — shaded = a stable plateau",
@@ -2199,6 +2267,77 @@ function renderResolutionMetricsPanel() {
   renderLineChart(grid, {
     title: "Cross-seed variation of information", hint: "Distance from those re-runs, in nats (lower = more reproducible)",
     unit: "distance (nats)", points: series("cross_seed_variation_of_information"), format: num, onPointClick: onResolutionPointClick,
+  });
+
+  renderConnectivityPanels();
+}
+
+// ── Well-connectedness diagnostic + Connectivity Modifier before/after ────────
+// Driven by connectivity_metrics.json (community_connectivity_metrics.py +
+// community_connectivity_modifier.py). The section stays hidden if that file is
+// absent, so datasets without the connectivity DAGs are unaffected.
+function renderConnectivityPanels() {
+  const section = document.getElementById("view-connectivity-section");
+  const grid = document.getElementById("connectivity-grid");
+  const cm = state.connectivityMetrics;
+  if (!section || !grid || !cm || !cm.resolutions || !cm.resolutions.length) return;
+  grid.innerHTML = "";
+  section.hidden = false;
+
+  const rows = cm.resolutions.slice().sort((a, b) => a.resolution - b.resolution);
+  const xs = rows.map((r) => String(r.resolution));
+  const series = (field) => rows.map((r, i) => ({ x: xs[i], y: r[field] }));
+  const constant = (v) => xs.map((x) => ({ x, y: v }));
+  const beforeAfterLegend = [
+    { label: "Before CM", color: "var(--accent)" }, { label: "After CM", color: "var(--accent-after)" }];
+
+  const pct = (y) => `${Math.round(y * 100)}%`;
+  const num = (y) => y.toLocaleString(undefined, { maximumFractionDigits: 2 });
+
+  // Well-connected % of substantive communities (diagnostic on the original
+  // partition) vs. after CM, which is 100% by construction — a validation line.
+  renderLineChart(grid, {
+    title: "Well-connected communities",
+    hint: "Share of substantive communities whose minimum edge cut exceeds log10(n). After CM this is 100% by construction.",
+    unit: "% of substantive", points: series("fraction_well_connected_over_substantive_communities"),
+    pointsAfter: constant(1), legend: beforeAfterLegend, format: pct, onPointClick: onResolutionPointClick,
+  });
+
+  // Node coverage: share of papers in a kept community, before vs. after CM.
+  renderLineChart(grid, {
+    title: "Node coverage",
+    hint: "Share of papers in a kept community (size ≥ 11). CM trims weakly-attached papers, so coverage falls — the cost of remediation.",
+    unit: "% of papers", points: series("node_coverage_before_in_communities_at_least_min_size"),
+    pointsAfter: series("node_coverage_after"), legend: beforeAfterLegend, format: pct, onPointClick: onResolutionPointClick,
+  });
+
+  // Median minimum edge cut of substantive communities.
+  renderLineChart(grid, {
+    title: "Median minimum edge cut",
+    hint: "Median minimum edge cut of substantive communities — how many citations must be cut to split the typical one.",
+    unit: "edges", points: series("median_minimum_edge_cut_size_over_substantive_communities"),
+    format: num, onPointClick: onResolutionPointClick,
+  });
+
+  // How CM transformed each substantive community (the Fig. 3 taxonomy).
+  const taxonomyBands = [
+    { label: "Extant", color: "#4a9d7f" },
+    { label: "Reduced", color: "#e0a34b" },
+    { label: "Split", color: "#7c74d6" },
+    { label: "Degraded", color: "#8a94a6" },
+  ];
+  const taxonomyRows = rows.map((r) => ({
+    resolution: String(r.resolution),
+    counts: [
+      r.number_of_substantive_communities_extant, r.number_of_substantive_communities_reduced,
+      r.number_of_substantive_communities_split, r.number_of_substantive_communities_degraded,
+    ],
+    total: r.number_of_original_substantive_communities,
+  }));
+  renderStackedBars(grid, {
+    title: "What CM did to each community",
+    hint: "Substantive communities by transformation: extant (unchanged), reduced (trimmed), split (≥2 well-connected pieces), degraded (dissolved below the size floor).",
+    rows: taxonomyRows, bands: taxonomyBands, onBarClick: onResolutionPointClick,
   });
 }
 
@@ -2278,6 +2417,9 @@ function percentileOfSorted(sorted, p) {
 // Stacked bar per resolution, segments in fixed band order, 2px surface gaps.
 function renderStackedBars(container, opts) {
   const { title, hint, rows, onBarClick } = opts;
+  // Segments default to the community size bands, but any {label,color} list works
+  // (e.g. the Connectivity Modifier's extant/reduced/split/degraded taxonomy).
+  const bands = opts.bands || SIZE_BANDS;
   const W = 300, H = 200, PAD = { l: 46, r: 12, t: 12, b: 42 };
   const plotW = W - PAD.l - PAD.r, plotH = H - PAD.t - PAD.b;
 
@@ -2320,7 +2462,7 @@ function renderStackedBars(container, opts) {
   rows.forEach((row, i) => {
     const cx = PAD.l + bandW * (i + 0.5);
     let cursor = 0;
-    SIZE_BANDS.forEach((band, b) => {
+    bands.forEach((band, b) => {
       const count = row.counts[b];
       if (!count) return;
       const y0 = yAt(cursor), y1 = yAt(cursor + count);
@@ -2335,7 +2477,7 @@ function renderStackedBars(container, opts) {
         `<strong>Resolution ${escapeHtml(row.resolution)}</strong>` +
         `<div class="tt-meta">${escapeHtml(band.label)}: ${count.toLocaleString()} of ` +
         `${row.total.toLocaleString()} communities (${(100 * count / row.total).toFixed(1)}%)</div>` +
-        `<div class="tt-meta">holding ${row.nodeShares[b].toFixed(1)}% of papers</div>`));
+        (row.nodeShares ? `<div class="tt-meta">holding ${row.nodeShares[b].toFixed(1)}% of papers</div>` : "")));
       rect.addEventListener("mousemove", positionTooltipAt);
       rect.addEventListener("mouseleave", hideTooltipEl);
       if (onBarClick) {
@@ -2359,7 +2501,7 @@ function renderStackedBars(container, opts) {
   // Legend: identity is never colour-alone.
   const legend = document.createElement("div");
   legend.className = "metric-band-legend";
-  legend.innerHTML = SIZE_BANDS.map((b) =>
+  legend.innerHTML = bands.map((b) =>
     `<span class="mbl-item"><i style="background:${b.color}"></i>${escapeHtml(b.label)}</span>`).join("");
   wrap.appendChild(legend);
   container.appendChild(wrap);
