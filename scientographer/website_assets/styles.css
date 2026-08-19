@@ -8,6 +8,9 @@
   --text-dim: #9aa3b2;
   --accent: #4ea1ff;
   --accent-dim: rgba(78, 161, 255, 0.4);
+  /* "After CM" second series: a rose distinct from the blue accent and the amber
+     threshold, legible on the dark panels. Identity is dash + hue, not colour alone. */
+  --accent-after: #e06c9f;
 }
 
 * { box-sizing: border-box; }
@@ -652,6 +655,8 @@ details.about p {
 .metric-band { fill: #ffb14e; opacity: 0.10; }
 .metric-line { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; }
 .metric-dot { fill: var(--accent); }
+.metric-line-after { stroke: var(--accent-after); stroke-dasharray: 4 3; }
+.metric-dot-after { fill: var(--accent-after); }
 .metric-tick { fill: var(--text-dim); font-size: 8px; }
 .metric-axis-title { fill: var(--text-dim); font-size: 8.5px; font-weight: 600; }
 .metric-crosshair { stroke: var(--text-dim); stroke-width: 1; stroke-dasharray: 2 2; }

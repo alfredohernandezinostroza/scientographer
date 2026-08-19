@@ -75,6 +75,21 @@
       </div>
       <div id="metrics-grid"></div>
 
+      <!-- Well-connectedness diagnostic (community_connectivity_metrics.py) and
+           the Connectivity Modifier before/after (community_connectivity_modifier.py),
+           via connectivity_metrics.json. Hidden if that file is absent. -->
+      <section id="view-connectivity-section" hidden>
+        <div class="metrics-head">
+          <h2>Well-connectedness &amp; the Connectivity Modifier</h2>
+          <p class="meta">A community is <strong>well-connected</strong> only if its minimum edge cut
+             exceeds log<sub>10</sub>(n) &mdash; deleting a handful of edges shouldn&rsquo;t split it. The
+             <strong>Connectivity Modifier</strong> enforces that by trimming or splitting communities
+             that fail. These panels show the diagnostic and what remediation costs; the before/after
+             lines on the charts above are that same remediation scored on every quality metric.</p>
+        </div>
+        <div id="connectivity-grid" class="metrics-grid-like"></div>
+      </section>
+
       <!-- Per-community health: are the detected communities real, or artifacts?
            Driven by community_distributions.json (every community, including the
            singletons that never reach the map legend). Hidden if absent. -->

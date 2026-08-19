@@ -470,6 +470,69 @@ def _resolution_plateau_flags(memberships: list[np.ndarray], resolutions: list[f
     return result
 
 
+def _structural_partition_metrics(
+    citation_network: ig.Graph,
+    undirected_networkx_graph: nx.Graph,
+    membership: np.ndarray,
+    resolution: float,
+) -> tuple[list[dict], dict]:
+    """Per-community and partition-level *structural* quality metrics for one
+    membership vector -- everything that depends only on the graph and the
+    partition: modularity, the constant Potts model score, surprise,
+    significance, coverage, per-community conductance/density/surprise, and the
+    population-explicit summaries.
+
+    Excludes cross-seed stability and resolution-plateau detection, which are
+    properties of the Leiden reseeding *at* a resolution and have no meaning for
+    an arbitrary partition (e.g. a Connectivity-Modifier-remediated one). Factored
+    out of community_quality_metrics_for_resolution so the identical code scores
+    both the original partition and the CM partition, keeping the before/after
+    comparison exact -- see community_quality_metrics_after_connectivity_modifier.py.
+    """
+    total_directed_edges = citation_network.ecount()
+    n_vertices = citation_network.vcount()
+    edge_counts = _directed_community_edge_counts(citation_network, membership)
+    total_internal_edges = sum(c["internal_directed_edge_count"] for c in edge_counts.values())
+
+    per_community = []
+    for community_id, counts in edge_counts.items():
+        conductances = _directed_conductance(counts, total_directed_edges)
+        per_community.append({
+            "resolution": resolution,
+            "community_id": community_id,
+            "community_size": counts["size"],
+            "internal_directed_edge_count": counts["internal_directed_edge_count"],
+            "boundary_edge_count": counts["boundary_edge_count"],
+            "out_boundary_edge_count": counts["out_boundary_edge_count"],
+            "in_boundary_edge_count": counts["in_boundary_edge_count"],
+            "conductance": conductances["conductance"],
+            "conductance_out": conductances["conductance_out"],
+            "conductance_in": conductances["conductance_in"],
+            "internal_edge_density": _directed_internal_edge_density(counts),
+            "internal_edge_surprise": _community_surprise(
+                counts["internal_directed_edge_count"], counts["size"],
+                n_vertices, total_directed_edges),
+        })
+
+    per_partition = {
+        "resolution": resolution,
+        "number_of_communities": len(edge_counts),
+        "modularity": _directed_modularity(citation_network, membership),
+        "constant_potts_model_score": _constant_potts_model_score(
+            citation_network, membership, resolution),
+        "surprise": _directed_surprise(
+            n_vertices, total_directed_edges,
+            [c["size"] for c in edge_counts.values()], total_internal_edges),
+        "significance": _significance(undirected_networkx_graph, membership),
+        "mean_internal_edge_density": float(np.mean(
+            [m["internal_edge_density"] for m in per_community])) if per_community else 0.0,
+        "intra_community_edge_fraction": _intra_community_edge_fraction(
+            total_internal_edges, total_directed_edges),
+        **_summarize_community_metrics(per_community),
+    }
+    return per_community, per_partition
+
+
 ##################
 ##     Main     ##
 ##################
@@ -607,57 +670,19 @@ def community_quality_metrics_for_resolution(
     community edge/conductance/density metrics, plus partition-level
     modularity, constant Potts model score, surprise, significance,
     coverage, cross-seed stability, and plateau status."""
-    total_directed_edges = citation_network.ecount()
-    n_vertices = citation_network.vcount()
-    edge_counts = _directed_community_edge_counts(citation_network, community_membership)
-    total_internal_edges = sum(c["internal_directed_edge_count"] for c in edge_counts.values())
-
-    per_community = []
-    for community_id, counts in edge_counts.items():
-        conductances = _directed_conductance(counts, total_directed_edges)
-        per_community.append({
-            "resolution": resolution,
-            "community_id": community_id,
-            "community_size": counts["size"],
-            "internal_directed_edge_count": counts["internal_directed_edge_count"],
-            "boundary_edge_count": counts["boundary_edge_count"],
-            "out_boundary_edge_count": counts["out_boundary_edge_count"],
-            "in_boundary_edge_count": counts["in_boundary_edge_count"],
-            "conductance": conductances["conductance"],
-            "conductance_out": conductances["conductance_out"],
-            "conductance_in": conductances["conductance_in"],
-            "internal_edge_density": _directed_internal_edge_density(counts),
-            "internal_edge_surprise": _community_surprise(
-                counts["internal_directed_edge_count"], counts["size"],
-                n_vertices, total_directed_edges),
-        })
+    per_community, per_partition = _structural_partition_metrics(
+        citation_network, undirected_networkx_graph, community_membership, resolution)
 
     stability = _cross_seed_stability(
         citation_network, resolution, n_iterations, community_membership, tuple(stability_seeds))
     plateau = resolution_plateau_flags[resolution]
+    per_partition = {**per_partition, **stability, **plateau}
 
-    per_partition = {
-        "resolution": resolution,
-        "number_of_communities": len(edge_counts),
-        "modularity": _directed_modularity(citation_network, community_membership),
-        "constant_potts_model_score": _constant_potts_model_score(
-            citation_network, community_membership, resolution),
-        "surprise": _directed_surprise(
-            n_vertices, total_directed_edges,
-            [c["size"] for c in edge_counts.values()], total_internal_edges),
-        "significance": _significance(undirected_networkx_graph, community_membership),
-        "mean_internal_edge_density": float(np.mean(
-            [m["internal_edge_density"] for m in per_community])) if per_community else 0.0,
-        "intra_community_edge_fraction": _intra_community_edge_fraction(
-            total_internal_edges, total_directed_edges),
-        **_summarize_community_metrics(per_community),
-        **stability,
-        **plateau,
-    }
+    number_of_communities = per_partition["number_of_communities"]
     logger.info(
         "resolution=%s: %d communities, modularity=%.4f, constant_potts_model_score=%.2f, "
         "surprise=%.2f, significance=%.2f",
-        resolution, len(edge_counts), per_partition["modularity"],
+        resolution, number_of_communities, per_partition["modularity"],
         per_partition["constant_potts_model_score"], per_partition["surprise"],
         per_partition["significance"],
     )
@@ -665,10 +690,10 @@ def community_quality_metrics_for_resolution(
         "resolution=%s health: %d/%d communities statistically dense (holding %.1f%% of papers), "
         "%d singletons (%.1f%% of communities but only %.1f%% of papers), "
         "median conductance over substantive communities=%.3f",
-        resolution, per_partition["number_of_statistically_dense_communities"], len(edge_counts),
+        resolution, per_partition["number_of_statistically_dense_communities"], number_of_communities,
         100 * per_partition["share_of_nodes_in_statistically_dense_communities"],
         per_partition["number_of_singleton_communities"],
-        100 * per_partition["number_of_singleton_communities"] / max(len(edge_counts), 1),
+        100 * per_partition["number_of_singleton_communities"] / max(number_of_communities, 1),
         100 * per_partition["share_of_nodes_in_singleton_communities"],
         per_partition["conductance_median_over_substantive_communities"],
     )

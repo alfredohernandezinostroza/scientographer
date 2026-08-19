@@ -66,6 +66,15 @@ from motor_learning_network.community_quality_metrics import (
     PER_COMMUNITY_PARQUET,
     PER_PARTITION_PARQUET,
 )
+from motor_learning_network.community_quality_metrics_after_connectivity_modifier import (
+    PER_PARTITION_PARQUET as AFTER_CM_PARTITION_PARQUET,
+)
+from motor_learning_network.community_connectivity_metrics import (
+    PER_PARTITION_PARQUET as CONNECTIVITY_DIAGNOSTIC_PARTITION_PARQUET,
+)
+from motor_learning_network.community_connectivity_modifier import (
+    PER_PARTITION_PARQUET as CONNECTIVITY_MODIFIER_PARTITION_PARQUET,
+)
 
 ###################
 ##   Constants   ##
@@ -254,6 +263,9 @@ def _main() -> int:
         topic_metrics_path=GRAPH_LEVEL_DATA_PATH / "topic_community" / "topic_community_metrics.json",
         per_community_metrics_path=PER_COMMUNITY_PARQUET,
         per_partition_metrics_path=PER_PARTITION_PARQUET,
+        after_cm_partition_metrics_path=AFTER_CM_PARTITION_PARQUET,
+        connectivity_diagnostic_partition_path=CONNECTIVITY_DIAGNOSTIC_PARTITION_PARQUET,
+        connectivity_modifier_partition_path=CONNECTIVITY_MODIFIER_PARTITION_PARQUET,
     )
     outputs = ["assembled_website"]
     import __main__
@@ -415,13 +427,63 @@ def resolution_metrics_records(per_partition_quality_df: pd.DataFrame) -> list[d
     one half of the ramp. The population-explicit summaries computed in
     community_quality_metrics.py (over substantive communities) are used instead
     and flow through automatically with the rest of the parquet columns."""
+    return _partition_records(per_partition_quality_df)
+
+
+def _partition_records(df: pd.DataFrame) -> list[dict]:
+    """A per-partition parquet as a resolution-sorted list of records, NaN/inf →
+    null so it survives json.dump/JSON.parse. Shared by every per-resolution
+    metrics source (quality before, quality after CM, connectivity diagnostic)."""
     records = []
-    for row in per_partition_quality_df.sort_values("resolution").itertuples(index=False):
+    for row in df.sort_values("resolution").itertuples(index=False):
         records.append({
             k: (None if isinstance(v, float) and not math.isfinite(v) else v)
             for k, v in row._asdict().items()
         })
     return records
+
+
+def per_partition_quality_after_cm_df(after_cm_partition_metrics_path: Path) -> pd.DataFrame:
+    """Per-resolution quality metrics of the Connectivity-Modifier-remediated
+    partition (same structural schema as the 'before' metrics, minus the
+    stability/plateau columns), from
+    community_quality_metrics_after_connectivity_modifier.py."""
+    return pd.read_parquet(after_cm_partition_metrics_path)
+
+
+def connectivity_diagnostic_partition_df(connectivity_diagnostic_partition_path: Path) -> pd.DataFrame:
+    """Per-resolution well-connectedness diagnostic (fraction of communities whose
+    minimum edge cut exceeds log10(n), median min-cut, ...) from
+    community_connectivity_metrics.py."""
+    return pd.read_parquet(connectivity_diagnostic_partition_path)
+
+
+def connectivity_modifier_partition_df(connectivity_modifier_partition_path: Path) -> pd.DataFrame:
+    """Per-resolution Connectivity Modifier before/after summary (node coverage,
+    extant/reduced/split/degraded taxonomy) from
+    community_connectivity_modifier.py."""
+    return pd.read_parquet(connectivity_modifier_partition_path)
+
+
+def resolution_metrics_after_cm_records(per_partition_quality_after_cm_df: pd.DataFrame) -> list[dict]:
+    """The after-CM whole-graph metrics vs. resolution, same record shape as
+    resolution_metrics_records so the frontend can overlay it as a second series."""
+    return _partition_records(per_partition_quality_after_cm_df)
+
+
+def connectivity_metrics_records(
+    connectivity_diagnostic_partition_df: pd.DataFrame,
+    connectivity_modifier_partition_df: pd.DataFrame,
+) -> list[dict]:
+    """The well-connectedness diagnostic merged with the Connectivity Modifier
+    before/after summary, one record per resolution — the source for the Metrics
+    tab's connectivity panels (well-connected %, node coverage before/after,
+    transformation taxonomy, median min-cut)."""
+    modifier_by_resolution = {r["resolution"]: r for r in _partition_records(connectivity_modifier_partition_df)}
+    merged = []
+    for diagnostic in _partition_records(connectivity_diagnostic_partition_df):
+        merged.append({**diagnostic, **modifier_by_resolution.get(diagnostic["resolution"], {})})
+    return merged
 
 
 def community_distribution_records(per_community_quality_df: pd.DataFrame) -> dict:
@@ -552,6 +614,24 @@ def save_resolution_metrics_json(resolution_metrics_records: list[dict]) -> dict
 
 
 @datasaver()
+def save_resolution_metrics_after_cm_json(resolution_metrics_after_cm_records: list[dict]) -> dict:
+    path = _data_dir() / "resolution_metrics_after_cm.json"
+    payload = {"default_resolution": str(COMMUNITY_RESOLUTION), "resolutions": resolution_metrics_after_cm_records}
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, separators=(",", ":"))
+    return {"path": str(path), "n_resolutions": len(resolution_metrics_after_cm_records)}
+
+
+@datasaver()
+def save_connectivity_metrics_json(connectivity_metrics_records: list[dict]) -> dict:
+    path = _data_dir() / "connectivity_metrics.json"
+    payload = {"default_resolution": str(COMMUNITY_RESOLUTION), "resolutions": connectivity_metrics_records}
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, separators=(",", ":"))
+    return {"path": str(path), "n_resolutions": len(connectivity_metrics_records)}
+
+
+@datasaver()
 def save_community_distributions_json(community_distribution_records: dict) -> dict:
     path = _data_dir() / "community_distributions.json"
     with open(path, "w", encoding="utf-8") as f:
@@ -589,6 +669,8 @@ def assembled_website(
     save_clusters_json: dict,
     save_communities_by_resolution_json: dict,
     save_resolution_metrics_json: dict,
+    save_resolution_metrics_after_cm_json: dict,
+    save_connectivity_metrics_json: dict,
     save_community_distributions_json: dict,
     save_abstracts_json: dict,
     save_edges_bins: dict,
@@ -605,6 +687,8 @@ def assembled_website(
         "clusters": save_clusters_json["n_clusters"],
         "communities_total": save_communities_by_resolution_json["n_communities_total"],
         "resolutions": save_resolution_metrics_json["n_resolutions"],
+        "resolutions_after_cm": save_resolution_metrics_after_cm_json["n_resolutions"],
+        "connectivity_resolutions": save_connectivity_metrics_json["n_resolutions"],
         "communities_profiled": save_community_distributions_json["n_communities_total"],
         "abstracts": save_abstracts_json["n_abstracts"],
         "edges": save_edges_bins["n_edges"],
