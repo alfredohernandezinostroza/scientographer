@@ -60,6 +60,11 @@ from motor_learning_network.constants import (
     DEFAULT_UI_USERNAME,
     TEAM_NAME,
 )
+from motor_learning_network.community_resolution_bands import (
+    RESOLUTIONS,
+    LOW_RES_GRAPHML,
+    merge_higher_band_communities,
+)
 
 ###################
 ##   Constants   ##
@@ -70,9 +75,8 @@ logger = logging.getLogger(__name__)
 
 EXECUTE = True
 
-# Must match the resolution sweep in get_network_communities_and_stats.py --
-# these select which `cpm_communities_at_res=<r>` columns to read.
-RESOLUTIONS: Final[list[float]] = [round(i * 0.001, 3) for i in range(1, 10)]
+# RESOLUTIONS (the full three-band sweep 0.001-0.9) is imported from
+# community_resolution_bands so every analysis DAG sweeps the identical set.
 
 # A community this size or larger is treated as "substantive" when summarizing
 # per-community metrics. Matches community_quality_metrics.py and the cutoff the
@@ -81,7 +85,7 @@ RESOLUTIONS: Final[list[float]] = [round(i * 0.001, 3) for i in range(1, 10)]
 # sees on the map, not the singleton artifact mass.
 SUBSTANTIVE_COMMUNITY_MIN_SIZE: Final[int] = 30
 
-INPUT_GRAPHML: Final[Path] = GRAPH_LEVEL_DATA_PATH / "citation_network_full_low_res.graphml"
+INPUT_GRAPHML: Final[Path] = LOW_RES_GRAPHML
 OUTPUT_DIR: Final[Path] = GRAPH_LEVEL_DATA_PATH / "community_connectivity_metrics"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 PER_COMMUNITY_PARQUET: Final[Path] = OUTPUT_DIR / "community_connectivity_metrics_per_community.parquet"
@@ -247,7 +251,11 @@ def _main() -> int:
 #########################
 @dataloader()
 def citation_network(citation_network_path: Path) -> tuple[ig.Graph, dict]:
+    # citation_network_path is the low-res base; merge_higher_band_communities grafts
+    # the mid/high `cpm_communities_at_res=*` columns on so this one graph carries all
+    # of RESOLUTIONS (the three bands share identical topology).
     graph = ig.Graph.Read_GraphML(str(citation_network_path))
+    merge_higher_band_communities(graph)
     metadata = utils.get_file_metadata(citation_network_path)
     return graph, metadata
 
