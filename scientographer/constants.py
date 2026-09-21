@@ -33,3 +33,14 @@ TEAM_NAME = os.getenv('TEAM_NAME')
 GOOGLE_DRIVE_FOLDER_ID = os.getenv('GOOGLE_DRIVE_FOLDER_ID')
 OPENCITATIONS_ACCESS_TOKEN = os.getenv('OPENCITATIONS_ACCESS_TOKEN')
 OPENALEX_API_KEY = os.getenv('OPENALEX_API_KEY')
+SCOPUS_API_KEY = os.getenv('SCOPUS_API_KEY')
+
+# SOCKS5 endpoint of the institutional (JHU) tunnel, when one is running.
+# Empty means "go direct" -- every module using it must still work unproxied,
+# just with less publisher entitlement. Set it inline per run rather than in
+# .env, because the tunnel's underlying DSID cookie expires after a few hours:
+#   INSTITUTIONAL_PROXY_URL=socks5h://127.0.0.1:11080 pixi run python -m ...
+# Use socks5h:// rather than socks5://: the trailing "h" resolves DNS *through*
+# the tunnel. With plain socks5:// the lookup happens locally, which both leaks
+# it and can return an address that only makes sense on this side.
+INSTITUTIONAL_PROXY_URL = os.getenv('INSTITUTIONAL_PROXY_URL', '')
