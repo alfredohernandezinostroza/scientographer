@@ -1,8 +1,8 @@
 """Well-connectedness (minimum-edge-cut) diagnostic for the Leiden/CPM communities.
 
-``get_network_communities_and_stats.py`` runs Leiden with the constant Potts
-model (CPM) across several resolutions and writes the resulting community
-assignments as per-vertex ``cpm_communities_at_res=<resolution>`` columns.
+``detect_communities`` runs Leiden with the constant Potts model (CPM) across
+several resolutions and writes the resulting community assignments as
+per-vertex ``cpm_communities_at_res=<resolution>`` columns.
 ``community_quality_metrics.py`` scores those communities on *density* (internal
 edge density, internal edge surprise) and *boundary tightness* (conductance).
 
@@ -14,7 +14,7 @@ minimum edge cut is ``<= f(n)`` with ``f(n) = log10(n)`` -- i.e. deleting a
 handful of edges splits it in two. A community can be dense (high surprise) yet
 still be poorly connected: two dense blobs joined by a single citation have a
 minimum cut of 1. The paper's central empirical finding is that Leiden-CPM at
-*small* resolutions -- exactly this project's regime (0.001-0.009) -- produces
+*small* resolutions -- the regime citation networks usually need -- produces
 the fewest well-connected communities, so this is where the test bites.
 
 This is a diagnostic only: it measures well-connectedness, it does not re-cluster
@@ -36,34 +36,33 @@ Outputs (data/graph_level_data/community_connectivity_metrics/):
     long form: resolution x {number_of_communities, fraction_well_connected_*, ...}
 """
 
-import sys
-import math
-import logging
-from pathlib import Path
-from typing import Final
 from collections import defaultdict
+import logging
+import math
+from pathlib import Path
+import sys
+from typing import Final
 
+from hamilton import driver
+from hamilton.function_modifiers import dataloader, datasaver, group, parameterize, source, value
+from hamilton.io import utils
+import hamilton.log_setup
+import igraph as ig
 import numpy as np
 import pandas as pd
-import igraph as ig
 
-from hamilton.function_modifiers import dataloader, datasaver, value, source, group, parameterize
-from hamilton.io import utils
-from hamilton_sdk import adapters
-from hamilton import driver
-import hamilton.log_setup
-
-from motor_learning_network.constants import (
-    GRAPH_LEVEL_DATA_PATH,
+from scientographer.community_resolution_bands import (
+    CANONICAL_RESOLUTION,
+    LOW_RES_GRAPHML,
+    RESOLUTIONS,
+    merge_higher_band_communities,
+)
+from scientographer.config import (
     FIGURES_PATH,
+    draw_dag,
+    ensure_dirs,
     params,
     tracker_adapters,
-)
-from motor_learning_network.community_resolution_bands import (
-    CANONICAL_RESOLUTION,
-    RESOLUTIONS,
-    LOW_RES_GRAPHML,
-    merge_higher_band_communities,
 )
 
 ###################
@@ -87,7 +86,6 @@ SUBSTANTIVE_COMMUNITY_MIN_SIZE: Final[int] = int(params("communities")["substant
 
 INPUT_GRAPHML: Final[Path] = LOW_RES_GRAPHML
 OUTPUT_DIR: Final[Path] = Path(params("graph")["analysis_output_dir"]) / "community_connectivity_metrics"
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 PER_COMMUNITY_PARQUET: Final[Path] = OUTPUT_DIR / "community_connectivity_metrics_per_community.parquet"
 PER_PARTITION_PARQUET: Final[Path] = OUTPUT_DIR / "community_connectivity_metrics_per_partition.parquet"
 # DVC-facing summaries (see community_quality_metrics.py): scalars at the canonical
@@ -220,6 +218,7 @@ def _summarize_connectivity_metrics(per_community: list[dict]) -> dict:
 ##     Main     ##
 ##################
 def _main() -> int:
+    ensure_dirs(FIGURES_PATH, OUTPUT_DIR)
     inputs = dict(
         citation_network_path=INPUT_GRAPHML,
     )
@@ -236,15 +235,7 @@ def _main() -> int:
         .build()
     )
     dr.validate_execution(outputs, inputs=inputs)
-    dr.display_all_functions(
-        FIGURES_PATH / f"{CURRENT_FILE_NAME}_all_functions.png",
-        keep_dot=True, deduplicate_inputs=True,
-    )
-    dr.visualize_execution(
-        outputs, inputs=inputs,
-        output_file_path=FIGURES_PATH / f"{CURRENT_FILE_NAME}.png",
-        keep_dot=False, deduplicate_inputs=True,
-    )
+    draw_dag(dr, CURRENT_FILE_NAME, outputs, inputs)
     if EXECUTE:
         dr.execute(outputs, inputs=inputs)
     return 0
@@ -360,7 +351,7 @@ def save_dvc_metrics_and_plots(per_partition_connectivity_metrics_df: pd.DataFra
     """See DVC_METRICS_JSON / DVC_PLOTS_CSV: what `dvc metrics` and `dvc plots` read."""
     import json
 
-    from motor_learning_network.community_quality_metrics import _dvc_metrics_at_canonical_resolution
+    from scientographer.community_quality_metrics import _dvc_metrics_at_canonical_resolution
 
     DVC_METRICS_JSON.parent.mkdir(parents=True, exist_ok=True)
     DVC_PLOTS_CSV.parent.mkdir(parents=True, exist_ok=True)

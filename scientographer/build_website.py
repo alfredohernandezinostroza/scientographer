@@ -52,6 +52,7 @@ Serve with ``python -m http.server 8123 --directory reports/website``.
 """
 
 from collections import Counter, defaultdict
+import html
 import json
 import logging
 import math
@@ -68,7 +69,7 @@ from hamilton.function_modifiers import datasaver, unpack_fields
 import hamilton.log_setup
 import pandas as pd
 
-from motor_learning_network.constants import FIGURES_PATH, params, tracker_adapters
+from scientographer.config import FIGURES_PATH, draw_dag, ensure_dirs, params, tracker_adapters
 
 ###################
 ##   Constants   ##
@@ -133,6 +134,7 @@ DEFAULT_INPUTS: Final[dict] = dict(
     community_keyword_scores_path=_optional_path("community_keyword_scores"),
     default_resolution=DEFAULT_COMMUNITY_RESOLUTION,
     website_dir=Path(_cfg["output_dir"]),
+    site_title=str(_cfg.get("title") or "Citation map"),
 )
 
 
@@ -351,23 +353,23 @@ def _partition_records(df: pd.DataFrame) -> list[dict]:
 
 
 _WORDCLOUD_RESOLUTION = re.compile(r"_at_(?P<resolution>[0-9.]+)_")
-_UNTIL_YEAR = re.compile(r"until_(?P<year>\d{4})")
+_WORDCLOUD_GRAPH = re.compile(r"^(?:tdidf|frequency)_(?P<graph>.+?)_wordcloud_at_")
 
 
 def discover_wordcloud_figures(keywords_level_data_path: Path = WORDCLOUDS_DIR) -> list[dict]:
-    """The word-cloud SVGs written by find_keywords_per_cluster_noverlap.py, as
+    """The word-cloud SVGs written by wordclouds.py, as
     figure-manifest entries. The graph and resolution are parsed from the path
-    (``until_<year>_wordcloud_noverlap/wordclouds/<kind>_until_<year>_wordcloud_at_<r>_...svg``)."""
+    (``<run>/wordclouds/<kind>_[<graph_label>_]wordcloud_at_<resolution>_...svg``)."""
     root = Path(keywords_level_data_path)
-    # Either the study's tree of per-year run dirs, or one run dir on its own.
+    # Either a tree of per-run dirs (<run>/wordclouds/*.svg) or one run dir on its own.
     found = sorted(set(root.glob("*/wordclouds/*.svg")) | set(root.glob("wordclouds/*.svg")))
     entries = []
     for svg in found:
         stem = svg.stem
         res_match = _WORDCLOUD_RESOLUTION.search(stem)
-        year_match = _UNTIL_YEAR.search(stem)
+        graph_match = _WORDCLOUD_GRAPH.search(stem)
         kind = "frequency-wordcloud" if stem.startswith("frequency") else "tfidf-wordcloud"
-        graph = f"until_{year_match.group('year')}" if year_match else None
+        graph = graph_match.group("graph") if graph_match else None
         resolution = float(res_match.group("resolution")) if res_match else None
         title = ("Keyword frequency" if kind == "frequency-wordcloud" else "Distinguishing keywords (TF-IDF)")
         if graph:
@@ -382,6 +384,7 @@ def discover_wordcloud_figures(keywords_level_data_path: Path = WORDCLOUDS_DIR) 
 ##     Main     ##
 ##################
 def _main() -> int:
+    ensure_dirs(FIGURES_PATH)
     inputs = dict(DEFAULT_INPUTS)
     inputs["figure_manifest"] = discover_wordcloud_figures()
     outputs = ["assembled_website"]
@@ -393,11 +396,7 @@ def _main() -> int:
         .build()
     )
     dr.validate_execution(outputs, inputs=inputs)
-    dr.display_all_functions(
-        FIGURES_PATH / f"{CURRENT_FILE_NAME}_all_functions.png", keep_dot=True, deduplicate_inputs=True)
-    dr.visualize_execution(
-        outputs, inputs=inputs,
-        output_file_path=FIGURES_PATH / f"{CURRENT_FILE_NAME}.png", keep_dot=False, deduplicate_inputs=True)
+    draw_dag(dr, CURRENT_FILE_NAME, outputs, inputs)
     if EXECUTE:
         dr.execute(outputs, inputs=inputs)
     return 0
@@ -907,13 +906,18 @@ def assembled_website(
     save_abstracts_json: dict,
     save_edges_bins: dict,
     website_dir: Path,
+    site_title: str,
 ) -> dict:
     """Copy the vendored frontend next to the freshly written data bundle,
     producing a directory ready to serve."""
     website_dir = Path(website_dir)
     website_dir.mkdir(parents=True, exist_ok=True)
     for asset in FRONTEND_FILES:
-        shutil.copy2(ASSETS_DIR / asset, website_dir / asset)
+        if asset == "index.html":
+            page = (ASSETS_DIR / asset).read_text(encoding="utf-8")
+            (website_dir / asset).write_text(page.replace("{{SITE_TITLE}}", html.escape(site_title)), encoding="utf-8")
+        else:
+            shutil.copy2(ASSETS_DIR / asset, website_dir / asset)
     manifest = {
         "website_dir": str(website_dir),
         "data_dir": str(website_dir / DATA_SUBDIR),

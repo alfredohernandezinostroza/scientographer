@@ -1,16 +1,16 @@
 import math
 
+import igraph as ig
 import numpy as np
 import pytest
-import igraph as ig
 
-from motor_learning_network.community_connectivity_metrics import (
-    _well_connectedness_threshold,
-    _community_vertex_groups,
-    _minimum_edge_cut_of_community,
-    _is_well_connected,
-    _summarize_connectivity_metrics,
+from scientographer.community_connectivity_metrics import (
     SUBSTANTIVE_COMMUNITY_MIN_SIZE,
+    _community_vertex_groups,
+    _is_well_connected,
+    _minimum_edge_cut_of_community,
+    _summarize_connectivity_metrics,
+    _well_connectedness_threshold,
 )
 
 

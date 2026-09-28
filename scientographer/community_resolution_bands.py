@@ -1,29 +1,18 @@
 """Single source of truth for the Leiden/CPM resolution sweep and the graph it lives on.
 
-``get_network_communities_and_stats.py`` ran Leiden with the constant Potts model
-(CPM) across a *three-band* resolution sweep and stored the resulting community
-assignments as per-vertex ``cpm_communities_at_res=<resolution>`` columns. The three
-bands were written to three separate graphml files that share identical topology
-(same 22,982 nodes / 183,926 edges, same vertex names) and differ only in which
-``cpm_communities_at_res=*`` columns they carry:
+A partition is stored on the graph as one ``cpm_communities_at_res=<resolution>``
+vertex column per resolution (``detect_communities`` writes them). Every analysis
+stage imports ``RESOLUTIONS`` from here, so they can never silently disagree on
+which resolutions they sweep.
 
-    citation_network_full_low_res.graphml   0.001 .. 0.009   (LOW_BAND)
-    citation_network_full.graphml           0.01  .. 0.19    (MID_BAND)
-    citation_network_full_high_res.graphml  0.2   .. 0.9     (HIGH_BAND)
-
-The downstream analysis DAGs (community_quality_metrics, community_connectivity_metrics,
-community_connectivity_modifier, community_quality_metrics_after_connectivity_modifier)
-used to hardcode the low band and read only the low-res graph, so their outputs -- and
-the website plots built from them -- stopped at 0.009. This module consolidates the
-resolution list into one place (so the DAGs can never silently disagree on which
-resolutions they sweep) and provides ``merge_higher_band_communities`` to graft the
-mid/high community columns onto the low-res graph, giving every DAG one graph carrying
-all ``RESOLUTIONS`` at once. Because topology is identical across bands, the minimum-cut
-/ modularity computations only ever need this single merged topology.
-
-Note: the frozen Track-A ``get_network_communities_and_stats.py`` keeps its own
-``resolutions`` list (its low-band detection run) and is intentionally NOT wired to this
-module -- it is frozen. This module is the shared source for the *analysis* DAGs only.
+The sweep is declared in three bands (params.yaml ``resolutions.low/mid/high``)
+because partitions are sometimes produced in separate runs and written to separate
+graphml files with identical topology (same vertices, same edges), each carrying
+only its own band's columns. ``graph.low_band_graphml`` is the base every stage
+loads; ``merge_higher_band_communities`` grafts the other bands' columns onto it by
+vertex ``name``, giving one graph that carries every resolution. A graph written by
+``detect_communities`` already carries all bands, and the merge is then a no-op --
+point all three band paths at the same file.
 """
 
 from pathlib import Path
@@ -31,7 +20,7 @@ from typing import Final
 
 import igraph as ig
 
-from motor_learning_network.constants import params
+from scientographer.config import params
 
 _resolutions = params("resolutions")
 _graph = params("graph")

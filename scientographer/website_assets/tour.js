@@ -19,9 +19,9 @@ const SEEN_KEY = "mlsm_tour_seen_v1";
 // that ship snapshots).
 const STEPS = [
   {
-    title: "Welcome to the Semantic Map",
+    title: "Welcome to the map",
     body:
-      "This is an interactive map of <strong>~14,500 motor-learning papers</strong>. " +
+      "This is an interactive map of a <strong>citation network</strong>. " +
       "Every dot is one paper; dot size is how often it's cited. Nearby dots are " +
       "related — by text content or by citations, depending on the layout.<br><br>" +
       "This quick tour walks through everything you can do. Use <em>Next</em> / " +

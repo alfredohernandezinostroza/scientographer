@@ -28,35 +28,34 @@ Outputs (data/graph_level_data/community_quality_metrics_after_connectivity_modi
 stability/plateau columns).
 """
 
-import sys
 import logging
 from pathlib import Path
+import sys
 from typing import Final
 
-import numpy as np
-import pandas as pd
+from hamilton import driver
+from hamilton.function_modifiers import dataloader, datasaver, group, parameterize, source, value
+from hamilton.io import utils
+import hamilton.log_setup
 import igraph as ig
 import networkx as nx
+import numpy as np
+import pandas as pd
 
-from hamilton.function_modifiers import dataloader, datasaver, value, source, group, parameterize
-from hamilton.io import utils
-from hamilton_sdk import adapters
-from hamilton import driver
-import hamilton.log_setup
-
-from motor_learning_network.constants import (
-    GRAPH_LEVEL_DATA_PATH,
-    FIGURES_PATH,
-    params,
-    tracker_adapters,
+from scientographer.community_connectivity_modifier import (
+    MEMBERSHIP_PARQUET as CM_MEMBERSHIP_PARQUET,
 )
-from motor_learning_network.community_resolution_bands import LOW_RES_GRAPHML
-from motor_learning_network.community_quality_metrics import (
+from scientographer.community_quality_metrics import (
     RESOLUTIONS,
     _structural_partition_metrics,
 )
-from motor_learning_network.community_connectivity_modifier import (
-    MEMBERSHIP_PARQUET as CM_MEMBERSHIP_PARQUET,
+from scientographer.community_resolution_bands import LOW_RES_GRAPHML
+from scientographer.config import (
+    FIGURES_PATH,
+    draw_dag,
+    ensure_dirs,
+    params,
+    tracker_adapters,
 )
 
 ###################
@@ -70,7 +69,6 @@ EXECUTE = True
 
 INPUT_GRAPHML: Final[Path] = LOW_RES_GRAPHML
 OUTPUT_DIR: Final[Path] = Path(params("graph")["analysis_output_dir"]) / "community_quality_metrics_after_connectivity_modifier"
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 PER_COMMUNITY_PARQUET: Final[Path] = OUTPUT_DIR / "community_quality_metrics_after_cm_per_community.parquet"
 PER_PARTITION_PARQUET: Final[Path] = OUTPUT_DIR / "community_quality_metrics_after_cm_per_partition.parquet"
 
@@ -105,6 +103,7 @@ def _after_membership(graph: ig.Graph, cm_membership_df: pd.DataFrame, resolutio
 ##     Main     ##
 ##################
 def _main() -> int:
+    ensure_dirs(FIGURES_PATH, OUTPUT_DIR)
     inputs = dict(
         citation_network_path=INPUT_GRAPHML,
         cm_membership_path=CM_MEMBERSHIP_PARQUET,
@@ -121,15 +120,7 @@ def _main() -> int:
         .build()
     )
     dr.validate_execution(outputs, inputs=inputs)
-    dr.display_all_functions(
-        FIGURES_PATH / f"{CURRENT_FILE_NAME}_all_functions.png",
-        keep_dot=True, deduplicate_inputs=True,
-    )
-    dr.visualize_execution(
-        outputs, inputs=inputs,
-        output_file_path=FIGURES_PATH / f"{CURRENT_FILE_NAME}.png",
-        keep_dot=False, deduplicate_inputs=True,
-    )
+    draw_dag(dr, CURRENT_FILE_NAME, outputs, inputs)
     if EXECUTE:
         dr.execute(outputs, inputs=inputs)
     return 0

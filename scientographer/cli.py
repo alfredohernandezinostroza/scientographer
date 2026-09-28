@@ -1,31 +1,43 @@
-"""``mln`` -- the command line for the citation-network pipeline.
+"""``scientographer`` -- the command line.
 
-Every stage is a Hamilton DAG module under ``motor_learning_network/``; the
-pipeline as a whole is declared in ``dvc.yaml`` with its knobs in
-``motor_learning_network/params.yaml``. This CLI is a thin front for those, so
-a pip-installed user without pixi gets the same commands as ``pixi run <task>``::
+Every stage is a Hamilton DAG module of the package; a project wires them together
+in its ``dvc.yaml`` and keeps every setting in its ``params.yaml``::
 
-    mln stages                       list the DAG modules (and which are in dvc.yaml)
-    mln run detect_communities       run one stage, exactly as `python .../detect_communities.py`
-    mln pipeline [stage]             `dvc repro` (the whole pipeline, or up to one stage)
-    mln website [--port 8123]        serve the built site
-    mln ui [--port 8241]             start the Hamilton UI tracker for this checkout
-    mln params                       show which params.yaml is in effect
+    scientographer init my-project        create a project (params.yaml, dvc.yaml, data/)
+    scientographer stages                 list the stages (* = declared in ./dvc.yaml)
+    scientographer run detect_communities run one stage in the current project
+    scientographer pipeline [stage]       `dvc repro`: everything out of date, or up to one stage
+    scientographer website [--port 8123]  serve the built site
+    scientographer ui [--port 8241]       start the Hamilton UI tracker for this project
+    scientographer params                 show which params.yaml is in effect
 """
 
+from importlib import resources
 from pathlib import Path
 import runpy
+import shutil
 import subprocess
 import sys
 from typing import Optional
 
 import typer
 
-app = typer.Typer(add_completion=False, no_args_is_help=True, help=__doc__)
+app = typer.Typer(
+    add_completion=False,
+    no_args_is_help=True,
+    help="Map a scientific literature from its citation network. Start with `scientographer init`.",
+)
 
 PACKAGE_DIR = Path(__file__).resolve().parent
-# Modules that are not pipeline stages (shared code, scaffolds, this file).
-NOT_STAGES = {"__init__", "cli", "constants", "dag_template", "community_resolution_bands"}
+# Modules that are shared code rather than pipeline stages.
+NOT_STAGES = {"__init__", "cli", "config", "synonyms", "community_resolution_bands"}
+
+PROJECT_GITIGNORE = """\
+# Scientographer outputs are versioned by DVC, not git.
+/reports/
+.env
+.hamilton/
+"""
 
 
 def _stage_modules() -> list[str]:
@@ -36,7 +48,8 @@ def _stage_modules() -> list[str]:
     )
 
 
-def _dvc_stage_names() -> set[str]:
+def _dvc_stage_commands() -> set[str]:
+    """Module names run by ./dvc.yaml's stages (`scientographer run <module>`)."""
     dvc_yaml = Path("dvc.yaml")
     if not dvc_yaml.exists():
         return set()
@@ -44,25 +57,65 @@ def _dvc_stage_names() -> set[str]:
 
     with open(dvc_yaml, "r", encoding="utf-8") as f:
         doc = yaml.safe_load(f) or {}
-    return set((doc.get("stages") or {}).keys())
+    modules = set()
+    for stage in (doc.get("stages") or {}).values():
+        parts = str(stage.get("cmd", "")).split()
+        if "run" in parts and parts.index("run") + 1 < len(parts):
+            modules.add(parts[parts.index("run") + 1])
+    return modules
+
+
+@app.command()
+def init(
+    directory: Path = typer.Argument(Path("."), help="project directory (created if missing)"),
+    force: bool = typer.Option(False, "--force", help="overwrite an existing params.yaml / dvc.yaml"),
+) -> None:
+    """Create a project: params.yaml (every setting, documented), dvc.yaml (the
+    pipeline), data/ for your two input tables, and a .gitignore."""
+    directory.mkdir(parents=True, exist_ok=True)
+    templates = resources.files("scientographer")
+    targets = {
+        "params.yaml": templates / "params.yaml",
+        "dvc.yaml": templates / "templates" / "dvc.yaml",
+    }
+    for name, source in targets.items():
+        target = directory / name
+        if target.exists() and not force:
+            typer.echo(f"kept existing {target} (use --force to overwrite)")
+            continue
+        with resources.as_file(source) as src:
+            shutil.copyfile(src, target)
+        typer.echo(f"wrote {target}")
+    (directory / "data").mkdir(exist_ok=True)
+    gitignore = directory / ".gitignore"
+    if not gitignore.exists():
+        gitignore.write_text(PROJECT_GITIGNORE, encoding="utf-8")
+    typer.echo(
+        "\nNext:\n"
+        f"  1. put your papers table at {directory / 'data/papers.parquet'} (a `doi` column + metadata)\n"
+        f"     and your references at {directory / 'data/references.parquet'} (citing_doi, cited_dois)\n"
+        "  2. adjust params.yaml (size thresholds scale with the corpus)\n"
+        f"  3. cd {directory} && git init && dvc init && dvc repro\n"
+        "  4. scientographer website"
+    )
 
 
 @app.command()
 def stages() -> None:
-    """List the pipeline's DAG modules; * marks those declared as dvc.yaml stages."""
-    declared = _dvc_stage_names()
+    """List the stages; * marks those run by ./dvc.yaml."""
+    declared = _dvc_stage_commands()
     for name in _stage_modules():
         typer.echo(f"{'*' if name in declared else ' '} {name}")
 
 
 @app.command()
-def run(stage: str = typer.Argument(..., help="module name, e.g. detect_communities")) -> None:
-    """Run one stage in this working directory (reads/writes the paths in params.yaml)."""
+def run(stage: str = typer.Argument(..., help="stage name, e.g. detect_communities")) -> None:
+    """Run one stage in the current project (reads/writes the paths in params.yaml)."""
     if stage not in _stage_modules():
         typer.echo(f"unknown stage '{stage}'. Known: {', '.join(_stage_modules())}", err=True)
         raise typer.Exit(code=2)
-    # Modules build their driver from `__main__`, so run them as a script would.
-    runpy.run_module(f"motor_learning_network.{stage}", run_name="__main__", alter_sys=True)
+    # Stages build their Hamilton driver from `__main__`, so run them as a script would.
+    runpy.run_module(f"scientographer.{stage}", run_name="__main__", alter_sys=True)
 
 
 @app.command()
@@ -81,12 +134,12 @@ def pipeline(
 
 @app.command()
 def website(port: int = typer.Option(8123, help="port to serve on")) -> None:
-    """Serve the site built by build_website.py (params.yaml `website.output_dir`)."""
-    from motor_learning_network.constants import params
+    """Serve the site built by build_website (params.yaml `website.output_dir`)."""
+    from scientographer.config import params
 
     directory = Path(params("website")["output_dir"])
     if not (directory / "index.html").exists():
-        typer.echo(f"no site at {directory}; run `mln run build_website` first", err=True)
+        typer.echo(f"no site at {directory}; run `scientographer run build_website` first", err=True)
         raise typer.Exit(code=2)
     typer.echo(f"serving {directory} at http://localhost:{port}")
     raise typer.Exit(
@@ -98,7 +151,7 @@ def website(port: int = typer.Option(8123, help="port to serve on")) -> None:
 
 @app.command()
 def ui(port: int = typer.Option(8241, help="port for the Hamilton UI")) -> None:
-    """Start the Hamilton UI tracker for THIS checkout (its own .hamilton/db)."""
+    """Start the Hamilton UI tracker for this project (its own .hamilton/db)."""
     base_dir = Path(".hamilton", "db")
     base_dir.mkdir(parents=True, exist_ok=True)
     typer.echo(
@@ -115,7 +168,7 @@ def ui(port: int = typer.Option(8241, help="port for the Hamilton UI")) -> None:
 @app.command(name="params")
 def params_command() -> None:
     """Show which params.yaml is in effect and its sections."""
-    from motor_learning_network.constants import PARAMS, PARAMS_PATH
+    from scientographer.config import PARAMS, PARAMS_PATH
 
     typer.echo(f"{PARAMS_PATH}")
     for section in PARAMS:

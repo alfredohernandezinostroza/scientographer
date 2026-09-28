@@ -2,7 +2,7 @@ import igraph as ig
 import pandas as pd
 import pytest
 
-from motor_learning_network.community_keywords import (
+from scientographer.community_keywords import (
     _attach_top_keywords,
     _build_synonym_map,
     _canonical_corpus,

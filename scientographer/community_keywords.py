@@ -7,7 +7,7 @@ the resolutions are read from the graph, community sizes are counted from the
 assignment itself (no ``community_size_at_res`` column needed), and the graph is
 otherwise left untouched.
 
-Method -- the "modified TF-IDF" of ``find_keywords_per_cluster_noverlap.py``:
+Method -- the "modified TF-IDF" of ``wordclouds.py``:
 each community's synonym-canonicalised keyword list is one document; a
 ``TfidfVectorizer`` is fit per resolution; a corrected IDF strips sklearn's ``+1``
 smoothing constant; the top-N terms by corrected score become the community's
@@ -34,7 +34,6 @@ mixing ``str`` and ``float`` (``NaN``) is silently dropped on write -- so missin
 labels are always the empty string.
 """
 
-import json
 import logging
 from pathlib import Path
 import re
@@ -51,12 +50,14 @@ import pandas as pd
 import scipy.sparse
 from sklearn.feature_extraction.text import TfidfVectorizer
 
-from motor_learning_network.constants import (
+from scientographer.config import (
     FIGURES_PATH,
-    RAW_DATA_PATH,
+    draw_dag,
+    ensure_dirs,
     params,
     tracker_adapters,
 )
+from scientographer.synonyms import load_synonym_groups
 
 ###################
 ##   Constants   ##
@@ -69,7 +70,6 @@ EXECUTE = True
 
 # Every knob comes from params.yaml `community_keywords` (one value, one place).
 _cfg = params("community_keywords")
-SYNONYMS_THRESHOLD: Final[float] = float(_cfg["synonyms_threshold"])
 TFIDF_NORM: Final[str] = str(_cfg["tfidf_norm"])
 IDF_BIAS: Final[float] = float(_cfg["idf_bias"])
 TOP_N_KEYWORDS: Final[int] = int(_cfg["top_n_keywords"])  # terms that make up the label
@@ -85,9 +85,8 @@ LABEL_ATTRIBUTE_PREFIX: Final[str] = "top_keywords_at_res="
 
 OUTPUT_DIR: Final[Path] = Path(params("graph")["analysis_output_dir"]) / "community_keywords"
 INPUT_GRAPHML: Final[Path] = Path(_cfg["input_graphml"])
-SYNONYM_DICT_PATH: Final[Path] = (
-    RAW_DATA_PATH / f"keyword_synonyms_{SYNONYMS_THRESHOLD}_with_transitivity.json"
-)
+SYNONYMS_FILE: Final[Optional[Path]] = Path(_cfg["synonyms_file"]) if _cfg.get("synonyms_file") else None
+EXTRA_SYNONYMS: Final[dict] = dict(_cfg.get("extra_synonyms") or {})
 OUTPUT_GRAPHML: Final[Path] = OUTPUT_DIR / "citation_network_with_community_keywords.graphml"
 COMMUNITY_KEYWORDS_PARQUET: Final[Path] = OUTPUT_DIR / "community_keywords_per_resolution.parquet"
 COMMUNITY_KEYWORD_SCORES_PARQUET: Final[Path] = OUTPUT_DIR / "community_keyword_scores.parquet"
@@ -153,7 +152,7 @@ def _correct_tfidf(
     X: scipy.sparse.csr_matrix, vectorizer: TfidfVectorizer, idf_bias: float
 ) -> scipy.sparse.csr_matrix:
     """Strip sklearn's ``+1`` IDF smoothing constant (see
-    find_keywords_per_cluster_noverlap.py's ``_correct_tfidf``)."""
+    wordclouds.py's ``_correct_tfidf``)."""
     X_array = X.toarray()
     wrong_idf = vectorizer.idf_
     corrected_idf = wrong_idf - 1.0 + idf_bias
@@ -321,9 +320,11 @@ def _keyword_scores_df(
 ##     Main     ##
 ##################
 def _main() -> int:
+    ensure_dirs(FIGURES_PATH)
     inputs = dict(
         input_graphml_path=INPUT_GRAPHML,
-        synonym_dict_path=SYNONYM_DICT_PATH,
+        synonyms_file=SYNONYMS_FILE,
+        extra_synonyms=EXTRA_SYNONYMS,
         requested_resolutions=REQUESTED_RESOLUTIONS,  # None = every resolution the graph carries
         keyword_dividing_character=KEYWORD_DIVIDING_CHARACTER,
         min_community_size=MIN_COMMUNITY_SIZE,
@@ -351,18 +352,7 @@ def _main() -> int:
     )
 
     dr.validate_execution(outputs, inputs=inputs)
-    dr.display_all_functions(
-        FIGURES_PATH / f"{CURRENT_FILE_NAME}_all_functions.png",
-        keep_dot=True,
-        deduplicate_inputs=True,
-    )
-    dr.visualize_execution(
-        outputs,
-        inputs=inputs,
-        output_file_path=FIGURES_PATH / f"{CURRENT_FILE_NAME}.png",
-        keep_dot=False,
-        deduplicate_inputs=True,
-    )
+    draw_dag(dr, CURRENT_FILE_NAME, outputs, inputs)
     if EXECUTE:
         dr.execute(outputs, inputs=inputs)
     return 0
@@ -380,22 +370,14 @@ def citation_network(input_graphml_path: Path) -> tuple[ig.Graph, dict]:
     return graph, utils.get_file_metadata(input_graphml_path)
 
 
-@dataloader()
-def synonym_dict(synonym_dict_path: Path) -> tuple[dict, dict]:
-    """The keyword synonym groups ({canonical: [variants]}). Optional: a corpus
-    without one gets no canonicalisation (every keyword is its own term).
-    Applies the same hard-coded Purkinje Cell alias patch as
-    find_keywords_per_cluster_noverlap.py's `synonym_dict` node when that entry
-    exists, so the study's file behaves exactly as before."""
-    synonym_dict_path = Path(synonym_dict_path)
-    if not synonym_dict_path.exists():
-        logger.warning("no synonym file at %s; keywords are used verbatim", synonym_dict_path)
-        return {}, {"path": str(synonym_dict_path), "exists": False}
-    with open(synonym_dict_path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    if "Purkinje Cell" in data:
-        data["Purkinje Cell"].extend(["Purkinje Cell ( PC )"])
-    return data, utils.get_file_metadata(synonym_dict_path)
+def synonym_dict(synonyms_file: Optional[Path], extra_synonyms: dict) -> dict:
+    """The keyword synonym groups ({canonical: [variants]}) from params.yaml's
+    ``synonyms_file`` plus ``extra_synonyms`` (see scientographer.synonyms).
+    Both optional: without them every keyword is its own term."""
+    groups = load_synonym_groups(synonyms_file, extra_synonyms)
+    if not groups:
+        logger.info("no synonym groups; keywords are used verbatim")
+    return groups
 
 
 def synonym_map(synonym_dict: dict) -> dict[str, str]:

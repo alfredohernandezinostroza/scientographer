@@ -1,13 +1,10 @@
-import math
 
-import numpy as np
-import pytest
 import igraph as ig
 
-from motor_learning_network.community_connectivity_modifier import (
-    _undirected_simple_graph,
-    _connectivity_modifier_on_cluster,
+from scientographer.community_connectivity_modifier import (
     _classify_transformation,
+    _connectivity_modifier_on_cluster,
+    _undirected_simple_graph,
     _well_connectedness_threshold,
 )
 

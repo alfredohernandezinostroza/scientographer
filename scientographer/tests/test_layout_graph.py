@@ -2,7 +2,7 @@ import igraph as ig
 import pandas as pd
 import pytest
 
-from motor_learning_network.layout_graph import (
+from scientographer.layout_graph import (
     _has_complete_layout,
     _imported_positions,
     _positions_from_file,

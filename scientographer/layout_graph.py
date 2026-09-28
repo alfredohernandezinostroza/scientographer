@@ -8,9 +8,9 @@ Two modes (params.yaml ``layout.mode``):
   graph, in-pipeline, ``forceatlas2_iterations`` steps.
 - ``import``: copy x/y from a file exported by Gephi -- a graphml (Gephi writes
   ``x``/``y`` vertex attributes) or a node CSV with ``id``/``name`` + ``x``/``y``
-  columns -- matched by the vertex ``name`` (the DOI). This is how the study's
-  ``*_with_layout.graphml`` files were made; the stage makes that hand-off a
-  declared dependency instead of an undocumented rename.
+  columns -- matched by the vertex ``name`` (the DOI). Tuning a layout by hand
+  in Gephi and importing it keeps that manual step a declared dependency of the
+  pipeline.
 
 An input that already carries a complete layout is passed through unchanged
 unless ``overwrite_existing`` is true, so re-running the pipeline never
@@ -31,7 +31,7 @@ import hamilton.log_setup
 import igraph as ig
 import pandas as pd
 
-from motor_learning_network.constants import FIGURES_PATH, params, tracker_adapters
+from scientographer.config import FIGURES_PATH, draw_dag, ensure_dirs, params, tracker_adapters
 
 ###################
 ##   Constants   ##
@@ -124,6 +124,7 @@ def _with_positions(
 ##     Main     ##
 ##################
 def _main() -> int:
+    ensure_dirs(FIGURES_PATH)
     if MODE not in MODES:
         raise ValueError(f"layout.mode must be one of {MODES}, got {MODE!r}")
     inputs = dict(
@@ -145,18 +146,7 @@ def _main() -> int:
         .build()
     )
     dr.validate_execution(outputs, inputs=inputs)
-    dr.display_all_functions(
-        FIGURES_PATH / f"{CURRENT_FILE_NAME}_all_functions.png",
-        keep_dot=True,
-        deduplicate_inputs=True,
-    )
-    dr.visualize_execution(
-        outputs,
-        inputs=inputs,
-        output_file_path=FIGURES_PATH / f"{CURRENT_FILE_NAME}.png",
-        keep_dot=False,
-        deduplicate_inputs=True,
-    )
+    draw_dag(dr, CURRENT_FILE_NAME, outputs, inputs)
     if EXECUTE:
         dr.execute(outputs, inputs=inputs)
     return 0

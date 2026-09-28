@@ -44,39 +44,37 @@ Outputs (data/graph_level_data/community_connectivity_modifier/):
     extant/reduced/split/degraded taxonomy}
 """
 
-import sys
-import math
 import logging
 from pathlib import Path
+import sys
 from typing import Final
 
-import numpy as np
-import pandas as pd
+from hamilton import driver
+from hamilton.function_modifiers import dataloader, datasaver, group, parameterize, source, value
+from hamilton.io import utils
+import hamilton.log_setup
 import igraph as ig
 import leidenalg
+import numpy as np
+import pandas as pd
 
-from hamilton.function_modifiers import dataloader, datasaver, value, source, group, parameterize
-from hamilton.io import utils
-from hamilton_sdk import adapters
-from hamilton import driver
-import hamilton.log_setup
-
-from motor_learning_network.constants import (
-    GRAPH_LEVEL_DATA_PATH,
-    FIGURES_PATH,
-    params,
-    tracker_adapters,
-)
-from motor_learning_network.community_connectivity_metrics import (
+from scientographer.community_connectivity_metrics import (
     RESOLUTIONS,
     SUBSTANTIVE_COMMUNITY_MIN_SIZE,
     _community_attribute_name,
     _community_vertex_groups,
     _well_connectedness_threshold,
 )
-from motor_learning_network.community_resolution_bands import (
+from scientographer.community_resolution_bands import (
     LOW_RES_GRAPHML,
     merge_higher_band_communities,
+)
+from scientographer.config import (
+    FIGURES_PATH,
+    draw_dag,
+    ensure_dirs,
+    params,
+    tracker_adapters,
 )
 
 ###################
@@ -101,7 +99,6 @@ CM_RECLUSTER_ITERATIONS: Final[int] = 2
 
 INPUT_GRAPHML: Final[Path] = LOW_RES_GRAPHML
 OUTPUT_DIR: Final[Path] = Path(params("graph")["analysis_output_dir"]) / "community_connectivity_modifier"
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 MEMBERSHIP_PARQUET: Final[Path] = OUTPUT_DIR / "connectivity_modifier_membership.parquet"
 PER_COMMUNITY_PARQUET: Final[Path] = OUTPUT_DIR / "connectivity_modifier_per_community.parquet"
 PER_PARTITION_PARQUET: Final[Path] = OUTPUT_DIR / "connectivity_modifier_per_partition.parquet"
@@ -191,6 +188,7 @@ def _classify_transformation(original_size: int, surviving_pieces: int, survivin
 ##     Main     ##
 ##################
 def _main() -> int:
+    ensure_dirs(FIGURES_PATH, OUTPUT_DIR)
     inputs = dict(
         citation_network_path=INPUT_GRAPHML,
         min_cluster_size=CM_MIN_CLUSTER_SIZE,
@@ -208,15 +206,7 @@ def _main() -> int:
         .build()
     )
     dr.validate_execution(outputs, inputs=inputs)
-    dr.display_all_functions(
-        FIGURES_PATH / f"{CURRENT_FILE_NAME}_all_functions.png",
-        keep_dot=True, deduplicate_inputs=True,
-    )
-    dr.visualize_execution(
-        outputs, inputs=inputs,
-        output_file_path=FIGURES_PATH / f"{CURRENT_FILE_NAME}.png",
-        keep_dot=False, deduplicate_inputs=True,
-    )
+    draw_dag(dr, CURRENT_FILE_NAME, outputs, inputs)
     if EXECUTE:
         dr.execute(outputs, inputs=inputs)
     return 0

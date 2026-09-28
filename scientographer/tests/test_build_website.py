@@ -2,7 +2,7 @@ import struct
 
 import pandas as pd
 
-from motor_learning_network.build_website import (
+from scientographer.build_website import (
     MIN_NAMED_GROUP_SIZE,
     OUTLIER_COLOR,
     PALETTE,

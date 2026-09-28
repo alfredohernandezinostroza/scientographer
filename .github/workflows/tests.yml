@@ -1,0 +1,30 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install
+        run: pip install -e ".[all,dev]"
+      - name: Unit tests
+        run: pytest -q
+      - name: Example project end to end
+        working-directory: examples/until_1990
+        env:
+          DVC_NO_ANALYTICS: "1"
+        run: |
+          dvc repro
+          test -f reports/website/index.html
+          test -f reports/website/network_data/communities_by_resolution.json

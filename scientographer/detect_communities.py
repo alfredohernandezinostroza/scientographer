@@ -1,18 +1,16 @@
 """Leiden/CPM community detection across the whole resolution sweep, written onto
 one graph.
 
-This is the package's (Track-B) counterpart of the frozen Track-A script
-``get_network_communities_and_stats.py``, which produced the study's stored
-partitions in three band files. Same algorithm and settings (Leiden with the
-constant Potts model, ``leidenalg.CPMVertexPartition``, unweighted, one seed,
-``n_iterations`` refinement passes), but: every resolution of
-``community_resolution_bands.RESOLUTIONS`` lands on ONE output graphml as
-``cpm_communities_at_res=<r>`` vertex columns, the optional pre-detection degree
-filter is a parameter (default: none -- detect on the full giant component and
-filter *communities* afterwards, which commutes; see docs/RESOLUTION_SELECTION.md),
-and the run settings are recorded as graph-level attributes (``leiden_seed``,
-``leiden_iterations``, ``leiden_quality_function``) so the graph itself says how
-its communities were made.
+Leiden with the constant Potts model (``leidenalg.CPMVertexPartition``,
+unweighted, one seed, ``n_iterations`` refinement passes) at every resolution of
+``community_resolution_bands.RESOLUTIONS``; all of them land on ONE output graphml
+as ``cpm_communities_at_res=<r>`` vertex columns. The optional pre-detection
+degree filter is a parameter and off by default: detect on the full graph and
+filter *communities* afterwards, which commutes with detection, whereas a
+pre-detection filter changes what is detected. The run settings are recorded as
+graph-level attributes (``leiden_seed``, ``leiden_iterations``,
+``leiden_quality_function``) so the graph itself says how its communities were
+made.
 
 Community ids within a resolution are numbered by size, largest = 0 (leidenalg's
 convention), which every downstream DAG relies on.
@@ -36,8 +34,8 @@ import igraph as ig
 import leidenalg
 import pandas as pd
 
-from motor_learning_network.community_resolution_bands import RESOLUTIONS, community_attribute_name
-from motor_learning_network.constants import FIGURES_PATH, params, tracker_adapters
+from scientographer.community_resolution_bands import RESOLUTIONS, community_attribute_name
+from scientographer.config import FIGURES_PATH, draw_dag, ensure_dirs, params, tracker_adapters
 
 ###################
 ##   Constants   ##
@@ -121,6 +119,7 @@ def _partition_summary(graph: ig.Graph, resolutions: list[float]) -> pd.DataFram
 ##     Main     ##
 ##################
 def _main() -> int:
+    ensure_dirs(FIGURES_PATH)
     inputs = dict(
         input_graphml_path=INPUT_GRAPHML,
         min_degree=MIN_DEGREE,
@@ -140,18 +139,7 @@ def _main() -> int:
         .build()
     )
     dr.validate_execution(outputs, inputs=inputs)
-    dr.display_all_functions(
-        FIGURES_PATH / f"{CURRENT_FILE_NAME}_all_functions.png",
-        keep_dot=True,
-        deduplicate_inputs=True,
-    )
-    dr.visualize_execution(
-        outputs,
-        inputs=inputs,
-        output_file_path=FIGURES_PATH / f"{CURRENT_FILE_NAME}.png",
-        keep_dot=False,
-        deduplicate_inputs=True,
-    )
+    draw_dag(dr, CURRENT_FILE_NAME, outputs, inputs)
     if EXECUTE:
         dr.execute(outputs, inputs=inputs)
     return 0

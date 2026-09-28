@@ -1,48 +1,46 @@
-import igraph as ig
-import re
-import sys
+from collections import defaultdict
+import colorsys
 import json
 import logging
 from pathlib import Path
-from typing import Final
-from collections import defaultdict
+import re
+import sys
+from typing import Final, Optional
 
-import colorsys
-
+import igraph as ig
+import matplotlib
 import numpy as np
 import pandas as pd
+from PIL import Image, ImageDraw
 import scipy.sparse
 from scipy.spatial import ConvexHull, Voronoi
-from shapely.geometry import Polygon, MultiPolygon, box as shapely_box
-from shapely.ops import unary_union
-from PIL import Image, ImageDraw
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-from sklearn.feature_extraction.text import TfidfVectorizer
-from fa2 import ForceAtlas2
-from wordcloud import WordCloud
+from shapely.geometry import MultiPolygon, Polygon
+from shapely.geometry import box as shapely_box
 
+matplotlib.use("Agg")
+from fa2 import ForceAtlas2
+from hamilton import driver
 from hamilton.function_modifiers import (
     dataloader,
     datasaver,
-    value,
-    source,
     parameterize,
+    source,
+    value,
 )
 from hamilton.io import utils
-from hamilton_sdk import adapters
-from hamilton import driver
 import hamilton.log_setup
+import matplotlib.pyplot as plt
+from sklearn.feature_extraction.text import TfidfVectorizer
+from wordcloud import WordCloud
 
-from motor_learning_network.constants import (
-    GRAPH_LEVEL_DATA_PATH,
-    KEYWORDS_LEVEL_DATA_PATH,
-    RAW_DATA_PATH,
+from scientographer.config import (
     FIGURES_PATH,
+    draw_dag,
+    ensure_dirs,
     params,
     tracker_adapters,
 )
+from scientographer.synonyms import load_synonym_groups
 
 ###################
 ##   Constants   ##
@@ -53,17 +51,16 @@ hamilton.log_setup.setup_logging(logging.INFO)
 logger = logging.getLogger(__name__)
 
 EXECUTE = True
-if EXECUTE:
-    logger.info("Executing the DAG!")
 
 # ── Run configuration: params.yaml `wordclouds` ───────────────────────────────
-# Which time-slice graph (until_<year>) and which resolutions to run on used to be
-# edited here per run (and once per git branch); they are parameters now. Past runs,
-# for the record: 1960 [0.005]; 1980 [0.001, 0.012]; 1990 [0.001, 0.002];
-# 2000 [0.003, 0.014]; 2005 [0.003, 0.007]; 2010 [0.0006, 0.002]; 2015 [0.0009, 0.003];
-# 2020 [0.001, 0.002]; 2026 [0.0004, 0.001].
+# Which graph and which resolutions to draw are parameters; to draw several
+# graphs, run the stage once per graph with its own graph_label and output_dir.
 _cfg = params("wordclouds")
-YEAR: int = int(_cfg["year"])
+# Optional name of the graph the figures were made on, used as a file-name prefix
+# ("until_2026" -> tdidf_until_2026_wordcloud_at_...), so figures of different
+# graphs can sit side by side and the website can tell them apart.
+GRAPH_LABEL: str = str(_cfg.get("graph_label") or "")
+_LABEL = f"{GRAPH_LABEL}_" if GRAPH_LABEL else ""
 RESOLUTIONS: list[float] = [float(r) for r in _cfg["resolutions"]]
 INPUT_GRAPHML: Path = Path(_cfg["input_graphml"])
 TD_IDF_SAVING_PATH = Path(_cfg["output_dir"])
@@ -112,6 +109,7 @@ _res_node_names = [f"res_{str(r).replace('.', '_')}" for r in RESOLUTIONS]
 ##################
 
 def _main() -> int:
+    ensure_dirs(FIGURES_PATH)
     ########################
     ## Inputs and Outputs ##
     ########################
@@ -122,7 +120,8 @@ def _main() -> int:
         idf_bias=IDF_BIAS,
         synonyms_threshold=SYNONYMS_THRESHOLD,
         citation_network_path=INPUT_GRAPHML,
-        synonym_dict_path=RAW_DATA_PATH / f"keyword_synonyms_{SYNONYMS_THRESHOLD}_with_transitivity.json",
+        synonyms_file=Path(_cfg["synonyms_file"]) if _cfg.get("synonyms_file") else None,
+        extra_synonyms=dict(_cfg.get("extra_synonyms") or {}),
         top_n_histogram=int(_cfg["top_n_histogram"]),
         keyword_dividing_character="|",
         min_cluster_size=MIN_CLUSTER_SIZE, # >= to this number will be included
@@ -152,18 +151,7 @@ def _main() -> int:
     ##   Sanity checks   ##
     #######################
     dr.validate_execution(outputs, inputs=inputs)
-    dr.display_all_functions(
-        FIGURES_PATH / f"{CURRENT_FILE_NAME}_all_functions.png",
-        keep_dot=True,
-        deduplicate_inputs=True,
-    )
-    dr.visualize_execution(
-        outputs,
-        inputs=inputs,
-        output_file_path=FIGURES_PATH / f"{CURRENT_FILE_NAME}.png",
-        keep_dot=False,
-        deduplicate_inputs=True,
-    )
+    draw_dag(dr, CURRENT_FILE_NAME, outputs, inputs)
 
     ###################
     ##   Execution   ##
@@ -531,7 +519,7 @@ def _render_cluster_wordclouds(
     all_y = np.array(graph.vs["y"], dtype=float)
 
     # Global bounding box used to clip Voronoi cells
-    graph_extent = max(all_x.ptp(), all_y.ptp())
+    graph_extent = max(np.ptp(all_x), np.ptp(all_y))
     pad = graph_extent * 0.05
     bbox = (all_x.min() - pad, all_y.min() - pad,
             all_x.max() + pad, all_y.max() + pad)
@@ -699,15 +687,10 @@ def citation_network(citation_network_path: Path) -> tuple[ig.Graph, dict]:
     metadata = utils.get_file_metadata(citation_network_path)
     return citation_network, metadata
 
-@dataloader()
-def synonym_dict(synonym_dict_path: Path) -> tuple[dict, dict]:
-    """Load the synonym dictionary JSON and patch in the Purkinje Cell alias."""
-    with open(synonym_dict_path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    # Hard-coded patch from original script
-    data["Purkinje Cell"].extend(["Purkinje Cell ( PC )"])
-    metadata = utils.get_file_metadata(synonym_dict_path)
-    return data, metadata
+def synonym_dict(synonyms_file: Optional[Path], extra_synonyms: dict) -> dict:
+    """The keyword synonym groups from params.yaml's ``synonyms_file`` plus
+    ``extra_synonyms`` (see scientographer.synonyms). Both optional."""
+    return load_synonym_groups(synonyms_file, extra_synonyms)
 
 
 # ── 2. Layout (shared across all resolutions) ─────────────────────────────────
@@ -1171,7 +1154,7 @@ def save_wordcloud_figure(
             cluster_freqs[float(cid)] = {kw.title(): float(sc) for kw, sc in scores.items()}
 
     wordclouds_dir = TD_IDF_SAVING_PATH / "wordclouds"
-    svg_path = wordclouds_dir / f"tdidf_until_{YEAR}_wordcloud_at_{resolution}_{TOP_N_CLUSTERS}_clusters{_COMMUNITIES_FIGURE_SUFFIX}.svg"
+    svg_path = wordclouds_dir / f"tdidf_{_LABEL}wordcloud_at_{resolution}_{TOP_N_CLUSTERS}_clusters{_COMMUNITIES_FIGURE_SUFFIX}.svg"
 
     return _render_cluster_wordclouds(
         cluster_freqs=cluster_freqs,
@@ -1225,7 +1208,7 @@ def save_frequency_wordcloud_figure(
             cluster_freqs[float(cid)] = {kw: float(np.log1p(count)) for kw, count in top}
 
     wordclouds_dir = TD_IDF_SAVING_PATH / "wordclouds"
-    svg_path = wordclouds_dir / f"frequency_until_{YEAR}_wordcloud_at_{resolution}_{TOP_N_CLUSTERS}_clusters{_COMMUNITIES_FIGURE_SUFFIX}.svg"
+    svg_path = wordclouds_dir / f"frequency_{_LABEL}wordcloud_at_{resolution}_{TOP_N_CLUSTERS}_clusters{_COMMUNITIES_FIGURE_SUFFIX}.svg"
 
     return _render_cluster_wordclouds(
         cluster_freqs=cluster_freqs,
