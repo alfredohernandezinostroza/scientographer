@@ -69,7 +69,7 @@ def test_synonyms_file_is_optional_and_extras_merge(tmp_path):
 def test_stage_list_excludes_shared_modules():
     stages = _stage_modules()
     assert "detect_communities" in stages and "build_website" in stages
-    assert not {"config", "cli", "synonyms", "community_resolution_bands"} & set(stages)
+    assert not {"config", "cli", "synonyms", "tracker", "community_resolution_bands"} & set(stages)
 
 
 def test_init_writes_a_project_whose_dvc_stages_all_exist(tmp_path):

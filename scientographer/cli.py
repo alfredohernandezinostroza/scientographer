@@ -32,7 +32,7 @@ app = typer.Typer(
 
 PACKAGE_DIR = Path(__file__).resolve().parent
 # Modules that are shared code rather than pipeline stages.
-NOT_STAGES = {"__init__", "cli", "config", "synonyms", "community_resolution_bands"}
+NOT_STAGES = {"__init__", "cli", "config", "synonyms", "tracker", "community_resolution_bands"}
 
 PROJECT_GITIGNORE = """\
 # Scientographer outputs are versioned by DVC, not git.
