@@ -1,0 +1,70 @@
+[build-system]
+requires = ["flit_core >=3.4,<4"]
+build-backend = "flit_core.buildapi"
+
+[project]
+name = "scientographer"
+version = "0.1.0"
+description = "Map a scientific literature from its citation network: Leiden/CPM communities across a resolution sweep, quality and well-connectedness metrics, keyword labels and an interactive map, as a reproducible Hamilton + DVC pipeline."
+readme = "README.md"
+authors = [{ name = "Alfredo Hernández Inostroza" }]
+requires-python = ">=3.10"
+keywords = ["citation network", "bibliometrics", "science mapping", "community detection", "leiden", "scientometrics"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+]
+dependencies = [
+    "sf-hamilton[sdk]>=1.89,<2",
+    "igraph>=0.11",
+    "leidenalg>=0.10",
+    "cdlib>=0.4",
+    "networkx>=3",
+    "pandas>=2.1",
+    "pyarrow>=14",
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "scikit-learn>=1.4",
+    "pyyaml>=6",
+    "python-dotenv>=1",
+    "typer>=0.12",
+    "matplotlib>=3.8",
+]
+
+[project.optional-dependencies]
+# layout_graph's in-pipeline ForceAtlas2 (not needed when importing a Gephi layout).
+layout = ["fa2>=1.1"]
+# The word-cloud / TF-IDF histogram stage.
+wordclouds = ["fa2>=1.1", "wordcloud>=1.9", "shapely>=2", "pillow>=10"]
+# Running the pipeline with DVC (stages, caching, experiments).
+dvc = ["dvc>=3.50"]
+# Drawing each stage's DAG to reports/figures/ (also needs the Graphviz `dot` program).
+figures = ["graphviz>=0.20"]
+# The Hamilton UI tracker (`scientographer ui`).
+ui = ["sf-hamilton[ui]>=1.89,<2"]
+all = ["scientographer[layout,wordclouds,figures,dvc,ui]"]
+dev = ["pytest>=8", "ruff>=0.4"]
+
+[project.urls]
+Homepage = "https://github.com/alfredohernandezinostroza/scientographer"
+
+[project.scripts]
+scientographer = "scientographer.cli:app"
+
+[tool.flit.sdist]
+include = ["examples/"]
+
+[tool.ruff]
+line-length = 110
+src = ["scientographer"]
+
+[tool.ruff.lint]
+extend-select = ["I"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["scientographer"]
+force-sort-within-sections = true
+
+[tool.pytest.ini_options]
+testpaths = ["scientographer/tests"]

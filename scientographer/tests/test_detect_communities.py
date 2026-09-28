@@ -1,6 +1,6 @@
 import igraph as ig
 
-from motor_learning_network.detect_communities import (
+from scientographer.detect_communities import (
     _attach_memberships,
     _filter_by_degree,
     _leiden_cpm_membership,

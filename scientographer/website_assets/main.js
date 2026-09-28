@@ -1,4 +1,4 @@
-// Interactive semantic map viewer.
+// Interactive citation-map viewer.
 // Same architecture as the citation-graph viewer, but node x/y come from a 2D
 // UMAP of text embeddings. There are two selectable DATASETS (see DATASETS
 // below), each built from a different embedding model:
@@ -22,7 +22,7 @@ import { Sigma } from "https://cdn.jsdelivr.net/npm/sigma@2.4.0/+esm";
 // noneLabel (the "ungrouped" bucket). `semantic: true` marks the text-embedding
 // (topic / semantic-cluster) grouping — the one the "Intra-topic citation
 // islands" view operates on. Exactly one grouping per dataset carries it.
-// Single dataset built by motor_learning_network/build_website.py from one
+// Single dataset built by scientographer/build_website.py from one
 // GraphML: positions come from the graphml's layout (x/y), the semantic "topic"
 // grouping from the graphml `topic` attribute, and the citation "community"
 // grouping from the graphml `cpm_communities_at_res=*` attribute. The bundle

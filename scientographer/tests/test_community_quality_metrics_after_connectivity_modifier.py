@@ -1,11 +1,10 @@
+import igraph as ig
 import numpy as np
 import pandas as pd
-import pytest
-import igraph as ig
 
-from motor_learning_network.community_quality_metrics_after_connectivity_modifier import (
-    _cm_community_attribute_name,
+from scientographer.community_quality_metrics_after_connectivity_modifier import (
     _after_membership,
+    _cm_community_attribute_name,
 )
 
 
@@ -59,7 +58,7 @@ def test_after_cm_partition_has_lower_coverage_than_before():
     node. If CM 'removed' the bridge node, the after-partition (bridge as its own
     singleton) has fewer internal edges -> lower coverage than treating all seven
     nodes as one community."""
-    from motor_learning_network.community_quality_metrics import _structural_partition_metrics
+    from scientographer.community_quality_metrics import _structural_partition_metrics
 
     g = ig.Graph(directed=True)
     g.add_vertices(7)

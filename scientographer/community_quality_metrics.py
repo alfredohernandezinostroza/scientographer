@@ -1,10 +1,10 @@
 """Clustering-quality metrics for the Leiden/CPM citation-network communities.
 
-``get_network_communities_and_stats.py`` runs Leiden with the constant Potts
-model (CPM) across several resolutions and writes the resulting community
-assignments as per-vertex ``cpm_communities_at_res=<resolution>`` columns, but
-computes no quality metrics at all -- not even the CPM objective it is
-optimizing. This module reads that graph and adds, per resolution:
+``detect_communities`` runs Leiden with the constant Potts model (CPM) across
+several resolutions and writes the resulting community assignments as
+per-vertex ``cpm_communities_at_res=<resolution>`` columns, but computes no
+quality metrics -- not even the CPM objective it optimizes. This module reads
+that graph and adds, per resolution:
 
   - partition-level scalars: modularity, the constant Potts model score,
     surprise, significance, mean internal edge density, the intra-community
@@ -34,39 +34,38 @@ Outputs (data/graph_level_data/):
     long form: resolution x {modularity, constant_potts_model_score, ...}
 """
 
-import sys
-import math
-import logging
-from pathlib import Path
-from typing import Final
 from collections import Counter, defaultdict
+import logging
+import math
+from pathlib import Path
+import sys
+from typing import Final
 
-import numpy as np
-import pandas as pd
+from cdlib import NodeClustering, evaluation
+from hamilton import driver
+from hamilton.function_modifiers import dataloader, datasaver, group, parameterize, source, value
+from hamilton.io import utils
+import hamilton.log_setup
 import igraph as ig
 import leidenalg
 import networkx as nx
-from scipy.stats import hypergeom
+import numpy as np
+import pandas as pd
 from scipy.special import comb
-from cdlib import evaluation, NodeClustering
+from scipy.stats import hypergeom
 
-from hamilton.function_modifiers import dataloader, datasaver, value, source, group, parameterize
-from hamilton.io import utils
-from hamilton_sdk import adapters
-from hamilton import driver
-import hamilton.log_setup
-
-from motor_learning_network.constants import (
-    GRAPH_LEVEL_DATA_PATH,
+from scientographer.community_resolution_bands import (
+    CANONICAL_RESOLUTION,
+    LOW_RES_GRAPHML,
+    RESOLUTIONS,
+    merge_higher_band_communities,
+)
+from scientographer.config import (
     FIGURES_PATH,
+    draw_dag,
+    ensure_dirs,
     params,
     tracker_adapters,
-)
-from motor_learning_network.community_resolution_bands import (
-    CANONICAL_RESOLUTION,
-    RESOLUTIONS,
-    LOW_RES_GRAPHML,
-    merge_higher_band_communities,
 )
 
 ###################
@@ -108,7 +107,6 @@ INPUT_GRAPHML: Final[Path] = LOW_RES_GRAPHML
 ANALYSIS_OUTPUT_DIR: Final[Path] = Path(params("graph")["analysis_output_dir"])
 OUTPUT_GRAPHML: Final[Path] = ANALYSIS_OUTPUT_DIR / "citation_network_with_community_metrics.graphml"
 OUTPUT_DIR: Final[Path] = ANALYSIS_OUTPUT_DIR / "community_quality_metrics"
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 PER_COMMUNITY_PARQUET: Final[Path] = OUTPUT_DIR / "community_quality_metrics_per_community.parquet"
 PER_PARTITION_PARQUET: Final[Path] = OUTPUT_DIR / "community_quality_metrics_per_partition.parquet"
 # DVC-facing summaries (outside OUTPUT_DIR so dvc.yaml can list them as `metrics` /
@@ -560,6 +558,7 @@ def _structural_partition_metrics(
 ##     Main     ##
 ##################
 def _main() -> int:
+    ensure_dirs(FIGURES_PATH, OUTPUT_DIR)
     inputs = dict(
         citation_network_path=INPUT_GRAPHML,
         n_iterations=LEIDEN_ITERATIONS,
@@ -579,15 +578,7 @@ def _main() -> int:
         .build()
     )
     dr.validate_execution(outputs, inputs=inputs)
-    dr.display_all_functions(
-        FIGURES_PATH / f"{CURRENT_FILE_NAME}_all_functions.png",
-        keep_dot=True, deduplicate_inputs=True,
-    )
-    dr.visualize_execution(
-        outputs, inputs=inputs,
-        output_file_path=FIGURES_PATH / f"{CURRENT_FILE_NAME}.png",
-        keep_dot=False, deduplicate_inputs=True,
-    )
+    draw_dag(dr, CURRENT_FILE_NAME, outputs, inputs)
     if EXECUTE:
         dr.execute(outputs, inputs=inputs)
     return 0

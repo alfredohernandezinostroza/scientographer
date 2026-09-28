@@ -1,240 +1,205 @@
-from fa2 import ForceAtlas2
+"""Build the citation graph from two tables: the papers and their references.
+
+This is where a corpus enters Scientographer. Whatever databases the papers came
+from, bring them to two tables (parquet or CSV):
+
+- **papers** -- one row per paper, with a ``doi`` column and any metadata you want
+  on the map. The stages downstream use ``title``, ``authors``, ``keywords``,
+  ``abstract``, ``journal`` and ``year`` when present. ``authors`` and
+  ``keywords`` may be lists or ``|``-separated strings.
+- **references** -- one row per citing paper: ``citing_doi`` and ``cited_dois``
+  (a list, or a ``|``-separated string).
+
+The graph keeps only citations between two papers of the corpus, drops papers
+with no such citation, and keeps the largest weakly connected component
+(community detection needs a connected graph). DOIs are lower-cased on both
+sides. Every column of the papers table becomes a vertex attribute; the DOI is
+the vertex ``name``, which is how every later stage matches papers.
+
+Output: ``citation_network.output_graphml`` from params.yaml, the input of
+``detect_communities``.
+"""
+
+import logging
+from pathlib import Path
 import sys
-import pickle
-from hamilton_sdk import adapters
+from typing import Final
+
 from hamilton import driver
 from hamilton.function_modifiers import dataloader, datasaver
 from hamilton.io import utils
-from pathlib import Path
-import logging
-import pandas as pd
-import igraph as ig
-from motor_learning_network.constants import (
-    PROCESSED_DATA_PATH,
-    FIGURES_PATH,
-    EMAIL,
-    OPENCITATIONS_ACCESS_TOKEN,
-    DEFAULT_UI_PROJECT_ID,
-    DEFAULT_UI_USERNAME,
-    TEAM_NAME,
-)
 import hamilton.log_setup
+import igraph as ig
+import pandas as pd
+
+from scientographer.config import FIGURES_PATH, draw_dag, ensure_dirs, params, tracker_adapters
 
 ###################
 ##   Constants   ##
 ###################
 CURRENT_FILE_NAME = Path(__file__).stem
 hamilton.log_setup.setup_logging(logging.INFO)
-
 logger = logging.getLogger(__name__)
 
 EXECUTE = True
-if EXECUTE:
-    logger.info("Executing the DAG!")
+
+_cfg = params("citation_network")
+PAPERS_TABLE: Final[Path] = Path(_cfg["papers_table"])
+REFERENCES_TABLE: Final[Path] = Path(_cfg["references_table"])
+OUTPUT_GRAPHML: Final[Path] = Path(_cfg["output_graphml"])
+LIST_SEPARATOR: Final[str] = str(_cfg.get("list_separator", "|"))
+KEEP_GIANT_COMPONENT: Final[bool] = bool(_cfg.get("keep_giant_component", True))
+
+
+#####################
+##  Aux Functions  ##
+#####################
+def _read_table(path: Path) -> pd.DataFrame:
+    path = Path(path)
+    if path.suffix.lower() == ".parquet":
+        return pd.read_parquet(path)
+    if path.suffix.lower() in (".csv", ".tsv"):
+        return pd.read_csv(path, sep="\t" if path.suffix.lower() == ".tsv" else ",")
+    raise ValueError(f"{path}: use a .parquet, .csv or .tsv table")
+
+
+def _as_list(value, separator: str) -> list[str]:
+    """A list-like cell (list, tuple, numpy array, or separated string) as a list
+    of stripped, non-empty strings."""
+    if value is None:
+        return []
+    if isinstance(value, float) and pd.isna(value):
+        return []
+    if isinstance(value, str):
+        items = value.split(separator)
+    else:
+        try:
+            items = list(value)
+        except TypeError:
+            items = [value]
+    return [str(item).strip() for item in items if item is not None and str(item).strip()]
+
+
+def _normalize_doi(doi) -> str:
+    return str(doi).strip().lower() if doi is not None and not (isinstance(doi, float) and pd.isna(doi)) else ""
+
+
+def _citation_edges(references: pd.DataFrame, valid_dois: set[str], separator: str) -> list[tuple[str, str]]:
+    """(citing, cited) pairs with both ends in the corpus; duplicates and self-citations dropped."""
+    edges = set()
+    for citing, cited_dois in zip(references["citing_doi"], references["cited_dois"]):
+        citing = _normalize_doi(citing)
+        if citing not in valid_dois:
+            continue
+        for cited in _as_list(cited_dois, separator):
+            cited = _normalize_doi(cited)
+            if cited in valid_dois and cited != citing:
+                edges.add((citing, cited))
+    return sorted(edges)
+
+
+def _build_graph(
+    papers: pd.DataFrame, edges: list[tuple[str, str]], separator: str, keep_giant_component: bool
+) -> ig.Graph:
+    papers = papers.assign(doi=papers["doi"].map(_normalize_doi))
+    papers = papers[papers["doi"] != ""].drop_duplicates("doi").set_index("doi")
+    dois = sorted(papers.index)
+    index = {doi: i for i, doi in enumerate(dois)}
+
+    graph = ig.Graph(directed=True)
+    graph.add_vertices(len(dois))
+    graph.vs["name"] = dois
+    graph.add_edges([(index[a], index[b]) for a, b in edges])
+
+    graph.delete_vertices(graph.vs.select(_degree=0))
+    if keep_giant_component and graph.vcount():
+        graph = graph.connected_components(mode="weak").giant()
+
+    rows = papers.loc[graph.vs["name"]]
+    for column in rows.columns:
+        values = rows[column].tolist()
+        if column in ("authors", "keywords"):
+            values = [separator.join(_as_list(v, separator)) for v in values]
+        elif rows[column].dtype == object:
+            # GraphML string columns must not mix str and NaN (igraph drops them).
+            values = ["" if v is None or (isinstance(v, float) and pd.isna(v)) else str(v) for v in values]
+        graph.vs[column] = values
+    return graph
+
 
 ##################
 ##     Main     ##
 ##################
 def _main() -> int:
-
-    UI_CONFIG = adapters.HamiltonTracker(
-        project_id=DEFAULT_UI_PROJECT_ID,
-        username=DEFAULT_UI_USERNAME,
-        dag_name=CURRENT_FILE_NAME,
-        tags={"environment": "DEV", "team": TEAM_NAME, "version": "0.1"},
-    )
-    print(UI_CONFIG)
-
-    ########################
-    ## Inputs and Outputs ##
-    ########################
+    ensure_dirs(FIGURES_PATH, OUTPUT_GRAPHML.parent)
     inputs = dict(
-        clean_unified_database_path=PROCESSED_DATA_PATH / "clean_unified_database.parquet",
-        # references_path=PROCESSED_DATA_PATH / "references_opencitations.parquet",
-        references_path=PROCESSED_DATA_PATH / "updated_references.parquet",
-        citation_network_path=PROCESSED_DATA_PATH / "citation_network", #format will be added later
-        citation_network_plot_path=FIGURES_PATH / "citation_network", #format will be added later
+        papers_table_path=PAPERS_TABLE,
+        references_table_path=REFERENCES_TABLE,
+        list_separator=LIST_SEPARATOR,
+        keep_giant_component=KEEP_GIANT_COMPONENT,
+        output_graphml_path=OUTPUT_GRAPHML,
     )
-    outputs = [
-        # "save_citation_network_as_pickle",
-        "save_citation_network_without_layout_as_graphml",
-        # "plot_citation_network",
-    ]
+    outputs = ["save_citation_network"]
 
     import __main__
 
     dr = (
         driver.Builder()
         .with_modules(__main__)
-        # .with_config()
-        # .with_cache()
-        .with_adapters(UI_CONFIG)
+        .with_adapters(*tracker_adapters(CURRENT_FILE_NAME))
         .build()
     )
-
-    #######################
-    ##   Sanity checks   ##
-    #######################
     dr.validate_execution(outputs, inputs=inputs)
-    dr.display_all_functions(
-        FIGURES_PATH / f"{CURRENT_FILE_NAME}_all_functions.png", keep_dot=True
-    )
-    dr.visualize_execution(
-        outputs,
-        inputs=inputs,
-        output_file_path=FIGURES_PATH / f"{CURRENT_FILE_NAME}.png",
-        keep_dot=False,
-    )
-
-    ###################
-    ##   Execution   ##
-    ###################
+    draw_dag(dr, CURRENT_FILE_NAME, outputs, inputs)
     if EXECUTE:
         dr.execute(outputs, inputs=inputs)
     return 0
 
 
-#####################
-##  Aux Functions  ##
-#####################
-
-def _build_edges_from_references(
-    references_df: pd.DataFrame, valid_dois: set[str]
-) -> list[tuple[str, str]]:
-    """
-    Build directed edges (citing_doi -> cited_doi) keeping only edges where
-    both endpoints are in the unified database (i.e., in valid_dois).
-    """
-    edges = []
-    for _, row in references_df.iterrows():
-        citing = row.get("citing_doi")
-        cited_dois = row.get("cited_dois", ())
-        if not citing or citing not in valid_dois:
-            continue
-        if cited_dois is None:
-            continue
-        for cited in cited_dois:
-            if cited and cited in valid_dois:
-                edges.append((citing, cited))
-    return edges
-
 #########################
 ##    DAG Definition   ##
 #########################
+@dataloader()
+def papers(papers_table_path: Path) -> tuple[pd.DataFrame, dict]:
+    table = _read_table(papers_table_path)
+    if "doi" not in table.columns:
+        raise ValueError(f"{papers_table_path} needs a 'doi' column; has {list(table.columns)}")
+    return table, utils.get_file_metadata(papers_table_path)
+
 
 @dataloader()
-def clean_unified_database(clean_unified_database_path: Path) -> tuple[pd.DataFrame, dict]:
-    """Load the unified (cleaned) database of papers."""
-    db = pd.read_parquet(clean_unified_database_path)
-    return db, utils.get_file_metadata(clean_unified_database_path)
+def references(references_table_path: Path) -> tuple[pd.DataFrame, dict]:
+    table = _read_table(references_table_path)
+    missing = {"citing_doi", "cited_dois"} - set(table.columns)
+    if missing:
+        raise ValueError(f"{references_table_path} is missing columns {sorted(missing)}")
+    return table, utils.get_file_metadata(references_table_path)
 
 
-@dataloader()
-def references_df(references_path: Path) -> tuple[pd.DataFrame, dict]:
-    """Load the OpenCitations references dataframe.
-
-    Expected columns: citing_doi, cited_dois (tuple/list of DOIs).
-    """
-    df = pd.read_parquet(references_path)
-    return df, utils.get_file_metadata(references_path)
+def valid_dois(papers: pd.DataFrame) -> set[str]:
+    return {d for d in papers["doi"].map(_normalize_doi) if d}
 
 
-def valid_dois(clean_unified_database: pd.DataFrame) -> set[str]:
-    """Extract the set of lowercase DOIs present in the unified database."""
-    dois = clean_unified_database["doi"].dropna()
-    dois = dois[dois != ""].str.lower()
-    return set(dois.tolist())
-
-
-def citation_edges(references_df: pd.DataFrame, valid_dois: set[str]) -> list[tuple[str, str]]:
-    """Build the list of directed citation edges (citing -> cited) restricted
-    to papers that exist in the unified database."""
-    edges = _build_edges_from_references(references_df, valid_dois)
-    logger.info(f"Built {len(edges)} citation edges from {len(valid_dois)} valid DOIs.")
+def citation_edges(references: pd.DataFrame, valid_dois: set[str], list_separator: str) -> list[tuple[str, str]]:
+    edges = _citation_edges(references, valid_dois, list_separator)
+    logger.info("%d citations between %d corpus papers", len(edges), len(valid_dois))
     return edges
 
 
-def citation_network(citation_edges: list[tuple[str, str]], valid_dois: set[str], clean_unified_database: pd.DataFrame) -> ig.Graph:
-    """Build a directed igraph citation network.
+def citation_network(
+    papers: pd.DataFrame, citation_edges: list[tuple[str, str]], list_separator: str, keep_giant_component: bool
+) -> ig.Graph:
+    graph = _build_graph(papers, citation_edges, list_separator, keep_giant_component)
+    logger.info("citation network: %d vertices, %d edges", graph.vcount(), graph.ecount())
+    return graph
 
-    Every paper in the unified database gets a vertex (isolated papers
-    included). Vertex index matches the sorted position of the DOI.
-    """
-    all_dois = sorted(valid_dois)
-    doi_to_idx = {doi: i for i, doi in enumerate(all_dois)}
-
-    g = ig.Graph(directed=True)
-    g.add_vertices(len(all_dois))
-    g.vs["name"] = all_dois  # fast lookup
-    g.vs["doi"] = g.vs["name"]
-
-    int_edges = [(doi_to_idx[src], doi_to_idx[dst]) for src, dst in citation_edges]
-    g.add_edges(int_edges)
-
-    logger.info(
-        f"Citation network: {g.vcount()} vertices, {g.ecount()} edges."
-    )
-
-    #delete isolated nodes. Note that this is not necessary if we later retrieve only the giant component, but we get nice information of the amount of isolated papers
-    g.delete_vertices(g.vs.select(_degree=0))
-    logger.info(
-        f"Citation network after deleting isolated nodes: {g.vcount()} vertices, {g.ecount()} edges."
-    )
-
-    #get giant component
-    components = g.connected_components(mode="weak") #weak is to ignore direction, which is what we want for a citation network
-    giant = components.giant()
-    logger.info(
-        f"Citation network after taking giant components: {giant.vcount()} vertices, {giant.ecount()} edges."
-    )
-
-    clean_unified_database = clean_unified_database.set_index("doi")
-    columns = clean_unified_database.columns.to_list()
-    for col in columns:
-        giant.vs[col] = clean_unified_database.loc[giant.vs["name"], col].tolist()
-    giant.vs["keywords"] = ["|".join(map(str.strip, keywords)) if keywords.tolist() else "" for keywords in giant.vs["keywords"]]
-    giant.vs["authors"] = ["|".join(map(str.strip, authors)) if authors.tolist() else "" for authors in giant.vs["authors"]]
-    return giant
 
 @datasaver()
-def save_citation_network_without_layout_as_graphml(citation_network: ig.Graph, citation_network_path: Path) -> dict:
-    """Save the igraph citation network as a pickle file."""
-    path = citation_network_path.with_name(f"{citation_network_path.stem}_without_layout_updated_citations")
-    path = path.with_suffix(".graphml")
-    citation_network.write(path)
-    metadata = utils.get_file_metadata(path)
-    return metadata
+def save_citation_network(citation_network: ig.Graph, output_graphml_path: Path) -> dict:
+    Path(output_graphml_path).parent.mkdir(parents=True, exist_ok=True)
+    citation_network.write_graphml(str(output_graphml_path))
+    return utils.get_file_metadata(output_graphml_path)
 
-def citation_network_with_layout(citation_network: ig.Graph) -> ig.Graph:
-    forceatlas2 = ForceAtlas2(verbose=True)
-    layout = forceatlas2.forceatlas2_igraph_layout(citation_network.as_undirected(), iterations=500)
-    citation_network.vs["x"] = [coord[0] for coord in layout]
-    citation_network.vs["y"] = [coord[1] for coord in layout]
-    return citation_network
-
-@datasaver()
-def plot_citation_network(citation_network_with_layout: ig.Graph, citation_network_plot_path: Path) -> dict:
-    citation_network_plot_path = citation_network_plot_path.with_suffix("png")
-    ig.plot(citation_network_with_layout, target=citation_network_plot_path)
-    metadata = utils.get_file_metadata(citation_network_plot_path)
-    return metadata
-
-@datasaver()
-def save_citation_network_as_pickle(citation_network_with_layout: ig.Graph, citation_network_path: Path) -> dict:
-    """Save the igraph citation network as a pickle file."""
-    path = citation_network_path.with_suffix(".pickle")
-    with open(path, "wb") as f:
-        pickle.dump(citation_network_with_layout, f, protocol=pickle.HIGHEST_PROTOCOL)
-    metadata = utils.get_file_metadata(path)
-    return metadata
-
-@datasaver()
-def save_citation_network_as_graphml(citation_network_with_layout: ig.Graph, citation_network_path: Path) -> dict:
-    """Save the igraph citation network as a pickle file."""
-    path = citation_network_path.with_suffix(".graphml")
-    citation_network_with_layout.write(path)
-    metadata = utils.get_file_metadata(path)
-    return metadata
 
 if __name__ == "__main__":
     sys.exit(_main())

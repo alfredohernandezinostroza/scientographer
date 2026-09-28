@@ -1,26 +1,26 @@
 import math
 
+import igraph as ig
 import numpy as np
 import pytest
-import igraph as ig
 
-from motor_learning_network.community_quality_metrics import (
-    _reciprocal_edge_pair_count,
+from scientographer.community_quality_metrics import (
+    SUBSTANTIVE_COMMUNITY_MIN_SIZE,
+    _community_surprise,
     _directed_community_edge_counts,
     _directed_conductance,
     _directed_internal_edge_density,
     _directed_surprise,
-    _community_surprise,
-    _parallel_edge_count,
-    _self_loop_count,
-    _statistical_density_surprise_threshold,
-    _percentile_summary,
-    _summarize_community_metrics,
-    SUBSTANTIVE_COMMUNITY_MIN_SIZE,
     _intra_community_edge_fraction,
     _kl_divergence_term,
-    _significance,
+    _parallel_edge_count,
+    _percentile_summary,
+    _reciprocal_edge_pair_count,
     _resolution_plateau_flags,
+    _self_loop_count,
+    _significance,
+    _statistical_density_surprise_threshold,
+    _summarize_community_metrics,
 )
 
 

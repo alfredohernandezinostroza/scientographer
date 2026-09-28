@@ -5,10 +5,10 @@ column names, and cover all three graphml bands with no gaps or duplicates -- a
 drift here would silently truncate every downstream metric plot.
 """
 
-from motor_learning_network.community_resolution_bands import (
+from scientographer.community_resolution_bands import (
+    HIGH_BAND,
     LOW_BAND,
     MID_BAND,
-    HIGH_BAND,
     RESOLUTIONS,
     community_attribute_name,
 )
