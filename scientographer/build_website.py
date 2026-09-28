@@ -1,80 +1,74 @@
-"""Build the interactive citation-network website from a single GraphML.
+"""Build the interactive citation-network website from a GraphML plus optional
+analysis outputs -- the last stage of the pipeline.
 
-Produces a self-contained sigma.js site (the same frontend as the companion
-Mariana-Embedding-Space-Analysis project) that renders this repo's citation
-network as a pannable/zoomable map: each dot is a paper, positioned by the
-graph's own layout (``x``/``y`` node attributes), colourable by semantic
-**topic** (the ``topic`` attribute) or by Leiden citation **community** (the
-``cpm_communities_at_res={COMMUNITY_RESOLUTION}`` attribute), with citation
-edges, search, filters, and per-topic/community detail panels.
+Produces a self-contained sigma.js site (frontend vendored under
+``website_assets/``) that renders the citation network as a pannable map: each
+dot is a paper, positioned by the graph's own layout (``x``/``y``), colourable
+by semantic **topic** (the ``topic`` attribute) or by Leiden/CPM citation
+**community** at any resolution the graph carries
+(``cpm_communities_at_res=<r>`` attributes), with citation edges, search,
+filters, per-group detail panels, a Metrics tab (partition quality vs.
+resolution, well-connectedness, per-community health, per-community keywords)
+and a Figures tab (word clouds and other pipeline figures).
 
-Everything is derived from ONE GraphML plus (optionally) the per-topic metrics
-from ``topic_community_analysis.py`` and the resolution-quality metrics from
-``community_quality_metrics.py``; no text-embedding UMAP parquet is needed,
-because positions come from the graph layout and cluster keyword labels are
-computed by TF-IDF over the nodes' own keyword fields. This consolidates the
-Mariana project's ``build_web_data*.py`` scripts into one Hamilton DAG.
+Inputs are a **manifest of paths**, not imports from sibling DAG modules:
+only the GraphML is required; every other input is optional and, when its
+file is absent, its panel is simply not emitted (the frontend hides panels
+whose JSON is missing). This is what lets the same builder serve a corpus that
+ran only the graph stages, and what makes it a clean ``dvc.yaml`` stage.
 
-Output (default ``reports/website/``): a directory ready to serve over HTTP ::
+What comes from where:
 
-    reports/website/
-      index.html  main.js  styles.css  tour.js   (vendored frontend, copied)
-      network_data/
-        nodes.json                     per-paper records (position, colour, metadata,
-                                        + this paper's community id at every resolution)
-        clusters.json                  topic legend (keywords, centroid, community metrics)
-        communities_by_resolution.json citation-community legend per Leiden/CPM resolution,
-                                        merged with community_quality_metrics.py's true
-                                        (full-network) per-community quality metrics
-        resolution_metrics.json        whole-graph quality metrics vs. resolution (for the
-                                        Metrics tab's small-multiple charts)
-        abstracts.json      {node_id: abstract}, lazily loaded
-        edges_out.bin       directed citation edges, CSR uint32 (out-neighbours)
-        edges_in.bin        directed citation edges, CSR uint32 (in-neighbours)
+- **resolutions** -- read from the GraphML (``cpm_communities_at_res=*``), never
+  from a constant, so the dropdown offers exactly what the graph carries.
+- **whole-graph metrics vs. resolution** -- the per-partition parquet from
+  ``community_quality_metrics.py`` when given; otherwise the graph-level
+  ``<metric>_at_res=<r>`` GraphML attributes that DAG also writes.
+- **community names** -- the ``top_keywords_at_res=<r>`` vertex attribute
+  written by ``community_keywords.py`` when present (the pipeline's
+  synonym-aware corrected-IDF labels); otherwise a quick TF-IDF over the
+  nodes' own keyword fields, computed here.
+- **per-community keyword bars** -- ``community_keyword_scores.parquet`` from
+  ``community_keywords.py`` when given; otherwise the same quick TF-IDF.
+- **figures** -- any list of files (word-cloud SVGs, PNGs) tagged with the graph
+  and resolution they belong to; copied into the site with a ``figures.json``.
 
-Serve with::
+Output (default ``reports/website/``)::
 
-    python -m http.server 8123 --directory reports/website
-    # then open http://localhost:8123
+    index.html  main.js  styles.css  tour.js        (vendored frontend, copied)
+    network_data/
+      nodes.json                     per-paper records (+ community id at every resolution)
+      clusters.json                  topic legend
+      communities_by_resolution.json citation-community legend per resolution (+ quality)
+      resolution_metrics.json        whole-graph metrics vs. resolution
+      resolution_metrics_after_cm.json, connectivity_metrics.json,
+      community_distributions.json   (optional panels)
+      community_keywords.json        per-resolution, per-community ranked keywords
+      figures.json                   the figure gallery index
+      abstracts.json, edges_out.bin, edges_in.bin
+    figures/                         copied figure files
 
-The web-export payload/CSR logic is ported from the Mariana project's
-``build_web_data.py`` / ``build_web_data_gemini.py``; graph parsing uses
-ElementTree (as the original did) because the payload builders operate on raw
-per-node attribute dicts and dense edge indices.
+Serve with ``python -m http.server 8123 --directory reports/website``.
 """
 
-import sys
-import json
-import math
-import struct
-import shutil
-import logging
-import xml.etree.ElementTree as ET
-from pathlib import Path
-from typing import Final, Optional
 from collections import Counter, defaultdict
+import json
+import logging
+import math
+from pathlib import Path
+import re
+import shutil
+import struct
+import sys
+from typing import Final, Optional
+import xml.etree.ElementTree as ET
 
+from hamilton import driver
+from hamilton.function_modifiers import datasaver, unpack_fields
+import hamilton.log_setup
 import pandas as pd
 
-from hamilton.function_modifiers import datasaver, unpack_fields
-from hamilton import driver
-import hamilton.log_setup
-
-from motor_learning_network.constants import GRAPH_LEVEL_DATA_PATH, FIGURES_PATH
-from motor_learning_network.community_quality_metrics import (
-    RESOLUTIONS,
-    PER_COMMUNITY_PARQUET,
-    PER_PARTITION_PARQUET,
-)
-from motor_learning_network.community_quality_metrics_after_connectivity_modifier import (
-    PER_PARTITION_PARQUET as AFTER_CM_PARTITION_PARQUET,
-)
-from motor_learning_network.community_connectivity_metrics import (
-    PER_PARTITION_PARQUET as CONNECTIVITY_DIAGNOSTIC_PARTITION_PARQUET,
-)
-from motor_learning_network.community_connectivity_modifier import (
-    PER_PARTITION_PARQUET as CONNECTIVITY_MODIFIER_PARTITION_PARQUET,
-)
+from motor_learning_network.constants import FIGURES_PATH, params, tracker_adapters
 
 ###################
 ##   Constants   ##
@@ -84,28 +78,28 @@ hamilton.log_setup.setup_logging(logging.INFO)
 logger = logging.getLogger(__name__)
 
 EXECUTE = True
-USE_TRACKER = False
 
 GRAPHML_NS: Final[str] = "http://graphml.graphdrawing.org/xmlns"
 NS = {"g": GRAPHML_NS}
 
-# Semantic topic and citation-community node attributes on the graph.
 TOPIC_ATTR: Final[str] = "topic"
-COMMUNITY_RESOLUTION: Final[float] = 0.005      # repo-canonical Leiden/CPM resolution
-COMMUNITY_ATTR: Final[str] = f"cpm_communities_at_res={COMMUNITY_RESOLUTION}"
+COMMUNITY_ATTRIBUTE_PREFIX: Final[str] = "cpm_communities_at_res="
+LABEL_ATTRIBUTE_PREFIX: Final[str] = "top_keywords_at_res="
 OUTLIER: Final[int] = -1
 
-# Communities below this size are left uncoloured/unnamed ("No community"),
-# mirroring the Mariana site where only the largest communities are curated.
-MIN_NAMED_GROUP_SIZE: Final[int] = 30
+# params.yaml `website`: the input manifest and the display knobs.
+_cfg = params("website")
+DEFAULT_COMMUNITY_RESOLUTION: Final[float] = float(_cfg["default_resolution"])  # see docs/RESOLUTION_SELECTION.md
+
+# Communities below this size are left uncoloured/unnamed ("No community").
+MIN_NAMED_GROUP_SIZE: Final[int] = int(_cfg["min_named_group_size"])
 
 # How many entries to keep per group for the detail panels.
 TOP_PAPERS: Final[int] = 5
 TOP_AUTHORS: Final[int] = 5
 TOP_KEYWORDS: Final[int] = 10
+TOP_KEYWORD_BARS: Final[int] = 12   # keywords per community in community_keywords.json
 
-# Distinct, high-contrast palette (cycled), kept clear of near-black tones since
-# the map background is dark. Outliers/small groups get grey.
 PALETTE: Final[list[str]] = [
     "#e6194B", "#3cb44b", "#4363d8", "#f58231", "#911eb4",
     "#42d4f4", "#f032e6", "#bfef45", "#fabed4", "#469990",
@@ -115,8 +109,31 @@ PALETTE: Final[list[str]] = [
 OUTLIER_COLOR: Final[str] = "#cccccc"
 
 ASSETS_DIR: Final[Path] = Path(__file__).resolve().parent / "website_assets"
-WEBSITE_DIR: Final[Path] = Path("reports", "website")
+FRONTEND_FILES: Final[tuple[str, ...]] = ("index.html", "main.js", "styles.css", "tour.js")
 DATA_SUBDIR: Final[str] = "network_data"
+FIGURES_SUBDIR: Final[str] = "figures"
+WORDCLOUDS_DIR: Final[Path] = Path(_cfg["wordclouds_dir"])
+
+
+def _optional_path(key: str) -> Optional[Path]:
+    value = _cfg.get(key)
+    return Path(value) if value else None
+
+
+# The input manifest from params.yaml `website`. Everything but the graphml is
+# optional: point `graphml` at any graphml with a layout to build a site for it.
+DEFAULT_INPUTS: Final[dict] = dict(
+    graphml_path=Path(_cfg["graphml"]),
+    topic_metrics_path=_optional_path("topic_metrics"),
+    per_community_metrics_path=_optional_path("per_community_metrics"),
+    per_partition_metrics_path=_optional_path("per_partition_metrics"),
+    after_cm_partition_metrics_path=_optional_path("after_cm_partition_metrics"),
+    connectivity_diagnostic_partition_path=_optional_path("connectivity_diagnostic_partition"),
+    connectivity_modifier_partition_path=_optional_path("connectivity_modifier_partition"),
+    community_keyword_scores_path=_optional_path("community_keyword_scores"),
+    default_resolution=DEFAULT_COMMUNITY_RESOLUTION,
+    website_dir=Path(_cfg["output_dir"]),
+)
 
 
 #####################
@@ -145,11 +162,23 @@ def _cluster_color(cid: int) -> str:
 
 
 def _parse_graphml(graphml_file: Path):
-    """Return (nodes, edges, id_to_idx): nodes = [(graphml_id, attrs_dict)],
-    edges = [(src_idx, tgt_idx)] over the dense node index."""
+    """Return (nodes, edges, graph_attributes, node_attribute_names):
+    nodes = [(graphml_id, attrs_dict)], edges = [(src_idx, tgt_idx)] over the
+    dense node index, graph_attributes = the ``<data>`` children of ``<graph>``
+    (igraph writes graph-level attributes there), node_attribute_names = every
+    declared ``<key for="node">`` name (so absent-on-some-nodes attributes are
+    still known)."""
     tree = ET.parse(graphml_file)
     root = tree.getroot()
     keys = {k.attrib["id"]: k.attrib["attr.name"] for k in root.findall("g:key", NS)}
+    node_attribute_names = [
+        k.attrib["attr.name"] for k in root.findall("g:key", NS) if k.attrib.get("for") == "node"]
+
+    graph_el = root.find("g:graph", NS)
+    graph_attributes = {
+        keys.get(d.attrib["key"], d.attrib["key"]): d.text
+        for d in graph_el.findall("g:data", NS)
+    } if graph_el is not None else {}
 
     nodes, id_to_idx = [], {}
     for node_el in root.findall("g:graph/g:node", NS):
@@ -165,7 +194,52 @@ def _parse_graphml(graphml_file: Path):
         t = id_to_idx.get(edge_el.attrib["target"])
         if s is not None and t is not None:
             edges.append((s, t))
-    return nodes, edges, id_to_idx
+    return nodes, edges, graph_attributes, node_attribute_names
+
+
+def _resolutions_from_attribute_names(names) -> list[float]:
+    found = set()
+    for name in names:
+        if name.startswith(COMMUNITY_ATTRIBUTE_PREFIX):
+            try:
+                found.add(float(name[len(COMMUNITY_ATTRIBUTE_PREFIX):]))
+            except ValueError:
+                continue
+    return sorted(found)
+
+
+_AT_RES = re.compile(r"^(?P<metric>.+)_at_res=(?P<resolution>[0-9.eE+-]+)$")
+
+
+def _coerce_scalar(text):
+    if text is None:
+        return None
+    t = text.strip()
+    if t.lower() in ("true", "false"):
+        return t.lower() == "true"
+    try:
+        v = float(t)
+    except ValueError:
+        return t
+    if not math.isfinite(v):
+        return None
+    return int(v) if v.is_integer() and "." not in t and "e" not in t.lower() else v
+
+
+def _partition_records_from_graph_attributes(graph_attributes: dict) -> list[dict]:
+    """Graph-level ``<metric>_at_res=<r>`` attributes -> one record per
+    resolution (same shape as the per-partition parquet's rows)."""
+    by_resolution: dict[float, dict] = defaultdict(dict)
+    for key, text in graph_attributes.items():
+        m = _AT_RES.match(key)
+        if not m:
+            continue
+        try:
+            resolution = float(m.group("resolution"))
+        except ValueError:
+            continue
+        by_resolution[resolution][m.group("metric")] = _coerce_scalar(text)
+    return [{"resolution": r, **by_resolution[r]} for r in sorted(by_resolution)]
 
 
 def _build_csr(num_nodes: int, edges: list, direction: str):
@@ -198,7 +272,8 @@ def _write_csr(path: Path, offsets: list, targets: list) -> None:
 def _top_lists_by_group(records: list[dict], group_field: str) -> dict[int, dict]:
     """Per-group top papers (by in-degree), top authors (by paper count), and top
     *distinctive* keywords (TF-IDF over groups, so generic terms are down-weighted).
-    Used for both the topic and community legends."""
+    Used for both the topic and community legends (and as the keyword fallback
+    when community_keywords.py has not run)."""
     papers: dict[int, list] = defaultdict(list)
     authors: dict[int, Counter] = defaultdict(Counter)
     kw_in_group: dict[int, Counter] = defaultdict(Counter)
@@ -248,37 +323,75 @@ def _label_from_keywords(top_keywords: list[dict], fallback: str) -> str:
     return ", ".join(k["keyword"] for k in top_keywords[:3]) if top_keywords else fallback
 
 
-def _resolution_communities(a: dict) -> dict[str, int]:
-    """This paper's community id at every swept Leiden/CPM resolution, read
-    from the graph's `cpm_communities_at_res=<r>` attributes."""
-    return {str(r): _to_int(a.get(f"cpm_communities_at_res={r}"), OUTLIER) for r in RESOLUTIONS}
+def _resolution_communities(a: dict, resolutions: list[float]) -> dict[str, int]:
+    """This paper's community id at every resolution the graph carries."""
+    return {str(r): _to_int(a.get(f"{COMMUNITY_ATTRIBUTE_PREFIX}{r}"), OUTLIER) for r in resolutions}
+
+
+def _optional_parquet(path) -> Optional[pd.DataFrame]:
+    if path is None:
+        return None
+    path = Path(path)
+    if not path.exists():
+        logger.info("optional input absent, its panel is skipped: %s", path)
+        return None
+    return pd.read_parquet(path)
+
+
+def _partition_records(df: pd.DataFrame) -> list[dict]:
+    """A per-partition parquet as a resolution-sorted list of records, NaN/inf →
+    null so it survives json.dump/JSON.parse."""
+    records = []
+    for row in df.sort_values("resolution").itertuples(index=False):
+        records.append({
+            k: (None if isinstance(v, float) and not math.isfinite(v) else v)
+            for k, v in row._asdict().items()
+        })
+    return records
+
+
+_WORDCLOUD_RESOLUTION = re.compile(r"_at_(?P<resolution>[0-9.]+)_")
+_UNTIL_YEAR = re.compile(r"until_(?P<year>\d{4})")
+
+
+def discover_wordcloud_figures(keywords_level_data_path: Path = WORDCLOUDS_DIR) -> list[dict]:
+    """The word-cloud SVGs written by find_keywords_per_cluster_noverlap.py, as
+    figure-manifest entries. The graph and resolution are parsed from the path
+    (``until_<year>_wordcloud_noverlap/wordclouds/<kind>_until_<year>_wordcloud_at_<r>_...svg``)."""
+    root = Path(keywords_level_data_path)
+    # Either the study's tree of per-year run dirs, or one run dir on its own.
+    found = sorted(set(root.glob("*/wordclouds/*.svg")) | set(root.glob("wordclouds/*.svg")))
+    entries = []
+    for svg in found:
+        stem = svg.stem
+        res_match = _WORDCLOUD_RESOLUTION.search(stem)
+        year_match = _UNTIL_YEAR.search(stem)
+        kind = "frequency-wordcloud" if stem.startswith("frequency") else "tfidf-wordcloud"
+        graph = f"until_{year_match.group('year')}" if year_match else None
+        resolution = float(res_match.group("resolution")) if res_match else None
+        title = ("Keyword frequency" if kind == "frequency-wordcloud" else "Distinguishing keywords (TF-IDF)")
+        if graph:
+            title += f" · {graph.replace('_', ' ')}"
+        if resolution is not None:
+            title += f" · resolution {resolution}"
+        entries.append({"path": str(svg), "kind": kind, "graph": graph, "resolution": resolution, "title": title})
+    return entries
 
 
 ##################
 ##     Main     ##
 ##################
 def _main() -> int:
-    inputs = dict(
-        graphml_path=GRAPH_LEVEL_DATA_PATH / "citation_network_with_topics_new.graphml",
-        topic_metrics_path=GRAPH_LEVEL_DATA_PATH / "topic_community" / "topic_community_metrics.json",
-        per_community_metrics_path=PER_COMMUNITY_PARQUET,
-        per_partition_metrics_path=PER_PARTITION_PARQUET,
-        after_cm_partition_metrics_path=AFTER_CM_PARTITION_PARQUET,
-        connectivity_diagnostic_partition_path=CONNECTIVITY_DIAGNOSTIC_PARTITION_PARQUET,
-        connectivity_modifier_partition_path=CONNECTIVITY_MODIFIER_PARTITION_PARQUET,
-    )
+    inputs = dict(DEFAULT_INPUTS)
+    inputs["figure_manifest"] = discover_wordcloud_figures()
     outputs = ["assembled_website"]
     import __main__
-    builder = driver.Builder().with_modules(__main__)
-    if USE_TRACKER:
-        from hamilton_sdk import adapters
-        from motor_learning_network.constants import (
-            DEFAULT_UI_PROJECT_ID, DEFAULT_UI_USERNAME, TEAM_NAME)
-        builder = builder.with_adapters(adapters.HamiltonTracker(
-            project_id=DEFAULT_UI_PROJECT_ID, username=DEFAULT_UI_USERNAME,
-            dag_name=CURRENT_FILE_NAME,
-            tags={"environment": "DEV", "team": TEAM_NAME, "version": "0.1"}))
-    dr = builder.build()
+    dr = (
+        driver.Builder()
+        .with_modules(__main__)
+        .with_adapters(*tracker_adapters(CURRENT_FILE_NAME))  # params.yaml `tracker.enabled`
+        .build()
+    )
     dr.validate_execution(outputs, inputs=inputs)
     dr.display_all_functions(
         FIGURES_PATH / f"{CURRENT_FILE_NAME}_all_functions.png", keep_dot=True, deduplicate_inputs=True)
@@ -293,35 +406,57 @@ def _main() -> int:
 #########################
 ##    DAG Definition   ##
 #########################
-@unpack_fields("raw_nodes", "edges")
-def parsed_graphml(graphml_path: Path) -> tuple[list, list]:
-    raw_nodes, edges, _ = _parse_graphml(graphml_path)
-    logger.info("parsed graphml: %d nodes, %d edges", len(raw_nodes), len(edges))
-    return raw_nodes, edges
+@unpack_fields("raw_nodes", "edges", "graph_attributes", "node_attribute_names")
+def parsed_graphml(graphml_path: Path) -> tuple[list, list, dict, list]:
+    raw_nodes, edges, graph_attributes, node_attribute_names = _parse_graphml(graphml_path)
+    logger.info("parsed graphml: %d nodes, %d edges, %d graph-level attributes",
+                len(raw_nodes), len(edges), len(graph_attributes))
+    return raw_nodes, edges, graph_attributes, node_attribute_names
 
 
-def topic_metrics(topic_metrics_path: Path) -> dict:
+def resolutions(node_attribute_names: list) -> list[float]:
+    """Every Leiden/CPM resolution the graph carries a community assignment for."""
+    found = _resolutions_from_attribute_names(node_attribute_names)
+    logger.info("graph carries %d community resolutions: %s", len(found), found)
+    return found
+
+
+def community_resolution(resolutions: list[float], default_resolution: float) -> Optional[float]:
+    """The resolution the map is coloured by on load: the requested default when
+    the graph has it, else the lowest one (with a warning), else None."""
+    if not resolutions:
+        logger.warning("graph has no community assignments; the community grouping will be empty")
+        return None
+    if default_resolution in resolutions:
+        return default_resolution
+    logger.warning("default resolution %s not on the graph; using %s", default_resolution, resolutions[0])
+    return resolutions[0]
+
+
+def topic_metrics(topic_metrics_path: Optional[Path]) -> dict:
     """Optional per-topic citation-community metrics from topic_community_analysis.py."""
-    if Path(topic_metrics_path).exists():
+    if topic_metrics_path is not None and Path(topic_metrics_path).exists():
         with open(topic_metrics_path, "r", encoding="utf-8") as f:
             m = json.load(f)
         logger.info("loaded topic-community metrics for %d topics", len(m))
         return m
-    logger.info("no topic-community metrics at %s (topic panels omit them)", topic_metrics_path)
+    logger.info("no topic-community metrics (topic panels omit them)")
     return {}
 
 
-def node_records(raw_nodes: list) -> list[dict]:
+def node_records(raw_nodes: list, resolutions: list[float], community_resolution: Optional[float]) -> list[dict]:
     """Per-paper web records: position (graph x/y), semantic topic (`cluster`
-    field + `color`), citation community (`community` + `community_color`), and
-    display metadata. Communities below MIN_NAMED_GROUP_SIZE are greyed."""
+    + `color`), citation community at the default resolution (`community` +
+    `community_color`, greyed below MIN_NAMED_GROUP_SIZE), the community id at
+    every resolution (`communities`), and display metadata."""
+    community_attr = f"{COMMUNITY_ATTRIBUTE_PREFIX}{community_resolution}" if community_resolution is not None else None
     community_sizes: Counter = Counter(
-        _to_int(a.get(COMMUNITY_ATTR), OUTLIER) for _, a in raw_nodes)
+        _to_int(a.get(community_attr), OUTLIER) for _, a in raw_nodes) if community_attr else Counter()
 
     records = []
     for nid, a in raw_nodes:
         topic = _to_int(a.get(TOPIC_ATTR), OUTLIER)
-        community = _to_int(a.get(COMMUNITY_ATTR), OUTLIER)
+        community = _to_int(a.get(community_attr), OUTLIER) if community_attr else OUTLIER
         named = community >= 0 and community_sizes[community] >= MIN_NAMED_GROUP_SIZE
         records.append({
             "id": nid,
@@ -331,11 +466,11 @@ def node_records(raw_nodes: list) -> list[dict]:
             "year": _to_int(a.get("year")),
             "journal": (a.get("journal") or "").strip(),
             "doi": (a.get("name") or "").strip(),
-            "cluster": topic,                                # semantic grouping
+            "cluster": topic,
             "color": _cluster_color(topic),
-            "community": community,                          # citation grouping (at COMMUNITY_RESOLUTION)
+            "community": community,
             "community_color": _cluster_color(community) if named else OUTLIER_COLOR,
-            "communities": _resolution_communities(a),       # same grouping at every swept resolution
+            "communities": _resolution_communities(a, resolutions),
             "x": round(_to_float(a.get("x"), 0.0), 3),
             "y": round(_to_float(a.get("y"), 0.0), 3),
             "size": round(_to_float(a.get("size"), 1.0), 3),
@@ -350,10 +485,31 @@ def abstracts(raw_nodes: list) -> dict:
             for nid, a in raw_nodes if (a.get("abstract") or "").strip()}
 
 
+def community_labels_from_graph(raw_nodes: list, resolutions: list[float]) -> dict[str, dict[str, str]]:
+    """resolution (str) -> community_id (str) -> label, from the
+    ``top_keywords_at_res=<r>`` vertex attributes written by
+    community_keywords.py. Empty where the graph has no such attribute."""
+    labels: dict[str, dict[str, str]] = {}
+    for r in resolutions:
+        label_attr = f"{LABEL_ATTRIBUTE_PREFIX}{r}"
+        community_attr = f"{COMMUNITY_ATTRIBUTE_PREFIX}{r}"
+        per_community: dict[str, str] = {}
+        for _, a in raw_nodes:
+            label = (a.get(label_attr) or "").strip()
+            if not label:
+                continue
+            cid = _to_int(a.get(community_attr), OUTLIER)
+            if cid >= 0 and str(cid) not in per_community:
+                per_community[str(cid)] = label
+        if per_community:
+            labels[str(r)] = per_community
+    if labels:
+        logger.info("community labels from the graph at %d resolutions", len(labels))
+    return labels
+
+
 def clusters_legend(node_records: list[dict], topic_metrics: dict) -> dict:
-    """Legend for the semantic `cluster` (topic) grouping: keyword label,
-    UMAP-free centroid (mean x/y), size, keywords, and the optional per-topic
-    citation-community metrics merged in for the detail panel."""
+    """Legend for the semantic `cluster` (topic) grouping."""
     top_lists = _top_lists_by_group(node_records, "cluster")
     agg: dict[int, dict] = defaultdict(lambda: {"size": 0, "sx": 0.0, "sy": 0.0})
     for r in node_records:
@@ -365,7 +521,7 @@ def clusters_legend(node_records: list[dict], topic_metrics: dict) -> dict:
     clusters = {}
     for cid in sorted(agg):
         if cid < 0:
-            continue  # topic -1 = "no topic"
+            continue
         lists = top_lists.get(cid, {})
         kws = lists.get("top_keywords", [])
         a = agg[cid]
@@ -386,120 +542,94 @@ def clusters_legend(node_records: list[dict], topic_metrics: dict) -> dict:
     return clusters
 
 
-def per_community_quality_df(per_community_metrics_path: Path) -> pd.DataFrame:
-    """Per-(resolution, community) quality metrics from community_quality_metrics.py
-    -- the true values computed on the full, unfiltered citation network (this
-    site only plots the subset of papers that also have a semantic topic)."""
-    return pd.read_parquet(per_community_metrics_path)
+def per_community_quality_df(per_community_metrics_path: Optional[Path]) -> Optional[pd.DataFrame]:
+    """Per-(resolution, community) quality metrics from community_quality_metrics.py."""
+    return _optional_parquet(per_community_metrics_path)
 
 
-def per_partition_quality_df(per_partition_metrics_path: Path) -> pd.DataFrame:
-    """Per-resolution partition-level quality metrics (modularity, constant
-    Potts model score, surprise, significance, cross-seed stability, adjacent-
-    resolution plateau detection, ...) from community_quality_metrics.py."""
-    return pd.read_parquet(per_partition_metrics_path)
+def per_partition_quality_df(per_partition_metrics_path: Optional[Path]) -> Optional[pd.DataFrame]:
+    """Per-resolution partition-level quality metrics from community_quality_metrics.py."""
+    return _optional_parquet(per_partition_metrics_path)
 
 
-def community_quality_lookup(per_community_quality_df: pd.DataFrame) -> dict:
-    """resolution (str) -> community_id (str) -> quality metrics, for merging
-    the true full-network numbers into each resolution's community legend."""
+def per_partition_quality_after_cm_df(after_cm_partition_metrics_path: Optional[Path]) -> Optional[pd.DataFrame]:
+    return _optional_parquet(after_cm_partition_metrics_path)
+
+
+def connectivity_diagnostic_partition_df(connectivity_diagnostic_partition_path: Optional[Path]) -> Optional[pd.DataFrame]:
+    return _optional_parquet(connectivity_diagnostic_partition_path)
+
+
+def connectivity_modifier_partition_df(connectivity_modifier_partition_path: Optional[Path]) -> Optional[pd.DataFrame]:
+    return _optional_parquet(connectivity_modifier_partition_path)
+
+
+def community_keyword_scores_df(community_keyword_scores_path: Optional[Path]) -> Optional[pd.DataFrame]:
+    """Long-form ranked keywords per (resolution, community) from community_keywords.py."""
+    return _optional_parquet(community_keyword_scores_path)
+
+
+def community_quality_lookup(per_community_quality_df: Optional[pd.DataFrame]) -> dict:
+    """resolution (str) -> community_id (str) -> quality metrics."""
+    if per_community_quality_df is None:
+        return {}
     quality_fields = [
         "community_size", "conductance", "conductance_out", "conductance_in",
         "internal_edge_density", "internal_edge_surprise",
         "internal_directed_edge_count", "boundary_edge_count",
     ]
+    present = [f for f in quality_fields if f in per_community_quality_df.columns]
     lookup: dict[str, dict[str, dict]] = defaultdict(dict)
     for row in per_community_quality_df.itertuples(index=False):
-        lookup[str(row.resolution)][str(int(row.community_id))] = {f: getattr(row, f) for f in quality_fields}
+        lookup[str(row.resolution)][str(int(row.community_id))] = {f: getattr(row, f) for f in present}
     return dict(lookup)
 
 
-def resolution_metrics_records(per_partition_quality_df: pd.DataFrame) -> list[dict]:
-    """The whole-graph metrics vs. resolution, as a flat list of records (one per
-    resolution) for the Metrics tab's charts and health summary. NaN (the
-    plateau-neighbor NMI at the first/last resolution) becomes null so this
-    survives json.dump/JSON.parse.
-
-    This used to add its own `median_conductance`, taken over ALL communities --
-    which is 1.0 at 8 of the 9 resolutions, because a singleton's every incident
-    edge is a boundary edge and singletons are the majority of communities. That
-    value centers the Integration colour scale, so it pinned the whole scale to
-    one half of the ramp. The population-explicit summaries computed in
-    community_quality_metrics.py (over substantive communities) are used instead
-    and flow through automatically with the rest of the parquet columns."""
-    return _partition_records(per_partition_quality_df)
-
-
-def _partition_records(df: pd.DataFrame) -> list[dict]:
-    """A per-partition parquet as a resolution-sorted list of records, NaN/inf →
-    null so it survives json.dump/JSON.parse. Shared by every per-resolution
-    metrics source (quality before, quality after CM, connectivity diagnostic)."""
-    records = []
-    for row in df.sort_values("resolution").itertuples(index=False):
-        records.append({
-            k: (None if isinstance(v, float) and not math.isfinite(v) else v)
-            for k, v in row._asdict().items()
-        })
+def resolution_metrics_records(
+    per_partition_quality_df: Optional[pd.DataFrame], graph_attributes: dict
+) -> list[dict]:
+    """Whole-graph metrics vs. resolution: the per-partition parquet when given,
+    else the graph-level ``<metric>_at_res=<r>`` attributes on the GraphML.
+    Empty when neither exists (the Metrics tab stays hidden)."""
+    if per_partition_quality_df is not None:
+        return _partition_records(per_partition_quality_df)
+    records = _partition_records_from_graph_attributes(graph_attributes)
+    if records:
+        logger.info("resolution metrics taken from %d graph-level attribute sets", len(records))
     return records
 
 
-def per_partition_quality_after_cm_df(after_cm_partition_metrics_path: Path) -> pd.DataFrame:
-    """Per-resolution quality metrics of the Connectivity-Modifier-remediated
-    partition (same structural schema as the 'before' metrics, minus the
-    stability/plateau columns), from
-    community_quality_metrics_after_connectivity_modifier.py."""
-    return pd.read_parquet(after_cm_partition_metrics_path)
-
-
-def connectivity_diagnostic_partition_df(connectivity_diagnostic_partition_path: Path) -> pd.DataFrame:
-    """Per-resolution well-connectedness diagnostic (fraction of communities whose
-    minimum edge cut exceeds log10(n), median min-cut, ...) from
-    community_connectivity_metrics.py."""
-    return pd.read_parquet(connectivity_diagnostic_partition_path)
-
-
-def connectivity_modifier_partition_df(connectivity_modifier_partition_path: Path) -> pd.DataFrame:
-    """Per-resolution Connectivity Modifier before/after summary (node coverage,
-    extant/reduced/split/degraded taxonomy) from
-    community_connectivity_modifier.py."""
-    return pd.read_parquet(connectivity_modifier_partition_path)
-
-
-def resolution_metrics_after_cm_records(per_partition_quality_after_cm_df: pd.DataFrame) -> list[dict]:
-    """The after-CM whole-graph metrics vs. resolution, same record shape as
-    resolution_metrics_records so the frontend can overlay it as a second series."""
-    return _partition_records(per_partition_quality_after_cm_df)
+def resolution_metrics_after_cm_records(per_partition_quality_after_cm_df: Optional[pd.DataFrame]) -> list[dict]:
+    return _partition_records(per_partition_quality_after_cm_df) if per_partition_quality_after_cm_df is not None else []
 
 
 def connectivity_metrics_records(
-    connectivity_diagnostic_partition_df: pd.DataFrame,
-    connectivity_modifier_partition_df: pd.DataFrame,
+    connectivity_diagnostic_partition_df: Optional[pd.DataFrame],
+    connectivity_modifier_partition_df: Optional[pd.DataFrame],
 ) -> list[dict]:
     """The well-connectedness diagnostic merged with the Connectivity Modifier
-    before/after summary, one record per resolution — the source for the Metrics
-    tab's connectivity panels (well-connected %, node coverage before/after,
-    transformation taxonomy, median min-cut)."""
-    modifier_by_resolution = {r["resolution"]: r for r in _partition_records(connectivity_modifier_partition_df)}
+    before/after summary, one record per resolution."""
+    if connectivity_diagnostic_partition_df is None:
+        return []
+    modifier_by_resolution = (
+        {r["resolution"]: r for r in _partition_records(connectivity_modifier_partition_df)}
+        if connectivity_modifier_partition_df is not None else {})
     merged = []
     for diagnostic in _partition_records(connectivity_diagnostic_partition_df):
         merged.append({**diagnostic, **modifier_by_resolution.get(diagnostic["resolution"], {})})
     return merged
 
 
-def community_distribution_records(per_community_quality_df: pd.DataFrame) -> dict:
+def community_distribution_records(
+    per_community_quality_df: Optional[pd.DataFrame], community_resolution: Optional[float]
+) -> dict:
     """Every community's health metrics at every resolution, as parallel numeric
-    arrays per resolution, for the Metrics tab's distribution views (size-band
-    composition, percentile ribbons, histograms, size-vs-health scatter).
+    arrays per resolution (the singleton mass never reaches the legend, so the
+    health views need this)."""
+    if per_community_quality_df is None:
+        return {}
 
-    The community legend only carries the ~90 communities big enough to name, so
-    the artifact mass -- the ~50-70% of communities that are singletons -- never
-    reaches the browser at all. These views exist precisely to show it, so they
-    need every community. Parallel arrays (rather than one object per community)
-    keep that ~20k-row payload small; values are rounded since they only drive
-    binning and plotting."""
     def _rounded(values, digits: int) -> list:
-        # JSON has no Infinity/NaN literal -- json.dump would emit one anyway and
-        # JSON.parse then rejects the whole file, silently disabling these views.
         return [round(float(v), digits) if math.isfinite(v) else None for v in values]
 
     by_resolution: dict[str, dict] = {}
@@ -512,22 +642,24 @@ def community_distribution_records(per_community_quality_df: pd.DataFrame) -> di
             "internal_edge_density": _rounded(group["internal_edge_density"], 5),
             "internal_edge_surprise": _rounded(group["internal_edge_surprise"], 2),
         }
-    return {"default_resolution": str(COMMUNITY_RESOLUTION), "by_resolution": by_resolution}
+    return {"default_resolution": str(community_resolution), "by_resolution": by_resolution}
 
 
-def communities_legend_by_resolution(node_records: list[dict], community_quality_lookup: dict) -> dict:
-    """Per-resolution version of the citation-community legend: for each of the
-    swept Leiden/CPM resolutions, the same top-papers/authors/keywords/centroid
-    legend as before (only communities >= MIN_NAMED_GROUP_SIZE, mirroring 'only
-    the largest are named'), merged with the true full-network quality metrics
-    from community_quality_metrics.py. `size` is the count within this site's
-    plotted subset (for centroids/top-lists); `true_size` (from the quality
-    lookup) is added when it differs, since the full network has papers this
-    site doesn't plot (no semantic topic assigned)."""
+def communities_legend_by_resolution(
+    node_records: list[dict],
+    community_quality_lookup: dict,
+    community_labels_from_graph: dict,
+    resolutions: list[float],
+) -> dict:
+    """Per-resolution citation-community legend: for every resolution the graph
+    carries, top papers/authors/keywords + centroid for communities of at least
+    MIN_NAMED_GROUP_SIZE, merged with the true full-network quality metrics
+    where available. Names prefer the pipeline's labels on the graph."""
     result = {}
-    for resolution in RESOLUTIONS:
+    for resolution in resolutions:
         res_key = str(resolution)
         quality_for_res = community_quality_lookup.get(res_key, {})
+        labels_for_res = community_labels_from_graph.get(res_key, {})
         recs_at_res = [{**r, "community": r["communities"].get(res_key, OUTLIER)} for r in node_records]
         top_lists = _top_lists_by_group(recs_at_res, "community")
 
@@ -545,9 +677,11 @@ def communities_legend_by_resolution(node_records: list[dict], community_quality
             lists = top_lists.get(cid, {})
             kws = lists.get("top_keywords", [])
             a = agg[cid]
+            graph_label = labels_for_res.get(str(cid))
             entry = {
                 "id": cid,
-                "name": _label_from_keywords(kws, f"Community {cid}"),
+                "name": graph_label or _label_from_keywords(kws, f"Community {cid}"),
+                "name_source": "pipeline" if graph_label else "site",
                 "color": _cluster_color(cid),
                 "centroid": [round(a["sx"] / a["size"], 3), round(a["sy"] / a["size"], 3)],
                 "size": a["size"],
@@ -565,100 +699,196 @@ def communities_legend_by_resolution(node_records: list[dict], community_quality
     return result
 
 
-def _data_dir() -> Path:
-    d = WEBSITE_DIR / DATA_SUBDIR
+def community_keywords_records(
+    communities_legend_by_resolution: dict,
+    community_keyword_scores_df: Optional[pd.DataFrame],
+) -> dict:
+    """resolution -> community_id -> ranked [{keyword, score}] for every named
+    community. From community_keywords.py's scores when given (one method
+    across parquet, graph and site); else the site's own quick TF-IDF."""
+    by_resolution: dict[str, dict] = {}
+    source = "site"
+    scores_by_key: dict[tuple[str, str], list] = {}
+    if community_keyword_scores_df is not None and len(community_keyword_scores_df):
+        source = "pipeline"
+        df = community_keyword_scores_df.sort_values(["resolution", "community_id", "rank"])
+        for row in df.itertuples(index=False):
+            key = (str(float(row.resolution)), str(int(row.community_id)))
+            bucket = scores_by_key.setdefault(key, [])
+            if len(bucket) < TOP_KEYWORD_BARS:
+                bucket.append({"keyword": row.keyword, "score": round(float(row.corrected_tfidf_score), 4)})
+    for res_key, communities in communities_legend_by_resolution.items():
+        per_community = {}
+        for cid, entry in communities.items():
+            ranked = scores_by_key.get((res_key, cid))
+            if not ranked:
+                ranked = [{"keyword": k["keyword"], "score": k["tfidf"]}
+                          for k in entry.get("top_keywords", [])[:TOP_KEYWORD_BARS]]
+            if ranked:
+                per_community[cid] = ranked
+        by_resolution[res_key] = per_community
+    return {"source": source, "score_label": "corrected TF-IDF" if source == "pipeline" else "TF-IDF",
+            "by_resolution": by_resolution}
+
+
+def figure_entries(figure_manifest: list, graphml_path: Path) -> list[dict]:
+    """Validated figure-manifest entries: existing files only, each with a
+    site-relative `file` name (kept unique by prefixing the parent dir when
+    stems collide) and the graph/resolution tags the gallery filters on."""
+    entries, seen = [], set()
+    for item in figure_manifest or []:
+        src = Path(item["path"])
+        if not src.exists():
+            logger.warning("figure missing, skipped: %s", src)
+            continue
+        name = src.name
+        if name in seen:
+            name = f"{src.parent.name}__{src.name}"
+        seen.add(name)
+        entries.append({
+            "file": name,
+            "source": str(src),
+            "kind": item.get("kind", "figure"),
+            "graph": item.get("graph"),
+            "resolution": item.get("resolution"),
+            "title": item.get("title") or src.stem,
+        })
+    logger.info("%d figures for the gallery", len(entries))
+    return entries
+
+
+def _data_dir(website_dir: Path) -> Path:
+    d = Path(website_dir) / DATA_SUBDIR
     d.mkdir(parents=True, exist_ok=True)
     return d
 
 
-@datasaver()
-def save_nodes_json(node_records: list[dict]) -> dict:
-    years = [r["year"] for r in node_records if r["year"] is not None]
-    path = _data_dir() / "nodes.json"
+def _write_json(path: Path, payload) -> None:
     with open(path, "w", encoding="utf-8") as f:
-        json.dump({"year_min": min(years) if years else None,
-                   "year_max": max(years) if years else None,
-                   "nodes": node_records}, f, ensure_ascii=False, separators=(",", ":"))
+        json.dump(payload, f, ensure_ascii=False, separators=(",", ":"))
+
+
+def _write_optional_json(path: Path, payload, present: bool) -> Optional[str]:
+    """Write the file when its panel has data; otherwise remove any stale copy
+    so the frontend sees a clean 404 and hides the panel."""
+    if present:
+        _write_json(path, payload)
+        return str(path)
+    if path.exists():
+        path.unlink()
+    return None
+
+
+@datasaver()
+def save_nodes_json(node_records: list[dict], website_dir: Path) -> dict:
+    years = [r["year"] for r in node_records if r["year"] is not None]
+    path = _data_dir(website_dir) / "nodes.json"
+    _write_json(path, {"year_min": min(years) if years else None,
+                       "year_max": max(years) if years else None,
+                       "nodes": node_records})
     return {"path": str(path), "n_nodes": len(node_records)}
 
 
 @datasaver()
-def save_clusters_json(clusters_legend: dict) -> dict:
-    path = _data_dir() / "clusters.json"
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(clusters_legend, f, ensure_ascii=False, separators=(",", ":"))
+def save_clusters_json(clusters_legend: dict, website_dir: Path) -> dict:
+    path = _data_dir(website_dir) / "clusters.json"
+    _write_json(path, clusters_legend)
     return {"path": str(path), "n_clusters": len(clusters_legend)}
 
 
 @datasaver()
-def save_communities_by_resolution_json(communities_legend_by_resolution: dict) -> dict:
-    path = _data_dir() / "communities_by_resolution.json"
-    payload = {"default_resolution": str(COMMUNITY_RESOLUTION), "by_resolution": communities_legend_by_resolution}
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, separators=(",", ":"))
-    n_communities_total = sum(len(v) for v in communities_legend_by_resolution.values())
-    return {
-        "path": str(path),
-        "n_resolutions": len(communities_legend_by_resolution),
-        "n_communities_total": n_communities_total,
-    }
+def save_communities_by_resolution_json(
+    communities_legend_by_resolution: dict, community_resolution: Optional[float], website_dir: Path
+) -> dict:
+    path = _data_dir(website_dir) / "communities_by_resolution.json"
+    present = bool(communities_legend_by_resolution)
+    _write_optional_json(path, {"default_resolution": str(community_resolution),
+                                "by_resolution": communities_legend_by_resolution}, present)
+    return {"path": str(path) if present else None,
+            "n_resolutions": len(communities_legend_by_resolution),
+            "n_communities_total": sum(len(v) for v in communities_legend_by_resolution.values())}
 
 
 @datasaver()
-def save_resolution_metrics_json(resolution_metrics_records: list[dict]) -> dict:
-    path = _data_dir() / "resolution_metrics.json"
-    payload = {"default_resolution": str(COMMUNITY_RESOLUTION), "resolutions": resolution_metrics_records}
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, separators=(",", ":"))
-    return {"path": str(path), "n_resolutions": len(resolution_metrics_records)}
+def save_resolution_metrics_json(
+    resolution_metrics_records: list[dict], community_resolution: Optional[float], website_dir: Path
+) -> dict:
+    path = _data_dir(website_dir) / "resolution_metrics.json"
+    written = _write_optional_json(
+        path, {"default_resolution": str(community_resolution), "resolutions": resolution_metrics_records},
+        bool(resolution_metrics_records))
+    return {"path": written, "n_resolutions": len(resolution_metrics_records)}
 
 
 @datasaver()
-def save_resolution_metrics_after_cm_json(resolution_metrics_after_cm_records: list[dict]) -> dict:
-    path = _data_dir() / "resolution_metrics_after_cm.json"
-    payload = {"default_resolution": str(COMMUNITY_RESOLUTION), "resolutions": resolution_metrics_after_cm_records}
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, separators=(",", ":"))
-    return {"path": str(path), "n_resolutions": len(resolution_metrics_after_cm_records)}
+def save_resolution_metrics_after_cm_json(
+    resolution_metrics_after_cm_records: list[dict], community_resolution: Optional[float], website_dir: Path
+) -> dict:
+    path = _data_dir(website_dir) / "resolution_metrics_after_cm.json"
+    written = _write_optional_json(
+        path, {"default_resolution": str(community_resolution), "resolutions": resolution_metrics_after_cm_records},
+        bool(resolution_metrics_after_cm_records))
+    return {"path": written, "n_resolutions": len(resolution_metrics_after_cm_records)}
 
 
 @datasaver()
-def save_connectivity_metrics_json(connectivity_metrics_records: list[dict]) -> dict:
-    path = _data_dir() / "connectivity_metrics.json"
-    payload = {"default_resolution": str(COMMUNITY_RESOLUTION), "resolutions": connectivity_metrics_records}
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, separators=(",", ":"))
-    return {"path": str(path), "n_resolutions": len(connectivity_metrics_records)}
+def save_connectivity_metrics_json(
+    connectivity_metrics_records: list[dict], community_resolution: Optional[float], website_dir: Path
+) -> dict:
+    path = _data_dir(website_dir) / "connectivity_metrics.json"
+    written = _write_optional_json(
+        path, {"default_resolution": str(community_resolution), "resolutions": connectivity_metrics_records},
+        bool(connectivity_metrics_records))
+    return {"path": written, "n_resolutions": len(connectivity_metrics_records)}
 
 
 @datasaver()
-def save_community_distributions_json(community_distribution_records: dict) -> dict:
-    path = _data_dir() / "community_distributions.json"
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(community_distribution_records, f, ensure_ascii=False, separators=(",", ":"))
-    n_communities_total = sum(
-        len(v["community_id"]) for v in community_distribution_records["by_resolution"].values())
-    return {
-        "path": str(path),
-        "n_resolutions": len(community_distribution_records["by_resolution"]),
-        "n_communities_total": n_communities_total,
-    }
+def save_community_distributions_json(community_distribution_records: dict, website_dir: Path) -> dict:
+    path = _data_dir(website_dir) / "community_distributions.json"
+    present = bool(community_distribution_records.get("by_resolution"))
+    written = _write_optional_json(path, community_distribution_records, present)
+    n_total = sum(len(v["community_id"]) for v in community_distribution_records.get("by_resolution", {}).values())
+    return {"path": written, "n_resolutions": len(community_distribution_records.get("by_resolution", {})),
+            "n_communities_total": n_total}
 
 
 @datasaver()
-def save_abstracts_json(abstracts: dict) -> dict:
-    path = _data_dir() / "abstracts.json"
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(abstracts, f, ensure_ascii=False, separators=(",", ":"))
+def save_community_keywords_json(community_keywords_records: dict, website_dir: Path) -> dict:
+    path = _data_dir(website_dir) / "community_keywords.json"
+    n_communities = sum(len(v) for v in community_keywords_records["by_resolution"].values())
+    written = _write_optional_json(path, community_keywords_records, n_communities > 0)
+    return {"path": written, "n_communities": n_communities, "source": community_keywords_records["source"]}
+
+
+@datasaver()
+def save_figures(figure_entries: list[dict], graphml_path: Path, website_dir: Path) -> dict:
+    """Copy every figure into <website>/figures/ and write figures.json (the
+    gallery index). The site graph's name lets the gallery tell figures made on
+    this graph from figures made on another one."""
+    figures_dir = Path(website_dir) / FIGURES_SUBDIR
+    figures_dir.mkdir(parents=True, exist_ok=True)
+    index = []
+    for entry in figure_entries:
+        shutil.copy2(entry["source"], figures_dir / entry["file"])
+        index.append({k: v for k, v in entry.items() if k != "source"})
+    payload = {"site_graph": Path(graphml_path).stem, "figures_dir": FIGURES_SUBDIR, "figures": index}
+    written = _write_optional_json(_data_dir(website_dir) / "figures.json", payload, bool(index))
+    return {"path": written, "n_figures": len(index)}
+
+
+@datasaver()
+def save_abstracts_json(abstracts: dict, website_dir: Path) -> dict:
+    path = _data_dir(website_dir) / "abstracts.json"
+    _write_json(path, abstracts)
     return {"path": str(path), "n_abstracts": len(abstracts)}
 
 
 @datasaver()
-def save_edges_bins(node_records: list[dict], edges: list) -> dict:
+def save_edges_bins(node_records: list[dict], edges: list, website_dir: Path) -> dict:
     n = len(node_records)
     out_off, out_tgt = _build_csr(n, edges, "out")
     in_off, in_tgt = _build_csr(n, edges, "in")
-    d = _data_dir()
+    d = _data_dir(website_dir)
     _write_csr(d / "edges_out.bin", out_off, out_tgt)
     _write_csr(d / "edges_in.bin", in_off, in_tgt)
     return {"path": str(d), "n_edges": len(edges)}
@@ -672,29 +902,37 @@ def assembled_website(
     save_resolution_metrics_after_cm_json: dict,
     save_connectivity_metrics_json: dict,
     save_community_distributions_json: dict,
+    save_community_keywords_json: dict,
+    save_figures: dict,
     save_abstracts_json: dict,
     save_edges_bins: dict,
+    website_dir: Path,
 ) -> dict:
-    """Copy the vendored frontend (index.html/main.js/styles.css/tour.js) next to
-    the freshly written data bundle, producing a directory ready to serve."""
-    WEBSITE_DIR.mkdir(parents=True, exist_ok=True)
-    for asset in ("index.html", "main.js", "styles.css", "tour.js"):
-        shutil.copy2(ASSETS_DIR / asset, WEBSITE_DIR / asset)
+    """Copy the vendored frontend next to the freshly written data bundle,
+    producing a directory ready to serve."""
+    website_dir = Path(website_dir)
+    website_dir.mkdir(parents=True, exist_ok=True)
+    for asset in FRONTEND_FILES:
+        shutil.copy2(ASSETS_DIR / asset, website_dir / asset)
     manifest = {
-        "website_dir": str(WEBSITE_DIR),
-        "data_dir": str(WEBSITE_DIR / DATA_SUBDIR),
+        "website_dir": str(website_dir),
+        "data_dir": str(website_dir / DATA_SUBDIR),
         "nodes": save_nodes_json["n_nodes"],
         "clusters": save_clusters_json["n_clusters"],
+        "resolutions": save_communities_by_resolution_json["n_resolutions"],
         "communities_total": save_communities_by_resolution_json["n_communities_total"],
-        "resolutions": save_resolution_metrics_json["n_resolutions"],
-        "resolutions_after_cm": save_resolution_metrics_after_cm_json["n_resolutions"],
+        "resolution_metrics": save_resolution_metrics_json["n_resolutions"],
+        "resolution_metrics_after_cm": save_resolution_metrics_after_cm_json["n_resolutions"],
         "connectivity_resolutions": save_connectivity_metrics_json["n_resolutions"],
         "communities_profiled": save_community_distributions_json["n_communities_total"],
+        "communities_with_keywords": save_community_keywords_json["n_communities"],
+        "keyword_source": save_community_keywords_json["source"],
+        "figures": save_figures["n_figures"],
         "abstracts": save_abstracts_json["n_abstracts"],
         "edges": save_edges_bins["n_edges"],
     }
     logger.info("assembled website: %s", manifest)
-    logger.info("serve with: python -m http.server 8123 --directory %s", WEBSITE_DIR)
+    logger.info("serve with: python -m http.server 8123 --directory %s", website_dir)
     return manifest
 
 

@@ -124,6 +124,40 @@
 
         <div id="health-table"></div>
       </section>
+
+      <!-- Per-community distinguishing keywords at the selected resolution
+           (community_keywords.json: community_keywords.py's corrected TF-IDF, or the
+           site's own TF-IDF fallback). Hidden if that file is absent. -->
+      <section id="view-keywords-section" hidden>
+        <div class="metrics-head">
+          <h2>What each community is about</h2>
+          <p class="meta" id="keywords-meta">Each community's keyword list is one document; the bars are
+             the keywords that most distinguish that community from the others at the selected
+             resolution. Click a community's name to open it on the map.</p>
+        </div>
+        <div id="keywords-grid" class="metrics-grid-like"></div>
+      </section>
+    </div>
+  </div>
+
+  <!-- Figures tab pane: pipeline figures (word clouds, ...) copied by build_website.py
+       and indexed in figures.json. Hidden entirely if that file is absent. -->
+  <div id="view-figures" class="view">
+    <div id="figures-wrap" class="panel">
+      <div class="metrics-head">
+        <h2>Figures from the pipeline</h2>
+        <p class="meta">Word clouds and other figures produced by the analysis DAGs. Figures are
+           tagged with the graph and community resolution they were computed on; those made on a
+           different graph than this map are marked, since their community ids do not line up
+           with the map's.</p>
+      </div>
+      <div class="health-controls">
+        <label class="health-check">
+          <input id="figures-follow-resolution" type="checkbox" checked> Only figures for the selected community resolution
+        </label>
+        <span class="meta" id="figures-count"></span>
+      </div>
+      <div id="figures-grid"></div>
     </div>
   </div>
 
@@ -140,6 +174,7 @@
       <div class="tabs">
         <button id="tab-graph" class="tab active" type="button">Graph</button>
         <button id="tab-metrics" class="tab" type="button" hidden>Metrics</button>
+        <button id="tab-figures" class="tab" type="button" hidden>Figures</button>
         <!-- <button id="tab-table" class="tab" type="button">Table</button> -->
       </div>
     </div>
@@ -262,7 +297,7 @@
   <script src="https://unpkg.com/tabulator-tables@6.3.1/dist/js/tabulator.min.js"></script>
 
   <!-- App -->
-  <script type="module" src="main.js?v=19"></script>
+  <script type="module" src="main.js?v=20"></script>
   <!-- Guided tour (independent of main.js; only reads the DOM) -->
   <script type="module" src="tour.js?v=1"></script>
 </body>
