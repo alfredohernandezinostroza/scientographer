@@ -33,6 +33,16 @@ KEYWORDS_LEVEL_DATA_PATH.mkdir(parents=True, exist_ok=True)
 FIGURES_PATH = Path("reports", "figures")
 FIGURES_PATH.mkdir(parents=True, exist_ok=True)
 
+# Root for the retrieved full-text corpus (PDFs / XML). This lives OUTSIDE the repo
+# because it runs to tens of GB and the repo volume is nearly full, while /raid has
+# room. Small derived tables (manifests, parquet) still live under data/ so they can
+# be DVC-tracked normally. Override with FULL_TEXT_DATA_ROOT in .env if the corpus
+# needs to move; nothing here is created eagerly, since the volume may not be mounted
+# on every machine that imports this module.
+EXTERNAL_DATA_ROOT = Path(
+    os.getenv("FULL_TEXT_DATA_ROOT", "/raid/fredi_dbs/papers-motor-learning-network")
+)
+
 
 # ── Parameters ────────────────────────────────────────────────────────────────
 PARAMS_PATH = Path(os.getenv("MLN_PARAMS", str(Path(__file__).parent / "params.yaml")))
@@ -70,7 +80,26 @@ OPENCITATIONS_ACCESS_TOKEN = os.getenv("OPENCITATIONS_ACCESS_TOKEN")
 OPENALEX_API_KEY = os.getenv("OPENALEX_API_KEY")
 SCOPUS_API_KEY = os.getenv("SCOPUS_API_KEY")
 
-# SOCKS5 endpoint of the institutional (JHU) tunnel, when one is running.
+# Publisher text-and-data-mining credentials for the full-text stage
+# (retrieve-full-text). All optional: the free routes work without any of them.
+# Elsevier / ScienceDirect: the key only *identifies* the caller -- subscribed content
+# needs entitlement via an institutional IP or InstToken.
+ELSEVIER_API_KEY = os.getenv("ELSEVIER_API_KEY")
+ELSEVIER_INSTITUTIONAL_TOKEN = os.getenv("ELSEVIER_INSTITUTIONAL_TOKEN")
+# Wiley: sent as the Wiley-TDM-Client-Token header; issued by the library, normally
+# still IP-restricted.
+WILEY_TDM_TOKEN = os.getenv("WILEY_TDM_TOKEN")
+# Springer Nature issues separate keys per API product: the Metadata API covers the
+# whole catalogue, the Open Access API returns full text for open content only.
+SPRINGER_NATURE_METADATA = os.getenv("SPRINGER_NATURE_METADATA")
+SPRINGER_NATURE_OPEN_ACCESS = os.getenv("SPRINGER_NATURE_OPEN_ACCESS")
+# Taylor & Francis: no self-served TDM key known; access is an institutional
+# agreement. Measured 2026-08-14: 7 of 8 sampled T&F papers declare no Crossref TDM
+# link, and the one that does returns 403 from this network.
+TAYLOR_AND_FRANCIS_TDM_TOKEN = os.getenv("TAYLOR_AND_FRANCIS_TDM_TOKEN")
+
+# SOCKS5 endpoint of the institutional (JHU) tunnel, when one is running
+# (see docs/ENTITLEMENT_SURVEY.md).
 # Empty means "go direct" -- every module using it must still work unproxied,
 # just with less publisher entitlement. Set it inline per run rather than in
 # .env, because the tunnel's underlying DSID cookie expires after a few hours:
