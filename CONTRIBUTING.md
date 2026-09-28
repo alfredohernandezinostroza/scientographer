@@ -21,7 +21,16 @@ and documented defaults in `scientographer/params.yaml`.
 
 ## Licensing of contributions
 
-By contributing, you agree that your contribution is licensed under the license of the
-files you change: GNU AGPL-3.0-or-later for the pipeline, MIT for the map frontend
+Before your first pull request can be merged, you sign the project's
+[Contributor License Agreement](CLA.md). A bot asks you on the pull request: reply with
+the sentence it gives you, once, and it covers all your future contributions. You keep
+the copyright in your work; the agreement lets the maintainer license and relicense the
+project (for example, alongside the open-source license, a commercial one), and commits
+the maintainer to keeping every accepted contribution available under an open-source
+license.
+
+Your contribution is licensed under the license of the files you change: GNU
+AGPL-3.0-or-later for the pipeline, MIT for the map frontend
 (`scientographer/website_assets/`) and the project templates. Keep the
 `SPDX-License-Identifier` header at the top of every file, and add one to new files.
+Only contribute data you are allowed to redistribute.
