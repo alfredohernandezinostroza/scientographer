@@ -151,20 +151,58 @@ def website(port: int = typer.Option(8123, help="port to serve on")) -> None:
     )
 
 
+def _wait_for(url: str, timeout_seconds: float) -> bool:
+    import time
+    import urllib.request
+
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        try:
+            with urllib.request.urlopen(url, timeout=2) as response:
+                if response.status == 200:
+                    return True
+        except OSError:
+            pass
+        time.sleep(1)
+    return False
+
+
 @app.command()
 def ui(port: int = typer.Option(8241, help="port for the Hamilton UI")) -> None:
-    """Start the Hamilton UI tracker for this project (its own .hamilton/db)."""
+    """Start the Hamilton UI for this project (its own .hamilton/db), create the
+    project and user tracked runs report to, and keep serving until Ctrl-C."""
+    import os
+
+    from scientographer.config import PARAMS
+
+    tracker = PARAMS.get("tracker", {})
+    username = os.getenv("HAMILTON_UI_USERNAME", tracker.get("username", "scientographer"))
+    wanted_id = int(tracker.get("project_id", 1))
     base_dir = Path(".hamilton", "db")
     base_dir.mkdir(parents=True, exist_ok=True)
-    typer.echo(
-        f"Hamilton UI on http://localhost:{port} (base dir {base_dir}); "
-        "set tracker.enabled: true in params.yaml for runs to register"
+    server = subprocess.Popen(
+        ["hamilton", "ui", "--base-dir", str(base_dir), "--port", str(port), "--no-open"]
     )
-    raise typer.Exit(
-        code=subprocess.call(
-            ["hamilton", "ui", "--base-dir", str(base_dir), "--port", str(port), "--no-open"]
+    try:
+        if not _wait_for(f"http://localhost:{port}/api/v0/health", timeout_seconds=120):
+            typer.echo("the Hamilton UI did not start within 2 minutes", err=True)
+            raise typer.Exit(code=1)
+        result = subprocess.run(
+            [sys.executable, "-m", "scientographer.tracker", str(base_dir), username, "scientographer"],
+            capture_output=True, text=True, check=True,
         )
-    )
+        project_id = int(result.stdout.strip().splitlines()[-1])
+        typer.echo(f"Hamilton UI on http://localhost:{port}; runs are tracked as '{username}' in project {project_id}")
+        if project_id != wanted_id:
+            typer.echo(f"note: set tracker.project_id: {project_id} in params.yaml (it says {wanted_id})")
+        if not tracker.get("enabled", False):
+            typer.echo("note: set tracker.enabled: true in params.yaml for runs to be recorded")
+        if f":{port}" not in str(tracker.get("url", "http://localhost:8241")):
+            typer.echo(f"note: set tracker.url: http://localhost:{port} in params.yaml")
+        raise typer.Exit(code=server.wait())
+    finally:
+        if server.poll() is None:
+            server.terminate()
 
 
 @app.command(name="params")

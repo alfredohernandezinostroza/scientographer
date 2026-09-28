@@ -33,7 +33,9 @@ stages:
       - ${detect_communities.input_graphml}
     params:
       - detect_communities
-      - resolutions
+      - resolutions.low
+      - resolutions.mid
+      - resolutions.high
     outs:
       - ${detect_communities.output_graphml}
       - ${detect_communities.summary_parquet}
@@ -92,7 +94,9 @@ stages:
       - ${graph.low_band_graphml}
     params:
       - graph
-      - resolutions
+      - resolutions.low
+      - resolutions.mid
+      - resolutions.high
       - communities
     outs:
       - ${graph.analysis_output_dir}/community_connectivity_modifier
@@ -104,7 +108,9 @@ stages:
       - ${graph.analysis_output_dir}/community_connectivity_modifier
     params:
       - graph
-      - resolutions
+      - resolutions.low
+      - resolutions.mid
+      - resolutions.high
       - communities
     outs:
       - ${graph.analysis_output_dir}/community_quality_metrics_after_connectivity_modifier
