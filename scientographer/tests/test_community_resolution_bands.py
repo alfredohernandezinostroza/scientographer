@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Alfredo Hernández Inostroza and the Scientographer contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Locks the shared resolution sweep every community-analysis DAG imports.
 
 The band lists must exactly reproduce the stored ``cpm_communities_at_res=<r>``

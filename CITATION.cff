@@ -1,0 +1,17 @@
+cff-version: 1.2.0
+message: "If you use Scientographer in your research, please cite it as below."
+title: "Scientographer: mapping a scientific literature from its citation network"
+type: software
+authors:
+  - family-names: "Hernández Inostroza"
+    given-names: "Alfredo"
+repository-code: "https://github.com/alfredohernandezinostroza/scientographer"
+license: "AGPL-3.0-or-later"
+version: "0.1.0"
+date-released: "2026-09-28"
+keywords:
+  - citation network
+  - science mapping
+  - bibliometrics
+  - community detection
+  - Leiden

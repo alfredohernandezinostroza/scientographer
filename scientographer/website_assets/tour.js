@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 Alfredo Hernández Inostroza and the Scientographer contributors
+// SPDX-License-Identifier: MIT
 // Guided tour: a self-contained walkthrough that spotlights each control in
 // turn with a short explanation. It only reads the DOM (and clicks the controls
 // toggle to expand the panel); it does not touch main.js state, so it stays in

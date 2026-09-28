@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Alfredo Hernández Inostroza and the Scientographer contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Build the citation graph from two tables: the papers and their references.
 
 This is where a corpus enters Scientographer. Whatever databases the papers came

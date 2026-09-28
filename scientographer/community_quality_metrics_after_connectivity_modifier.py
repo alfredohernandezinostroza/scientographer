@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Alfredo Hernández Inostroza and the Scientographer contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Quality metrics recomputed on the Connectivity-Modifier-remediated partition.
 
 community_quality_metrics.py scores the *original* Leiden/CPM partitions;

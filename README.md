@@ -77,7 +77,8 @@ resolution sweep and `canonical` resolution are the choices that shape the map.
 ## Try the example
 
 `examples/until_1990/` is a complete project: 292 papers and 585 citations from the
-motor-learning literature up to 1990.
+motor-learning literature up to 1990 (bibliographic metadata only; abstracts are left
+out because they are the publishers' copyright).
 
 ```bash
 cd examples/until_1990
@@ -135,6 +136,23 @@ stages and experiments vary the settings around it.
 pip install -e ".[all,dev]"
 pytest
 ```
+
+## License
+
+- **The pipeline** (the `scientographer` package) is licensed under the
+  [GNU Affero General Public License v3.0 or later](LICENSE). You can use, study,
+  modify and share it freely. If you distribute a modified version, or let people use
+  a modified version over a network (for example as a hosted service), you must offer
+  them its source code under the same license.
+- **The map frontend** (`scientographer/website_assets/`) and **the project templates**
+  (`params.yaml`, `templates/dvc.yaml`) are [MIT-licensed](LICENSE-MIT). These are the
+  files Scientographer copies into your maps and projects, so maps and projects you
+  publish carry no license obligations.
+- **Your data and results** are yours: the graphs, metrics, JSON and figures the pipeline
+  computes are its output, not part of the software.
+
+Each file states its license in an `SPDX-License-Identifier` header. If you use
+Scientographer in research, please cite it (see [CITATION.cff](CITATION.cff)).
 
 ## Origin
 

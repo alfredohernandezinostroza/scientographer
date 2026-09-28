@@ -1,5 +1,5 @@
 [build-system]
-requires = ["flit_core >=3.4,<4"]
+requires = ["flit_core >=3.12,<4"]
 build-backend = "flit_core.buildapi"
 
 [project]
@@ -9,6 +9,10 @@ description = "Map a scientific literature from its citation network: Leiden/CPM
 readme = "README.md"
 authors = [{ name = "Alfredo Hernández Inostroza" }]
 requires-python = ">=3.10"
+# The pipeline is AGPL-3.0-or-later; the map frontend and the project templates that
+# are copied into users' sites and projects are MIT (see LICENSE-MIT).
+license = "AGPL-3.0-or-later AND MIT"
+license-files = ["LICENSE", "LICENSE-MIT"]
 keywords = ["citation network", "bibliometrics", "science mapping", "community detection", "leiden", "scientometrics"]
 classifiers = [
     "Programming Language :: Python :: 3",
