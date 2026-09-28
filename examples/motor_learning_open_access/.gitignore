@@ -1,6 +1,3 @@
-# Only the input tables and their attribution are versioned; everything else is rebuilt by `dvc repro`.
-/data/*
-!/data/papers.parquet
-!/data/references.parquet
-!/data/ATTRIBUTION.md
+# Pipeline outputs under data/ are git-ignored by DVC itself (dvc.yaml `outs`); the
+# small metrics and plot files stay visible to git so `dvc exp` can record them.
 /reports/

@@ -122,17 +122,40 @@ this package, and `scientographer run <stage>` draws its Hamilton DAG to
 
 ## Experiments
 
-Every stage declares which `params.yaml` sections it reads, so DVC experiments work
-out of the box:
+Every stage declares which `params.yaml` settings it reads, so DVC experiments work
+out of the box. Commit a baseline run first, so experiments have something to be
+compared against:
 
 ```bash
-dvc exp run -S resolutions.canonical=0.003
-dvc exp show
+dvc repro
+git add -A && git commit -m "baseline run"      # dvc.lock + the small metrics files
+dvc exp run -S resolutions.canonical=0.003       # re-runs only the affected stages
+dvc exp show                                     # baseline vs. experiments, side by side
+dvc exp apply <name>                             # keep the one you like
 ```
+
+`dvc exp show` compares the summary metrics each run writes to
+`data/analysis/metrics/` (communities found, coverage, modularity, stability,
+well-connectedness at the canonical resolution); `dvc plots diff` compares the
+per-resolution curves.
 
 The resolution sweep itself is not an experiment: stages compare resolutions against
 each other within one run (stability, plateaus), so the sweep stays inside the
 stages and experiments vary the settings around it.
+
+## Tracking runs with the Hamilton UI
+
+Every stage is a Hamilton DAG, and Hamilton's UI can record each run: which
+functions ran, with which inputs, how long they took, and what they produced.
+
+```bash
+pip install "scientographer[ui]"
+scientographer ui            # starts the UI, sets up its project, keeps serving
+```
+
+Then set `tracker.enabled: true` in `params.yaml`, and every `dvc repro` or
+`scientographer run` reports to it; each run prints a link to its page. The UI keeps
+its data in `.hamilton/` inside the project.
 
 ## Development
 
