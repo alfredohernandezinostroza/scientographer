@@ -1,21 +1,14 @@
 # SPDX-FileCopyrightText: 2026 Alfredo Hernández Inostroza and the Scientographer contributors
 # SPDX-License-Identifier: MIT
-# Scientographer parameters: every setting of the pipeline, in one place.
+# Example project: 3,925 open-access papers on motor adaptation and motor skill and
+# sequence learning (2001-2026), all published under CC BY, with their authors'
+# own keywords and their abstracts (from Europe PMC), and the citations between them
+# (from OpenAlex, CC0). See data/ATTRIBUTION.md. Everything else is the stock project
+# `scientographer init` creates; the settings that scale with corpus size differ from
+# the defaults and are marked "example:".
 #
-# Stages read this file through `scientographer.config` (found as: the file named by
-# SCIENTOGRAPHER_PARAMS, else ./params.yaml, else these packaged defaults), and
-# dvc.yaml declares which stage reads which section, so `dvc repro` and
-# `dvc exp run -S section.key=value` re-run exactly the stages a change affects.
-# Paths are relative to the project directory.
+#     cd examples/motor_learning_open_access && dvc repro && scientographer website
 #
-# The default chain, as `scientographer init` sets it up:
-#
-#   data/papers.parquet + data/references.parquet
-#     -> citation_network  -> detect_communities -> layout_graph
-#     -> community_quality_metrics, community_connectivity_metrics,
-#        community_connectivity_modifier, community_quality_metrics_after_connectivity_modifier
-#     -> community_keywords -> wordclouds -> build_website
-
 citation_network:
   # build_citation_network.py. The papers table needs a `doi` column; title, authors,
   # keywords, abstract, journal and year are used when present. The references table
@@ -77,9 +70,9 @@ communities:
   # A community this size or larger is "substantive": the cutoff for naming on the
   # site, for population-explicit metric summaries, and for keyword labels.
   # Scale it with the corpus (30 suits ~10k+ papers; a few hundred papers want ~5).
-  substantive_min_size: 30
+  substantive_min_size: 15  # example
   # Leiden re-runs (beyond the stored seed-0 assignment) for cross-seed stability.
-  stability_seeds: [1, 2, 3, 4, 5]
+  stability_seeds: [1, 2, 3]  # example
   leiden_iterations: 10
   # Adjacent resolutions whose partitions agree (NMI) at least this much sit on
   # the same "natural" community scale.
@@ -102,19 +95,16 @@ community_keywords:
   tfidf_norm: l2
   idf_bias: 0.0
   top_n_keywords: 3
-  # Labels show each term in the spelling its authors use most ("tDCS"); `title`
-  # gives Title Case instead ("Tdcs").
   label_case: original
-  # Count Parkinson’s / Parkinson's (typographic vs straight apostrophe) as one term.
   unify_apostrophes: true
   top_n_scored_keywords: 25
   keyword_dividing_character: "|"
-  min_community_size: 30
+  min_community_size: 15  # example
 
 wordclouds:
   # wordclouds.py: TF-IDF histograms + word clouds for one graph at the listed
   # resolutions. graph_label (optional) prefixes the figure names.
-  graph_label: ""
+  graph_label: open_access  # example
   input_graphml: data/citation_network_with_layout.graphml
   output_dir: data/wordclouds
   resolutions: [0.005]
@@ -137,7 +127,7 @@ wordclouds:
 website:
   # build_website.py: only `graphml` is required; every other input is optional and
   # its panel is left out when the file is absent.
-  title: Citation map
+  title: Motor learning, open-access literature  # example
   graphml: data/analysis/community_keywords/citation_network_with_community_keywords.graphml
   topic_metrics: null
   per_community_metrics: data/analysis/community_quality_metrics/community_quality_metrics_per_community.parquet
@@ -150,7 +140,7 @@ website:
   wordclouds_dir: data/wordclouds
   output_dir: reports/website
   default_resolution: 0.005
-  min_named_group_size: 30
+  min_named_group_size: 15  # example
 
 tracker:
   # Hamilton UI tracker: run-level provenance (every node, input and output) in a

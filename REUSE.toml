@@ -3,6 +3,16 @@
 version = 1
 
 [[annotations]]
-path = ["README.md", "CONTRIBUTING.md", "CITATION.cff", "pyproject.toml", ".gitignore", ".github/**", "REUSE.toml", "examples/until_1990/.gitignore", "examples/until_1990/.dvcignore", "examples/until_1990/.dvc/**"]
+path = ["README.md", "CONTRIBUTING.md", "CITATION.cff", "pyproject.toml", ".gitignore", ".github/**", "REUSE.toml", "examples/motor_learning_open_access/.gitignore", "examples/motor_learning_open_access/.dvcignore", "examples/motor_learning_open_access/.dvc/**", "examples/motor_learning_open_access/data/ATTRIBUTION.md"]
 SPDX-FileCopyrightText = "2026 Alfredo Hernández Inostroza and the Scientographer contributors"
 SPDX-License-Identifier = "AGPL-3.0-or-later"
+
+[[annotations]]
+path = "examples/motor_learning_open_access/data/papers.parquet"
+SPDX-FileCopyrightText = "The authors of each article (see the record's title, authors, journal and DOI)"
+SPDX-License-Identifier = "LicenseRef-CC-BY-per-article"
+
+[[annotations]]
+path = "examples/motor_learning_open_access/data/references.parquet"
+SPDX-FileCopyrightText = "OpenAlex (OurResearch), released into the public domain"
+SPDX-License-Identifier = "CC0-1.0"

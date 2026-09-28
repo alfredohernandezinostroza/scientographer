@@ -21,7 +21,7 @@ jobs:
       - name: Unit tests
         run: pytest -q
       - name: Example project end to end
-        working-directory: examples/until_1990
+        working-directory: examples/motor_learning_open_access
         env:
           DVC_NO_ANALYTICS: "1"
         run: |

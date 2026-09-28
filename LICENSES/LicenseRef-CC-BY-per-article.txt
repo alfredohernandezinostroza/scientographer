@@ -1,0 +1,10 @@
+Each record in examples/motor_learning_open_access/data/papers.parquet reproduces
+the title, author keywords and abstract of an open-access article that its authors
+published under a Creative Commons Attribution (CC BY) license. The license version
+(CC BY 2.0, 3.0 or 4.0) is that of the individual article, identified by the record's
+DOI. Attribution for each work is given in the record itself (title, authors, journal,
+year, DOI, PMCID, license); see examples/motor_learning_open_access/data/ATTRIBUTION.md.
+
+CC BY 4.0: https://creativecommons.org/licenses/by/4.0/legalcode
+CC BY 3.0: https://creativecommons.org/licenses/by/3.0/legalcode
+CC BY 2.0: https://creativecommons.org/licenses/by/2.0/legalcode
