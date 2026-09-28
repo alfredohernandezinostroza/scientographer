@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Alfredo Hernández Inostroza and the Scientographer contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Well-connectedness (minimum-edge-cut) diagnostic for the Leiden/CPM communities.
 
 ``detect_communities`` runs Leiden with the constant Potts model (CPM) across

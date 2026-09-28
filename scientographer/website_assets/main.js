@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 Alfredo Hernández Inostroza and the Scientographer contributors
+// SPDX-License-Identifier: MIT
 // Interactive citation-map viewer.
 // Same architecture as the citation-graph viewer, but node x/y come from a 2D
 // UMAP of text embeddings. There are two selectable DATASETS (see DATASETS

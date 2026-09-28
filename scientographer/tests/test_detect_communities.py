@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Alfredo Hernández Inostroza and the Scientographer contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
 import igraph as ig
 
 from scientographer.detect_communities import (

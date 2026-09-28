@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Alfredo Hernández Inostroza and the Scientographer contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Single source of truth for the Leiden/CPM resolution sweep and the graph it lives on.
 
 A partition is stored on the graph as one ``cpm_communities_at_res=<resolution>``

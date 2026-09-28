@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Alfredo Hernández Inostroza and the Scientographer contributors
+# SPDX-License-Identifier: MIT
 # The Scientographer pipeline for this project. Every stage runs one module of the
 # installed package; its settings come from params.yaml (read through `vars`, so a
 # changed path or value re-runs exactly the stages that use it).

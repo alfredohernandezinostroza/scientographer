@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Alfredo Hernández Inostroza and the Scientographer contributors
+# SPDX-License-Identifier: MIT
 # Scientographer parameters: every setting of the pipeline, in one place.
 #
 # Stages read this file through `scientographer.config` (found as: the file named by

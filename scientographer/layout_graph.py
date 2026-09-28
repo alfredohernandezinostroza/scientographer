@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Alfredo Hernández Inostroza and the Scientographer contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Give a citation graph x/y coordinates -- the stage that used to be a manual
 Gephi step.
 

@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Alfredo Hernández Inostroza and the Scientographer contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Scientographer: map a scientific literature from its citation network.
 
 From two tables -- the papers and their references -- to Leiden/CPM communities at
