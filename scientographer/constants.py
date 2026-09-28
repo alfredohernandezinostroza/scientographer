@@ -1,35 +1,110 @@
-from pathlib import Path 
-import dotenv
+"""Paths, parameters and secrets shared by every DAG module.
+
+- **Paths** are relative to the repository root, which is the working directory every
+  DAG runs from (``pixi run python motor_learning_network/<module>.py``).
+- **Parameters** (``PARAMS``) come from ``params.yaml`` next to this file -- or the file
+  named by the ``MLN_PARAMS`` environment variable -- and are the one place a knob lives.
+  ``dvc.yaml`` points at the same file, so ``dvc repro`` / ``dvc exp run -S key=value``
+  re-run exactly the stages a key affects.
+- **Secrets** are read from a ``.env`` at the repository root when one exists. Nothing
+  here asserts on them: only the stages that call an external API need one, and they
+  ask for it with ``require_secret`` at the point of use, so the graph/community/website
+  stages run on a machine with no credentials at all.
+"""
+
 import os
+from pathlib import Path
 
-RAW_DATA_PATH = Path("data","raw")
-RAW_DATA_PATH.mkdir(exist_ok=True)
+import dotenv
+import yaml
 
-PROCESSED_DATA_PATH = Path("data","processed")
-PROCESSED_DATA_PATH.mkdir(exist_ok=True)
+RAW_DATA_PATH = Path("data", "raw")
+RAW_DATA_PATH.mkdir(parents=True, exist_ok=True)
 
-GRAPH_LEVEL_DATA_PATH = Path("data","graph_level_data")
-GRAPH_LEVEL_DATA_PATH.mkdir(exist_ok=True)
+PROCESSED_DATA_PATH = Path("data", "processed")
+PROCESSED_DATA_PATH.mkdir(parents=True, exist_ok=True)
 
-KEYWORDS_LEVEL_DATA_PATH = Path("data","keywords_level_data")
-KEYWORDS_LEVEL_DATA_PATH.mkdir(exist_ok=True)
+GRAPH_LEVEL_DATA_PATH = Path("data", "graph_level_data")
+GRAPH_LEVEL_DATA_PATH.mkdir(parents=True, exist_ok=True)
 
-FIGURES_PATH = Path("reports","figures")
-FIGURES_PATH.mkdir(exist_ok=True)
+KEYWORDS_LEVEL_DATA_PATH = Path("data", "keywords_level_data")
+KEYWORDS_LEVEL_DATA_PATH.mkdir(parents=True, exist_ok=True)
 
-DEFAULT_UI_PROJECT_ID = 1
+FIGURES_PATH = Path("reports", "figures")
+FIGURES_PATH.mkdir(parents=True, exist_ok=True)
 
-read_dotenv = dotenv.load_dotenv(Path(__file__).parent.parent / '.env')
-assert read_dotenv, f"Failed to read .env file ast {Path(__file__).parent.parent / '.env'}"
-assert os.getenv("MY_EMAIL") is not None, "MY_EMAIL not found in .env file"
-assert os.getenv("DEFAULT_UI_USERNAME") is not None, "DEFAULT_UI_USERNAME not found in .env file"
-assert os.getenv("TEAM_NAME") is not None, "TEAM_NAME not found in .env file"
-assert os.getenv("GOOGLE_DRIVE_FOLDER_ID") is not None, "GOOGLE_DRIVE_FOLDER_ID not found in .env file"
-assert os.getenv("OPENCITATIONS_ACCESS_TOKEN") is not None, "OPENCITATIONS_ACCESS_TOKEN not found in .env file"
 
-EMAIL = os.getenv('MY_EMAIL')
-DEFAULT_UI_USERNAME = os.getenv('DEFAULT_UI_USERNAME')
-TEAM_NAME = os.getenv('TEAM_NAME')
-GOOGLE_DRIVE_FOLDER_ID = os.getenv('GOOGLE_DRIVE_FOLDER_ID')
-OPENCITATIONS_ACCESS_TOKEN = os.getenv('OPENCITATIONS_ACCESS_TOKEN')
-OPENALEX_API_KEY = os.getenv('OPENALEX_API_KEY')
+# ── Parameters ────────────────────────────────────────────────────────────────
+PARAMS_PATH = Path(os.getenv("MLN_PARAMS", str(Path(__file__).parent / "params.yaml")))
+
+
+def load_params(path: Path = PARAMS_PATH) -> dict:
+    with open(path, "r", encoding="utf-8") as f:
+        loaded = yaml.safe_load(f) or {}
+    if not isinstance(loaded, dict):
+        raise ValueError(f"{path} must hold a mapping of sections, got {type(loaded).__name__}")
+    return loaded
+
+
+PARAMS: dict = load_params()
+
+
+def params(section: str) -> dict:
+    """One top-level section of params.yaml (``params("website")``), with a clear
+    error naming the file when the section is missing."""
+    try:
+        return PARAMS[section]
+    except KeyError:
+        raise KeyError(f"params.yaml ({PARAMS_PATH}) has no '{section}' section") from None
+
+
+# ── Secrets (optional) ────────────────────────────────────────────────────────
+ENV_PATH = Path(__file__).parent.parent / ".env"
+read_dotenv = dotenv.load_dotenv(ENV_PATH) if ENV_PATH.exists() else False
+
+EMAIL = os.getenv("MY_EMAIL")
+DEFAULT_UI_USERNAME = os.getenv("DEFAULT_UI_USERNAME", "user")
+TEAM_NAME = os.getenv("TEAM_NAME", "team")
+GOOGLE_DRIVE_FOLDER_ID = os.getenv("GOOGLE_DRIVE_FOLDER_ID")
+OPENCITATIONS_ACCESS_TOKEN = os.getenv("OPENCITATIONS_ACCESS_TOKEN")
+OPENALEX_API_KEY = os.getenv("OPENALEX_API_KEY")
+
+
+def require_secret(name: str) -> str:
+    """The value of an environment secret, or a clear error saying which stage
+    needs it and where to put it. Call at the point of use, never at import."""
+    value = os.getenv(name)
+    if not value:
+        raise RuntimeError(
+            f"{name} is not set. This stage calls an external service that needs it: "
+            f"add it to {ENV_PATH} (never committed) or export it in the environment."
+        )
+    return value
+
+
+# ── Hamilton UI tracker ───────────────────────────────────────────────────────
+DEFAULT_UI_PROJECT_ID = int(PARAMS.get("tracker", {}).get("project_id", 1))
+
+
+def tracker_adapters(dag_name: str, tags: dict | None = None) -> list:
+    """The Hamilton UI tracker adapter when ``tracker.enabled`` is true in
+    params.yaml, else an empty list -- so every ``_main`` can write
+    ``.with_adapters(*tracker_adapters(CURRENT_FILE_NAME))`` and run offline by
+    default. The study turns it on and runs ``hamilton ui --base-dir ./.hamilton/db``
+    (the project with ``tracker.project_id`` must exist there first)."""
+    cfg = PARAMS.get("tracker", {})
+    if not cfg.get("enabled", False):
+        return []
+    from hamilton_sdk import adapters  # validates against the server at construction
+
+    url = cfg.get("url", "http://localhost:8241")
+    return [
+        adapters.HamiltonTracker(
+            project_id=int(cfg.get("project_id", 1)),
+            username=DEFAULT_UI_USERNAME,
+            dag_name=dag_name,
+            tags={"environment": "DEV", "team": TEAM_NAME, "version": "0.1", **(tags or {})},
+            hamilton_api_url=url,
+            hamilton_ui_url=url,
+        )
+    ]

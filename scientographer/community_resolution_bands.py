@@ -26,29 +26,36 @@ Note: the frozen Track-A ``get_network_communities_and_stats.py`` keeps its own
 module -- it is frozen. This module is the shared source for the *analysis* DAGs only.
 """
 
-from typing import Final
 from pathlib import Path
+from typing import Final
 
 import igraph as ig
 
-from motor_learning_network.constants import GRAPH_LEVEL_DATA_PATH
+from motor_learning_network.constants import params
 
-# The three resolution bands, exactly matching the stored `cpm_communities_at_res=<r>`
-# column names (Python's float repr of each value is what the column is keyed on:
-# 0.01 -> "0.01", 0.1 -> "0.1", 0.2 -> "0.2", etc.).
-LOW_BAND: Final[list[float]] = [round(i * 0.001, 3) for i in range(1, 10)]   # 0.001 .. 0.009
-MID_BAND: Final[list[float]] = [round(i * 0.01, 2) for i in range(1, 20)]    # 0.01  .. 0.19
-HIGH_BAND: Final[list[float]] = [round(i * 0.1, 1) for i in range(2, 10)]    # 0.2   .. 0.9
+_resolutions = params("resolutions")
+_graph = params("graph")
+
+# The three resolution bands (params.yaml `resolutions`), exactly matching the stored
+# `cpm_communities_at_res=<r>` column names (Python's float repr of each value is what
+# the column is keyed on: 0.01 -> "0.01", 0.1 -> "0.1", 0.2 -> "0.2", etc.).
+LOW_BAND: Final[list[float]] = [float(r) for r in _resolutions["low"]]     # 0.001 .. 0.009
+MID_BAND: Final[list[float]] = [float(r) for r in _resolutions["mid"]]     # 0.01  .. 0.19
+HIGH_BAND: Final[list[float]] = [float(r) for r in _resolutions["high"]]   # 0.2   .. 0.9
 
 # The full sweep, ascending. Every analysis DAG imports this so they stay in lockstep.
 RESOLUTIONS: Final[list[float]] = LOW_BAND + MID_BAND + HIGH_BAND
 
+# The resolution single-resolution analyses and the website default to.
+CANONICAL_RESOLUTION: Final[float] = float(_resolutions["canonical"])
+
 # The low-res graph is the base every DAG already loads; the mid/high graphs supply the
-# additional community columns that get grafted onto it by merge_higher_band_communities.
-LOW_RES_GRAPHML: Final[Path] = GRAPH_LEVEL_DATA_PATH / "citation_network_full_low_res.graphml"
+# additional community columns that get grafted onto it by merge_higher_band_communities
+# (params.yaml `graph`).
+LOW_RES_GRAPHML: Final[Path] = Path(_graph["low_band_graphml"])
 _HIGHER_BAND_GRAPHML: Final[dict[Path, list[float]]] = {
-    GRAPH_LEVEL_DATA_PATH / "citation_network_full.graphml": MID_BAND,
-    GRAPH_LEVEL_DATA_PATH / "citation_network_full_high_res.graphml": HIGH_BAND,
+    Path(_graph["higher_band_graphml"]["mid"]): MID_BAND,
+    Path(_graph["higher_band_graphml"]["high"]): HIGH_BAND,
 }
 
 
@@ -69,6 +76,10 @@ def merge_higher_band_communities(base_graph: ig.Graph) -> ig.Graph:
     """
     base_names = base_graph.vs["name"]
     for graphml_path, band_resolutions in _HIGHER_BAND_GRAPHML.items():
+        # A graph written by detect_communities.py already carries every band, so
+        # there is nothing to graft (and the band path may just be the same file).
+        if all(community_attribute_name(r) in base_graph.vs.attributes() for r in band_resolutions):
+            continue
         other = ig.Graph.Read_GraphML(str(graphml_path))
         other_index_by_name = {name: index for index, name in enumerate(other.vs["name"])}
         for resolution in band_resolutions:

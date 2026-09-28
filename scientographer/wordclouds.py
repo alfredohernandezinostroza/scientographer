@@ -40,9 +40,8 @@ from motor_learning_network.constants import (
     KEYWORDS_LEVEL_DATA_PATH,
     RAW_DATA_PATH,
     FIGURES_PATH,
-    DEFAULT_UI_PROJECT_ID,
-    DEFAULT_UI_USERNAME,
-    TEAM_NAME,
+    params,
+    tracker_adapters,
 )
 
 ###################
@@ -57,40 +56,41 @@ EXECUTE = True
 if EXECUTE:
     logger.info("Executing the DAG!")
 
-# ── Resolution sweep ──────────────────────────────────────────────────────────
-YEAR = 1960
-RESOLUTIONS: list[float] = [0.005]
-# YEAR = 1980
-# RESOLUTIONS: list[float] = [0.001, 0.012]
-# YEAR = 1990
-# RESOLUTIONS: list[float] = [0.001, 0.002]
-# YEAR = 2000
-# RESOLUTIONS: list[float] = [0.003, 0.014]
-# YEAR = 2005
-# RESOLUTIONS: list[float] = [0.003, 0.007]
-# YEAR = 2010
-# RESOLUTIONS: list[float] = [0.0006, 0.002]
-# YEAR = 2015
-# RESOLUTIONS: list[float] = [0.0009, 0.003]
-# YEAR = 2020
-# RESOLUTIONS: list[float] = [0.001, 0.002]
-# YEAR = 2026
-# RESOLUTIONS: list[float] = [0.0004, 0.001]
-TD_IDF_SAVING_PATH = KEYWORDS_LEVEL_DATA_PATH / f"until_{YEAR}_wordcloud_noverlap"
-TD_IDF_SAVING_PATH.mkdir(parents=True, exist_ok=True)
-TOP_N_CLUSTERS = 5
-MIN_CLUSTER_SIZE = 1
-# RESOLUTIONS: list[float] = [round(0.001 + i * 0.001, 3) for i in range(1, 9)]
+# ── Run configuration: params.yaml `wordclouds` ───────────────────────────────
+# Which time-slice graph (until_<year>) and which resolutions to run on used to be
+# edited here per run (and once per git branch); they are parameters now. Past runs,
+# for the record: 1960 [0.005]; 1980 [0.001, 0.012]; 1990 [0.001, 0.002];
+# 2000 [0.003, 0.014]; 2005 [0.003, 0.007]; 2010 [0.0006, 0.002]; 2015 [0.0009, 0.003];
+# 2020 [0.001, 0.002]; 2026 [0.0004, 0.001].
+_cfg = params("wordclouds")
+YEAR: int = int(_cfg["year"])
+RESOLUTIONS: list[float] = [float(r) for r in _cfg["resolutions"]]
+INPUT_GRAPHML: Path = Path(_cfg["input_graphml"])
+TD_IDF_SAVING_PATH = Path(_cfg["output_dir"])
+TOP_N_CLUSTERS: int = int(_cfg["top_n_clusters"])
+MIN_CLUSTER_SIZE: int = int(_cfg["min_cluster_size"])
+
+# How many communities enter the TF-IDF corpus, taken by id (0 .. N-1); ids are
+# assigned in descending size order, so this keeps the N largest. Every admitted
+# community is one document, so the long tail of tiny communities inflates the
+# document count and drags IDF down for terms that are genuinely shared by the
+# big communities. 50 reproduces the existing runs; any other value gets its own
+# output directory and figure names so runs never overwrite each other.
+TOP_N_COMMUNITIES: int = int(_cfg["top_n_communities"])
+_COMMUNITIES_DIR_SUFFIX = "" if TOP_N_COMMUNITIES == 50 else f"-communities-{TOP_N_COMMUNITIES}"
+_COMMUNITIES_FIGURE_SUFFIX = "" if TOP_N_COMMUNITIES == 50 else f"_of_{TOP_N_COMMUNITIES}"
+
+NORM: Final = str(_cfg["norm"])
+IDF_BIAS: Final = float(_cfg["idf_bias"])
+SYNONYMS_THRESHOLD: Final = float(_cfg["synonyms_threshold"])
+
 
 # ── Per-resolution output directory helper ────────────────────────────────────
-NORM: Final = "l2"
-IDF_BIAS: Final = 0.0
-SYNONYMS_THRESHOLD: Final = 0.99
-
 def _out_dir(resolution: float) -> Path:
     d = (
         TD_IDF_SAVING_PATH / "td-df-per-cluster-as-document"
         / f"res-{resolution}-threshold-{SYNONYMS_THRESHOLD}-norm-{NORM}-fixidf-{IDF_BIAS}"
+          f"{_COMMUNITIES_DIR_SUFFIX}"
     )
     d.mkdir(parents=True, exist_ok=True)
     return d
@@ -99,7 +99,7 @@ def _out_dir(resolution: float) -> Path:
 def _modularity_meta(resolution: float) -> dict:
     return {
         float(i): {"label": f"Community {i} at resolution {resolution}", "color": "#AAAAAA"}
-        for i in range(50)
+        for i in range(TOP_N_COMMUNITIES)
     }
 
 
@@ -113,32 +113,23 @@ _res_node_names = [f"res_{str(r).replace('.', '_')}" for r in RESOLUTIONS]
 
 def _main() -> int:
     ########################
-    ##  UI configuration  ##
-    ########################
-    UI_CONFIG = adapters.HamiltonTracker(
-        project_id=DEFAULT_UI_PROJECT_ID,
-        username=DEFAULT_UI_USERNAME,
-        dag_name=CURRENT_FILE_NAME,
-        tags={"environment": "DEV", "team": TEAM_NAME, "version": "0.1"},
-    )
-
-    ########################
     ## Inputs and Outputs ##
     ########################
+    TD_IDF_SAVING_PATH.mkdir(parents=True, exist_ok=True)
     inputs = dict(
         resolutions=RESOLUTIONS,
         norm=NORM,
         idf_bias=IDF_BIAS,
         synonyms_threshold=SYNONYMS_THRESHOLD,
-        citation_network_path=GRAPH_LEVEL_DATA_PATH / f"citation_network_until_{YEAR}_with_layout.graphml",
+        citation_network_path=INPUT_GRAPHML,
         synonym_dict_path=RAW_DATA_PATH / f"keyword_synonyms_{SYNONYMS_THRESHOLD}_with_transitivity.json",
-        top_n_histogram=40,
+        top_n_histogram=int(_cfg["top_n_histogram"]),
         keyword_dividing_character="|",
         min_cluster_size=MIN_CLUSTER_SIZE, # >= to this number will be included
         # wordcloud inputs
-        forceatlas2_iterations=500,
+        forceatlas2_iterations=int(_cfg["forceatlas2_iterations"]),
         top_n_clusters=TOP_N_CLUSTERS,
-        top_n_words=20,
+        top_n_words=int(_cfg["top_n_words"]),
     )
 
     tfidf_outputs = [f"save_combined_plot_{name}" for name in _res_node_names]
@@ -153,9 +144,7 @@ def _main() -> int:
     dr = (
         driver.Builder()
         .with_modules(__main__)
-        # .with_config()
-        # .with_cache()
-        .with_adapters(UI_CONFIG)
+        .with_adapters(*tracker_adapters(CURRENT_FILE_NAME))  # params.yaml `tracker.enabled`
         .build()
     )
 
@@ -1182,7 +1171,7 @@ def save_wordcloud_figure(
             cluster_freqs[float(cid)] = {kw.title(): float(sc) for kw, sc in scores.items()}
 
     wordclouds_dir = TD_IDF_SAVING_PATH / "wordclouds"
-    svg_path = wordclouds_dir / f"tdidf_until_{YEAR}_wordcloud_at_{resolution}_{TOP_N_CLUSTERS}_clusters.svg"
+    svg_path = wordclouds_dir / f"tdidf_until_{YEAR}_wordcloud_at_{resolution}_{TOP_N_CLUSTERS}_clusters{_COMMUNITIES_FIGURE_SUFFIX}.svg"
 
     return _render_cluster_wordclouds(
         cluster_freqs=cluster_freqs,
@@ -1236,7 +1225,7 @@ def save_frequency_wordcloud_figure(
             cluster_freqs[float(cid)] = {kw: float(np.log1p(count)) for kw, count in top}
 
     wordclouds_dir = TD_IDF_SAVING_PATH / "wordclouds"
-    svg_path = wordclouds_dir / f"frequency_until_{YEAR}_wordcloud_at_{resolution}_{TOP_N_CLUSTERS}_clusters.svg"
+    svg_path = wordclouds_dir / f"frequency_until_{YEAR}_wordcloud_at_{resolution}_{TOP_N_CLUSTERS}_clusters{_COMMUNITIES_FIGURE_SUFFIX}.svg"
 
     return _render_cluster_wordclouds(
         cluster_freqs=cluster_freqs,

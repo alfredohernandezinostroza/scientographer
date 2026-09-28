@@ -59,11 +59,11 @@ import hamilton.log_setup
 from motor_learning_network.constants import (
     GRAPH_LEVEL_DATA_PATH,
     FIGURES_PATH,
-    DEFAULT_UI_PROJECT_ID,
-    DEFAULT_UI_USERNAME,
-    TEAM_NAME,
+    params,
+    tracker_adapters,
 )
 from motor_learning_network.community_resolution_bands import (
+    CANONICAL_RESOLUTION,
     RESOLUTIONS,
     LOW_RES_GRAPHML,
     merge_higher_band_communities,
@@ -85,29 +85,47 @@ EXECUTE = True
 
 # Extra Leiden re-runs (beyond the graph's existing seed=0 assignment) used to
 # measure how much a resolution's partition changes under reseeding.
-STABILITY_SEEDS: Final[tuple[int, ...]] = (1, 2, 3, 4, 5)
+_communities = params("communities")  # params.yaml: one value, one place
+STABILITY_SEEDS: Final[tuple[int, ...]] = tuple(int(s) for s in _communities["stability_seeds"])
+LEIDEN_ITERATIONS: Final[int] = int(_communities["leiden_iterations"])
 
 # Adjacent resolutions whose partitions agree (NMI) at least this much are
 # flagged as sitting on the same "natural" community scale.
-PLATEAU_NMI_THRESHOLD: Final[float] = 0.9
+PLATEAU_NMI_THRESHOLD: Final[float] = float(_communities["plateau_nmi_threshold"])
 
 # A community this size or larger is treated as "substantive" when summarizing
 # per-community metrics. Matches the cutoff the website already uses to decide
 # which communities are worth naming in the legend, so the numbers reported here
 # describe the same communities a reader actually sees on the map.
-SUBSTANTIVE_COMMUNITY_MIN_SIZE: Final[int] = 30
+SUBSTANTIVE_COMMUNITY_MIN_SIZE: Final[int] = int(_communities["substantive_min_size"])
 
 # Family-wise error rate for calling a single community "statistically denser
 # than chance". Bonferroni-corrected across the communities of a partition, so
 # the per-community surprise cutoff is log(number_of_communities / this).
-STATISTICAL_DENSITY_FAMILYWISE_ALPHA: Final[float] = 0.05
+STATISTICAL_DENSITY_FAMILYWISE_ALPHA: Final[float] = float(_communities["statistical_density_familywise_alpha"])
 
 INPUT_GRAPHML: Final[Path] = LOW_RES_GRAPHML
-OUTPUT_GRAPHML: Final[Path] = GRAPH_LEVEL_DATA_PATH / "citation_network_with_community_metrics.graphml"
-OUTPUT_DIR: Final[Path] = GRAPH_LEVEL_DATA_PATH / "community_quality_metrics"
+ANALYSIS_OUTPUT_DIR: Final[Path] = Path(params("graph")["analysis_output_dir"])
+OUTPUT_GRAPHML: Final[Path] = ANALYSIS_OUTPUT_DIR / "citation_network_with_community_metrics.graphml"
+OUTPUT_DIR: Final[Path] = ANALYSIS_OUTPUT_DIR / "community_quality_metrics"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 PER_COMMUNITY_PARQUET: Final[Path] = OUTPUT_DIR / "community_quality_metrics_per_community.parquet"
 PER_PARTITION_PARQUET: Final[Path] = OUTPUT_DIR / "community_quality_metrics_per_partition.parquet"
+# DVC-facing summaries (outside OUTPUT_DIR so dvc.yaml can list them as `metrics` /
+# `plots` next to the directory output): a few scalars at the canonical resolution
+# for `dvc metrics show` / `dvc exp show`, and the per-partition table as CSV for
+# `dvc plots` with resolution on the x-axis.
+DVC_METRICS_JSON: Final[Path] = ANALYSIS_OUTPUT_DIR / "metrics" / "community_quality_metrics.json"
+DVC_PLOTS_CSV: Final[Path] = ANALYSIS_OUTPUT_DIR / "plots" / "community_quality_metrics_per_partition.csv"
+DVC_METRIC_FIELDS: Final[tuple[str, ...]] = (
+    "number_of_communities",
+    "number_of_substantive_communities",
+    "share_of_nodes_in_substantive_communities",
+    "modularity",
+    "intra_community_edge_fraction",
+    "share_of_communities_that_are_statistically_dense",
+    "cross_seed_normalized_mutual_information",
+)
 
 
 #####################
@@ -542,29 +560,22 @@ def _structural_partition_metrics(
 ##     Main     ##
 ##################
 def _main() -> int:
-    # Building the HamiltonTracker validates against a local UI server; only
-    # construct it when the UI adapter below is actually enabled.
-    # UI_CONFIG = adapters.HamiltonTracker(
-    #     project_id=DEFAULT_UI_PROJECT_ID,
-    #     username=DEFAULT_UI_USERNAME,
-    #     dag_name=CURRENT_FILE_NAME,
-    #     tags={"environment": "DEV", "team": TEAM_NAME, "version": "0.1"},
-    # )
     inputs = dict(
         citation_network_path=INPUT_GRAPHML,
-        n_iterations=10,
+        n_iterations=LEIDEN_ITERATIONS,
         stability_seeds=list(STABILITY_SEEDS),
     )
     outputs = [
         "save_citation_network_with_community_metrics",
         "save_per_community_quality_metrics",
         "save_per_partition_quality_metrics",
+        "save_dvc_metrics_and_plots",
     ]
     import __main__
     dr = (
         driver.Builder()
         .with_modules(__main__)
-        # .with_adapters(UI_CONFIG)
+        .with_adapters(*tracker_adapters(CURRENT_FILE_NAME))  # params.yaml `tracker.enabled`
         .build()
     )
     dr.validate_execution(outputs, inputs=inputs)
@@ -791,6 +802,36 @@ def save_per_community_quality_metrics(per_community_quality_metrics_df: pd.Data
 def save_per_partition_quality_metrics(per_partition_quality_metrics_df: pd.DataFrame) -> dict:
     per_partition_quality_metrics_df.to_parquet(PER_PARTITION_PARQUET)
     return utils.get_file_metadata(PER_PARTITION_PARQUET)
+
+
+def _dvc_metrics_at_canonical_resolution(df: pd.DataFrame, canonical_resolution: float, fields: tuple[str, ...]) -> dict:
+    """The row at the canonical resolution (or the nearest swept one) reduced to
+    a flat {field: number} dict, NaN -> None, so DVC can diff it across experiments."""
+    if df.empty:
+        return {}
+    nearest = min(df["resolution"], key=lambda r: abs(float(r) - canonical_resolution))
+    row = df[df["resolution"] == nearest].iloc[0]
+    out = {"resolution": float(nearest)}
+    for field in fields:
+        if field in row.index:
+            value = row[field]
+            out[field] = None if pd.isna(value) else (int(value) if float(value).is_integer() and "share" not in field and "modularity" not in field and "fraction" not in field and "information" not in field else float(value))
+    return out
+
+
+@datasaver()
+def save_dvc_metrics_and_plots(per_partition_quality_metrics_df: pd.DataFrame) -> dict:
+    """See DVC_METRICS_JSON / DVC_PLOTS_CSV: what `dvc metrics` and `dvc plots` read."""
+    import json
+
+    DVC_METRICS_JSON.parent.mkdir(parents=True, exist_ok=True)
+    DVC_PLOTS_CSV.parent.mkdir(parents=True, exist_ok=True)
+    summary = _dvc_metrics_at_canonical_resolution(
+        per_partition_quality_metrics_df, CANONICAL_RESOLUTION, DVC_METRIC_FIELDS)
+    with open(DVC_METRICS_JSON, "w", encoding="utf-8") as f:
+        json.dump(summary, f, indent=2)
+    per_partition_quality_metrics_df.sort_values("resolution").to_csv(DVC_PLOTS_CSV, index=False)
+    return {"metrics": str(DVC_METRICS_JSON), "plots": str(DVC_PLOTS_CSV), **summary}
 
 
 if __name__ == "__main__":
