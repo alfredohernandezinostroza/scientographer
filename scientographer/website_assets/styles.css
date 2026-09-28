@@ -734,6 +734,99 @@ details.about p {
 .health-controls select:focus { border-color: var(--accent); }
 .health-check { cursor: pointer; }
 
+/* ── Per-community keyword bars (Metrics tab section + community detail) ───── */
+#view-keywords-section {
+  margin-top: 26px;
+  padding-top: 18px;
+  border-top: 1px solid var(--panel-border);
+}
+.keyword-tile-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+.keyword-tile-title .swatch {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+.keyword-tile-title button {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.keyword-tile-title button:hover { color: var(--accent); }
+.keyword-bars { display: block; width: 100%; height: auto; }
+.kw-bar { fill: var(--accent); opacity: 0.85; }
+.kw-bar-track { fill: var(--panel-border); opacity: 0.35; }
+.kw-label { fill: var(--text); font-size: 8.5px; }
+.kw-value { fill: var(--text-dim); font-size: 7.5px; }
+#detail .keyword-bars-wrap { margin: 4px 0 10px; }
+
+/* ── Figures tab ───────────────────────────────────────────────────────── */
+#figures-wrap {
+  top: 16px;
+  left: 16px;
+  right: 16px;
+  bottom: 16px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+#figures-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+  gap: 14px;
+}
+@media (max-width: 900px) { #figures-grid { grid-template-columns: 1fr; } }
+.figure-card {
+  background: #161a22;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  padding: 10px 12px 8px;
+  min-width: 0;
+}
+.figure-card .figure-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+.figure-card .figure-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.figure-tag {
+  font-size: 9.5px;
+  padding: 1px 6px;
+  border-radius: 9px;
+  border: 1px solid var(--panel-border);
+  color: var(--text-dim);
+}
+.figure-tag.other-graph { border-color: #ffb14e; color: #ffb14e; }
+.figure-card img, .figure-card object {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: #fff;
+  border-radius: 4px;
+}
+.figures-empty { color: var(--text-dim); font-size: 12px; padding: 8px 0; }
+
 /* Size-band legend: identity never rests on colour alone. */
 .metric-band-legend {
   display: flex;

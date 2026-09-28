@@ -107,6 +107,16 @@ const state = {
   healthScatterMetric: "internal_edge_surprise", // y-axis metric of the size-vs-health scatter
   healthExcludeSingletons: true, // singletons are ~half the rows and pile up at one value
 
+  // community_keywords.json: resolution -> community id -> ranked [{keyword, score}]
+  // (community_keywords.py's corrected TF-IDF, or the site's own TF-IDF fallback --
+  // `source` says which). Drives the keyword bars in the Metrics tab and the
+  // community detail panel. null if absent.
+  communityKeywords: null,
+  // figures.json: pipeline figures (word clouds, ...) copied next to the data by
+  // build_website.py, each tagged with the graph + resolution it was made on.
+  figures: null,
+  figuresFollowResolution: true, // gallery filter: only the selected resolution's figures
+
   // "Until-year" time snapshots: the active dataset's snapshots.json (per-cutoff
   // re-layouts using only papers up to that year; colour/grouping is unchanged).
   // state.snapshot === null means the full "now" layout (base node x/y). Reset on
@@ -244,6 +254,9 @@ async function loadDataset(name) {
   // selector. A no-op (leaves "community" grouping empty) if the dataset
   // doesn't provide communities_by_resolution.json.
   await setupResolutionMetrics(cfg);
+  // Independent of the metrics: a dataset can ship figures without any
+  // community analysis, and vice versa.
+  await setupFigures(cfg);
 
   buildGraph(); // clears + repopulates the graph (and any edge layers)
   if (!state.renderer) {
@@ -459,11 +472,12 @@ async function setupResolutionMetrics(cfg) {
 
   state.resolutionMetricsAfterCm = null;
   state.connectivityMetrics = null;
+  state.communityKeywords = null;
 
   let commByRes = null, resMetrics = null, distributions = null;
-  let resMetricsAfterCm = null, connectivityMetrics = null;
+  let resMetricsAfterCm = null, connectivityMetrics = null, communityKeywords = null;
   try {
-    [commByRes, resMetrics, distributions, resMetricsAfterCm, connectivityMetrics] = await Promise.all([
+    [commByRes, resMetrics, distributions, resMetricsAfterCm, connectivityMetrics, communityKeywords] = await Promise.all([
       fetch(`${cfg.dir}/communities_by_resolution.json`).then((r) => (r.ok ? r.json() : null)),
       fetch(`${cfg.dir}/resolution_metrics.json`).then((r) => (r.ok ? r.json() : null)),
       // Optional: every community's health metrics, including the ones too small
@@ -476,6 +490,9 @@ async function setupResolutionMetrics(cfg) {
       // are skipped, everything else renders unchanged.
       fetch(`${cfg.dir}/resolution_metrics_after_cm.json`).then((r) => (r.ok ? r.json() : null)),
       fetch(`${cfg.dir}/connectivity_metrics.json`).then((r) => (r.ok ? r.json() : null)),
+      // Optional: per-community distinguishing keywords (bars in the Metrics
+      // tab + detail panel). Absent => the legend's plain keyword list is used.
+      fetch(`${cfg.dir}/community_keywords.json`).then((r) => (r.ok ? r.json() : null)),
     ]);
   } catch {
     commByRes = null;
@@ -483,14 +500,19 @@ async function setupResolutionMetrics(cfg) {
     distributions = null;
     resMetricsAfterCm = null;
     connectivityMetrics = null;
+    communityKeywords = null;
   }
-  if (!commByRes || !resMetrics || !Object.keys(commByRes.by_resolution || {}).length) return;
+  // The legend is the one required file: it carries every resolution the graph
+  // has. The whole-graph metrics are optional (a graph without
+  // community_quality_metrics.py output still gets the resolution dropdown).
+  if (!commByRes || !Object.keys(commByRes.by_resolution || {}).length) return;
 
   state.communitiesByResolution = commByRes;
   state.resolutionMetrics = resMetrics;
   state.communityDistributions = distributions;
   state.resolutionMetricsAfterCm = resMetricsAfterCm;
   state.connectivityMetrics = connectivityMetrics;
+  state.communityKeywords = communityKeywords;
 
   const resolutions = Object.keys(commByRes.by_resolution).sort((a, b) => parseFloat(a) - parseFloat(b));
   const defaultRes = commByRes.default_resolution && commByRes.by_resolution[commByRes.default_resolution]
@@ -511,9 +533,10 @@ async function setupResolutionMetrics(cfg) {
   state.groupData.community = commByRes.by_resolution[defaultRes];
 
   if (row) row.hidden = false;
-  if (tab) tab.hidden = false;
+  if (tab) tab.hidden = !(resMetrics || communityKeywords);
   renderResolutionMetricsPanel();
   renderCommunityHealthPanel();
+  renderKeywordsSection();
 }
 
 // Switch which resolution's Leiden/CPM communities colour the map: recomputes
@@ -537,9 +560,14 @@ function applyCommunityResolution(resolution) {
   const sel = document.getElementById("community-resolution");
   if (sel && sel.value !== resolution) sel.value = resolution;
 
-  // Keep the Metrics tab's per-resolution health views in step with the map.
-  renderSelectedResolutionHealth();
-  renderHealthSummaryStrip();
+  // Keep the Metrics tab's per-resolution views and the figure gallery in step
+  // with the map.
+  if (state.resolutionMetrics) {
+    renderSelectedResolutionHealth();
+    renderHealthSummaryStrip();
+  }
+  renderKeywordsSection();
+  renderFiguresGallery();
 
   if (!state.renderer) return; // called before the graph exists (initial load)
 
@@ -1375,9 +1403,16 @@ function showGroupDetail(key, gid) {
   const authors = (c.top_authors || [])
     .map((a) => `<li>${escapeHtml(a.name)}<div class="sub">${a.papers ?? ""} papers</div></li>`)
     .join("");
-  const keywords = (c.top_keywords || [])
+  // Distinguishing keywords: bars from community_keywords.json when the dataset
+  // has them for this citation community (community_keywords.py's corrected
+  // TF-IDF, or the site's own -- see keywordItemsFor); else the legend's list.
+  const barItems = g.citation ? keywordItemsFor(state.communityResolution, gid) : null;
+  const keywords = barItems ? "" : (c.top_keywords || [])
     .map((k) => `<li>${escapeHtml(k.keyword)}<div class="sub">tf-idf ${k.tfidf?.toFixed(3) ?? ""}</div></li>`)
     .join("");
+  const keywordBarsBlock = barItems
+    ? `<h3>Distinguishing keywords</h3><div class="keyword-bars-wrap" id="detail-keyword-bars"></div>`
+    : "";
   const wordsBlock = c.top_words
     ? `<h3>Top words</h3><p class="meta">${escapeHtml(c.top_words)}</p>`
     : "";
@@ -1409,11 +1444,14 @@ function showGroupDetail(key, gid) {
     ${integBlock}
     ${metricsBlock}
     ${wordsBlock}
+    ${keywordBarsBlock}
     ${keywords ? `<h3>Top keywords</h3><ul class="top-list">${keywords}</ul>` : ""}
     ${authors ? `<h3>Top authors</h3><ul class="top-list">${authors}</ul>` : ""}
     ${papers ? `<h3>Top papers</h3><ul class="top-list">${papers}</ul>` : ""}
   `;
   document.getElementById("detail").hidden = false;
+  const barsEl = document.getElementById("detail-keyword-bars");
+  if (barsEl && barItems) renderKeywordBars(barsEl, { items: barItems, color: c.color, maxBars: 12 });
   document.getElementById("frame-group").addEventListener("click", () => frameGroup(key, gid));
   document.getElementById("isolate-group").addEventListener("click", () => toggleIsolateGroup(key, gid));
   document.getElementById("show-islands")?.addEventListener("click", () => highlightTopicIslands(key, gid));
@@ -1792,6 +1830,7 @@ function initTabs() {
   const TABS = [
     { tabId: "tab-graph", viewId: "view-graph" },
     { tabId: "tab-metrics", viewId: "view-metrics" },
+    { tabId: "tab-figures", viewId: "view-figures" },
   ];
   for (const { tabId, viewId } of TABS) {
     const tabEl = document.getElementById(tabId);
@@ -2914,6 +2953,213 @@ function initHealthControls() {
       state.healthExcludeSingletons = e.target.checked;
       renderSelectedResolutionHealth();
     });
+  }
+}
+
+// ── Per-community keyword bars ─────────────────────────────────────────────
+// community_keywords.json (build_website.py): resolution -> community id ->
+// ranked [{keyword, score}], for every named community. `source` is "pipeline"
+// (community_keywords.py: synonym-aware, corrected IDF) or "site" (the quick
+// TF-IDF over the papers' own keyword fields that also names the legend).
+function keywordItemsFor(resolution, gid) {
+  const ck = state.communityKeywords;
+  if (!ck || !ck.by_resolution || resolution == null) return null;
+  const atRes = ck.by_resolution[String(resolution)];
+  const items = atRes && atRes[String(gid)];
+  return items && items.length ? items : null;
+}
+
+function truncateLabel(s, n) {
+  s = String(s);
+  return s.length > n ? s.slice(0, n - 1) + "…" : s;
+}
+
+// Horizontal bars, one per keyword, longest = the community's top score. Drawn
+// to scale within the tile; the full keyword + score is in the hover title.
+function renderKeywordBars(container, opts) {
+  const { items, color, maxBars = 10 } = opts;
+  const shown = items.slice(0, maxBars);
+  if (!shown.length) return;
+  const W = 300, ROW = 15, PAD = { l: 6, r: 40, t: 4, b: 4 }, LABEL_W = 132;
+  const H = PAD.t + PAD.b + shown.length * ROW;
+  const barX = PAD.l + LABEL_W;
+  const barMax = W - barX - PAD.r;
+  const max = Math.max(...shown.map((d) => d.score)) || 1;
+  const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, class: "keyword-bars" });
+  shown.forEach((d, i) => {
+    const y = PAD.t + i * ROW;
+    const label = svgEl("text", { x: barX - 5, y: y + ROW - 4, class: "kw-label", "text-anchor": "end" });
+    label.textContent = truncateLabel(d.keyword, 24);
+    const title = svgEl("title", {});
+    title.textContent = `${d.keyword}: ${d.score}`;
+    label.appendChild(title);
+    svg.appendChild(label);
+    svg.appendChild(svgEl("rect", { x: barX, y: y + 3, width: barMax, height: ROW - 6, rx: 2, class: "kw-bar-track" }));
+    const w = Math.max(1, (d.score / max) * barMax);
+    const bar = svgEl("rect", { x: barX, y: y + 3, width: w, height: ROW - 6, rx: 2, class: "kw-bar" });
+    if (color) bar.setAttribute("style", `fill:${color}`);
+    svg.appendChild(bar);
+    const val = svgEl("text", { x: barX + w + 4, y: y + ROW - 4, class: "kw-value" });
+    val.textContent = Number(d.score).toFixed(3);
+    svg.appendChild(val);
+  });
+  container.appendChild(svg);
+}
+
+// Metrics tab section: one tile per named community at the selected
+// resolution (largest first). Hidden when the dataset has no keyword data.
+function renderKeywordsSection() {
+  const section = document.getElementById("view-keywords-section");
+  const grid = document.getElementById("keywords-grid");
+  if (!section || !grid) return;
+  const res = state.communityResolution;
+  const legend = state.groupData.community || {};
+  const ids = Object.keys(legend).filter((cid) => keywordItemsFor(res, cid));
+  if (!state.communityKeywords || !ids.length) {
+    section.hidden = true;
+    grid.innerHTML = "";
+    return;
+  }
+  section.hidden = false;
+  const meta = document.getElementById("keywords-meta");
+  if (meta) {
+    const ck = state.communityKeywords;
+    const how = ck.source === "pipeline"
+      ? "from community_keywords.py (each community's synonym-canonicalised keyword list is one document; corrected IDF)"
+      : "computed by the site from the papers' own keyword fields";
+    meta.textContent = `${ids.length} named communities at resolution ${res}. Bars are ${ck.score_label || "TF-IDF"} scores ${how}. Click a community's name to open it on the map.`;
+  }
+  grid.innerHTML = "";
+  ids.sort((a, b) => (legend[b].size || 0) - (legend[a].size || 0));
+  const cg = citationGrouping();
+  for (const cid of ids) {
+    const c = legend[cid];
+    const tile = document.createElement("div");
+    tile.className = "metric-tile";
+    const head = document.createElement("div");
+    head.className = "keyword-tile-title";
+    const swatch = document.createElement("span");
+    swatch.className = "swatch";
+    swatch.style.background = c.color;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = c.name;
+    btn.title = c.name;
+    btn.addEventListener("click", () => { if (cg) openCommunityFromKeywords(cg.key, cid); });
+    head.appendChild(swatch);
+    head.appendChild(btn);
+    tile.appendChild(head);
+    const hint = document.createElement("div");
+    hint.className = "metric-tile-hint";
+    hint.textContent = `${(c.size || 0).toLocaleString()} papers · community ${cid}`;
+    tile.appendChild(hint);
+    renderKeywordBars(tile, { items: keywordItemsFor(res, cid), color: c.color });
+    grid.appendChild(tile);
+  }
+}
+
+// From a keyword tile to the map: switch to the Graph tab, colour by the
+// citation grouping (through the normal Color-by control so every side effect
+// runs), then open + frame the community.
+function openCommunityFromKeywords(key, gid) {
+  document.getElementById("tab-graph")?.click();
+  const sel = document.getElementById("color-by");
+  if (sel && sel.value !== key) {
+    sel.value = key;
+    sel.dispatchEvent(new Event("change"));
+  }
+  showGroupDetail(key, gid);
+  frameGroup(key, gid);
+}
+
+// ── Figures tab ────────────────────────────────────────────────────────────
+// figures.json (build_website.py): { site_graph, figures_dir, figures: [{file,
+// kind, graph, resolution, title}] }. Figures are static files copied next to
+// the data; the gallery only filters and labels them.
+async function setupFigures(cfg) {
+  state.figures = null;
+  const tab = document.getElementById("tab-figures");
+  if (tab) tab.hidden = true;
+  let figs = null;
+  try {
+    figs = await fetch(`${cfg.dir}/figures.json`).then((r) => (r.ok ? r.json() : null));
+  } catch {
+    figs = null;
+  }
+  if (!figs || !Array.isArray(figs.figures) || !figs.figures.length) return;
+  state.figures = figs;
+  if (tab) tab.hidden = false;
+  const cb = document.getElementById("figures-follow-resolution");
+  if (cb && !cb.dataset.wired) {
+    cb.dataset.wired = "1";
+    cb.checked = state.figuresFollowResolution;
+    cb.addEventListener("change", (e) => {
+      state.figuresFollowResolution = e.target.checked;
+      renderFiguresGallery();
+    });
+  }
+  renderFiguresGallery();
+}
+
+function renderFiguresGallery() {
+  const grid = document.getElementById("figures-grid");
+  const count = document.getElementById("figures-count");
+  if (!grid) return;
+  grid.innerHTML = "";
+  const figs = state.figures;
+  if (!figs) return;
+  const res = state.communityResolution;
+  const follow = state.figuresFollowResolution && res != null;
+  const base = figs.figures_dir || "figures";
+  // A figure "belongs" to this map when it was made on the same graph (or
+  // declares none). Figures from another graph can never line up with the
+  // dropdown's community ids, so they are always listed -- and marked.
+  const sameGraph = (f) => !f.graph || !figs.site_graph || figs.site_graph.includes(f.graph);
+  const visible = figs.figures.filter((f) => {
+    if (!follow || f.resolution == null || !sameGraph(f)) return true;
+    return String(f.resolution) === String(res);
+  });
+  if (count) count.textContent = `${visible.length} of ${figs.figures.length} figures`;
+  if (!visible.length) {
+    const p = document.createElement("div");
+    p.className = "figures-empty";
+    p.textContent = `No figures for resolution ${res}. Untick the box to see all ${figs.figures.length}.`;
+    grid.appendChild(p);
+    return;
+  }
+  for (const f of visible) {
+    const card = document.createElement("div");
+    card.className = "figure-card";
+    const title = document.createElement("div");
+    title.className = "figure-title";
+    title.textContent = f.title || f.file;
+    card.appendChild(title);
+    const tags = document.createElement("div");
+    tags.className = "figure-tags";
+    const tag = (text, cls) => {
+      const s = document.createElement("span");
+      s.className = "figure-tag" + (cls ? " " + cls : "");
+      s.textContent = text;
+      tags.appendChild(s);
+    };
+    if (f.kind) tag(f.kind.replace(/-/g, " "));
+    if (f.resolution != null) tag(`resolution ${f.resolution}`);
+    if (f.graph) tag(sameGraph(f) ? `graph: ${f.graph}` : `other graph: ${f.graph}`, sameGraph(f) ? "" : "other-graph");
+    card.appendChild(tags);
+    const src = `${base}/${encodeURIComponent(f.file)}`;
+    const img = document.createElement("img");
+    img.src = src;
+    img.alt = f.title || f.file;
+    img.loading = "lazy";
+    card.appendChild(img);
+    const link = document.createElement("a");
+    link.href = src;
+    link.target = "_blank";
+    link.rel = "noopener";
+    link.className = "meta";
+    link.textContent = "Open full size";
+    card.appendChild(link);
+    grid.appendChild(card);
   }
 }
 
