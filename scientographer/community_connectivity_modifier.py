@@ -64,9 +64,8 @@ import hamilton.log_setup
 from motor_learning_network.constants import (
     GRAPH_LEVEL_DATA_PATH,
     FIGURES_PATH,
-    DEFAULT_UI_PROJECT_ID,
-    DEFAULT_UI_USERNAME,
-    TEAM_NAME,
+    params,
+    tracker_adapters,
 )
 from motor_learning_network.community_connectivity_metrics import (
     RESOLUTIONS,
@@ -93,7 +92,7 @@ EXECUTE = True
 # than this are dropped both before CM runs and after it finishes cutting, so B is
 # also what makes CM shed node coverage. Communities that are trees are dropped
 # too (a tree's minimum cut is 1, poorly connected for any tree of ten+ nodes).
-CM_MIN_CLUSTER_SIZE: Final[int] = 11
+CM_MIN_CLUSTER_SIZE: Final[int] = int(params("communities")["connectivity_modifier_min_cluster_size"])
 
 # Seed for the Leiden-CPM re-clustering of cut pieces, so remediation is
 # reproducible. Matches the deterministic re-clustering the paper's CM performs.
@@ -101,7 +100,7 @@ CM_RECLUSTER_SEED: Final[int] = 0
 CM_RECLUSTER_ITERATIONS: Final[int] = 2
 
 INPUT_GRAPHML: Final[Path] = LOW_RES_GRAPHML
-OUTPUT_DIR: Final[Path] = GRAPH_LEVEL_DATA_PATH / "community_connectivity_modifier"
+OUTPUT_DIR: Final[Path] = Path(params("graph")["analysis_output_dir"]) / "community_connectivity_modifier"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 MEMBERSHIP_PARQUET: Final[Path] = OUTPUT_DIR / "connectivity_modifier_membership.parquet"
 PER_COMMUNITY_PARQUET: Final[Path] = OUTPUT_DIR / "connectivity_modifier_per_community.parquet"
@@ -192,14 +191,6 @@ def _classify_transformation(original_size: int, surviving_pieces: int, survivin
 ##     Main     ##
 ##################
 def _main() -> int:
-    # Building the HamiltonTracker validates against a local UI server; only
-    # construct it when the UI adapter below is actually enabled.
-    # UI_CONFIG = adapters.HamiltonTracker(
-    #     project_id=DEFAULT_UI_PROJECT_ID,
-    #     username=DEFAULT_UI_USERNAME,
-    #     dag_name=CURRENT_FILE_NAME,
-    #     tags={"environment": "DEV", "team": TEAM_NAME, "version": "0.1"},
-    # )
     inputs = dict(
         citation_network_path=INPUT_GRAPHML,
         min_cluster_size=CM_MIN_CLUSTER_SIZE,
@@ -213,7 +204,7 @@ def _main() -> int:
     dr = (
         driver.Builder()
         .with_modules(__main__)
-        # .with_adapters(UI_CONFIG)
+        .with_adapters(*tracker_adapters(CURRENT_FILE_NAME))  # params.yaml `tracker.enabled`
         .build()
     )
     dr.validate_execution(outputs, inputs=inputs)

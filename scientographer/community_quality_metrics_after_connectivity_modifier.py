@@ -47,10 +47,10 @@ import hamilton.log_setup
 from motor_learning_network.constants import (
     GRAPH_LEVEL_DATA_PATH,
     FIGURES_PATH,
-    DEFAULT_UI_PROJECT_ID,
-    DEFAULT_UI_USERNAME,
-    TEAM_NAME,
+    params,
+    tracker_adapters,
 )
+from motor_learning_network.community_resolution_bands import LOW_RES_GRAPHML
 from motor_learning_network.community_quality_metrics import (
     RESOLUTIONS,
     _structural_partition_metrics,
@@ -68,8 +68,8 @@ logger = logging.getLogger(__name__)
 
 EXECUTE = True
 
-INPUT_GRAPHML: Final[Path] = GRAPH_LEVEL_DATA_PATH / "citation_network_full_low_res.graphml"
-OUTPUT_DIR: Final[Path] = GRAPH_LEVEL_DATA_PATH / "community_quality_metrics_after_connectivity_modifier"
+INPUT_GRAPHML: Final[Path] = LOW_RES_GRAPHML
+OUTPUT_DIR: Final[Path] = Path(params("graph")["analysis_output_dir"]) / "community_quality_metrics_after_connectivity_modifier"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 PER_COMMUNITY_PARQUET: Final[Path] = OUTPUT_DIR / "community_quality_metrics_after_cm_per_community.parquet"
 PER_PARTITION_PARQUET: Final[Path] = OUTPUT_DIR / "community_quality_metrics_after_cm_per_partition.parquet"
@@ -105,14 +105,6 @@ def _after_membership(graph: ig.Graph, cm_membership_df: pd.DataFrame, resolutio
 ##     Main     ##
 ##################
 def _main() -> int:
-    # Building the HamiltonTracker validates against a local UI server; only
-    # construct it when the UI adapter below is actually enabled.
-    # UI_CONFIG = adapters.HamiltonTracker(
-    #     project_id=DEFAULT_UI_PROJECT_ID,
-    #     username=DEFAULT_UI_USERNAME,
-    #     dag_name=CURRENT_FILE_NAME,
-    #     tags={"environment": "DEV", "team": TEAM_NAME, "version": "0.1"},
-    # )
     inputs = dict(
         citation_network_path=INPUT_GRAPHML,
         cm_membership_path=CM_MEMBERSHIP_PARQUET,
@@ -125,7 +117,7 @@ def _main() -> int:
     dr = (
         driver.Builder()
         .with_modules(__main__)
-        # .with_adapters(UI_CONFIG)
+        .with_adapters(*tracker_adapters(CURRENT_FILE_NAME))  # params.yaml `tracker.enabled`
         .build()
     )
     dr.validate_execution(outputs, inputs=inputs)

@@ -1,0 +1,132 @@
+# Every knob of the pipeline, in one place.
+#
+# DAG modules read these through `motor_learning_network.constants.PARAMS` (loaded at
+# import; override the file with the MLN_PARAMS environment variable), and `dvc.yaml`
+# declares which stage depends on which key so `dvc repro` / `dvc exp run -S key=value`
+# re-run exactly the affected stages. Paths are relative to the repository root.
+#
+# Rule of thumb: a value that used to be a module constant lives here; a value that
+# is swept *inside* one DAG run (the resolution bands) is listed here once and imported
+# by every DAG so they can never disagree.
+
+graph:
+  # The graph the community-analysis DAGs run on. get_network_communities_and_stats.py
+  # (frozen Track-A script) wrote its three-band Leiden/CPM sweep to three graphml files
+  # with identical topology; the low band is the base and the others are grafted on.
+  low_band_graphml: data/graph_level_data/citation_network_full_low_res.graphml
+  higher_band_graphml:
+    mid: data/graph_level_data/citation_network_full.graphml
+    high: data/graph_level_data/citation_network_full_high_res.graphml
+  # Where the community-analysis DAGs write (one sub-directory per DAG, plus the
+  # metrics graphml). Point it elsewhere to analyse another graph side by side.
+  analysis_output_dir: data/graph_level_data
+
+resolutions:
+  # The Leiden/CPM resolution sweep, exactly matching the stored
+  # `cpm_communities_at_res=<r>` column names (Python float repr of each value).
+  low: [0.001, 0.002, 0.003, 0.004, 0.005, 0.006, 0.007, 0.008, 0.009]
+  mid: [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1, 0.11, 0.12, 0.13, 0.14, 0.15, 0.16, 0.17, 0.18, 0.19]
+  high: [0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+  # The resolution the site opens on and single-resolution analyses use.
+  # See docs/RESOLUTION_SELECTION.md for how to choose it from the metrics.
+  canonical: 0.005
+
+detect_communities:
+  # detect_communities.py: Leiden/CPM at every resolution of the sweep above, written
+  # onto ONE graph. The study's stored partitions came from the frozen Track-A script
+  # instead (the three band files under `graph`); this stage is how a new corpus gets
+  # its communities, and its output can replace all three band paths above.
+  input_graphml: data/processed/citation_network_without_layout_updated_citations.graphml
+  output_graphml: data/graph_level_data/citation_network_with_communities.graphml
+  summary_parquet: data/graph_level_data/detect_communities/partition_summary.parquet
+  seed: 0
+  iterations: 10
+  # Pre-detection total-degree cut (0 = none). The study's Track-A run used none for
+  # the metrics graph; process_network_by_time_periods.py used 5 for the time slices.
+  min_degree: 0
+
+layout:
+  # layout_graph.py: give a graph x/y coordinates. `forceatlas2` runs the layout
+  # in-pipeline (fa2); `import` copies x/y from a file exported by Gephi (graphml, or
+  # a node CSV with id/name, x, y columns) matched by DOI, which is how the study's
+  # layouts were made. An input that already has a complete layout is passed through
+  # unless `overwrite_existing` is true.
+  input_graphml: data/graph_level_data/citation_network_with_communities.graphml
+  output_graphml: data/graph_level_data/citation_network_with_communities_and_layout.graphml
+  mode: forceatlas2
+  forceatlas2_iterations: 500
+  import_path: null
+  overwrite_existing: false
+
+communities:
+  # A community this size or larger is "substantive": the cutoff for naming on the
+  # site, for population-explicit metric summaries, and for keyword labels.
+  substantive_min_size: 30
+  # Leiden re-runs (beyond the stored seed-0 assignment) for cross-seed stability.
+  stability_seeds: [1, 2, 3, 4, 5]
+  leiden_iterations: 10
+  # Adjacent resolutions whose partitions agree (NMI) at least this much sit on
+  # the same "natural" community scale.
+  plateau_nmi_threshold: 0.9
+  # Family-wise error rate for calling one community statistically denser than chance.
+  statistical_density_familywise_alpha: 0.05
+  # Connectivity Modifier: clusters smaller than this are not pursued further.
+  connectivity_modifier_min_cluster_size: 11
+
+community_keywords:
+  # Name every community on this graph by its most distinguishing keywords
+  # (community_keywords.py). null resolutions = every resolution the graph carries.
+  input_graphml: data/graph_level_data/citation_network_with_topics_new.graphml
+  resolutions: null
+  synonyms_threshold: 0.99
+  tfidf_norm: l2
+  idf_bias: 0.0
+  top_n_keywords: 3
+  top_n_scored_keywords: 25
+  keyword_dividing_character: "|"
+  min_community_size: 30
+
+wordclouds:
+  # find_keywords_per_cluster_noverlap.py: TF-IDF histograms + word clouds for one
+  # graph (the study: an "until_<year>" time slice) at the listed resolutions.
+  year: 2026
+  input_graphml: data/graph_level_data/citation_network_until_2026_with_layout.graphml
+  output_dir: data/keywords_level_data/until_2026_wordcloud_noverlap
+  resolutions: [0.0004, 0.001]
+  top_n_clusters: 15
+  min_cluster_size: 1
+  # How many communities (by id, 0..N-1 = the N largest) enter the TF-IDF corpus.
+  # Every admitted community is one document, so a long tail of tiny communities
+  # drags IDF down for terms the big communities genuinely share. 50 reproduces the
+  # existing runs; 5 was the 2026-09-15 experiment.
+  top_n_communities: 50
+  synonyms_threshold: 0.99
+  norm: l2
+  idf_bias: 0.0
+  top_n_histogram: 40
+  top_n_words: 20
+  forceatlas2_iterations: 500
+
+website:
+  # build_website.py: only `graphml` is required; every other input is optional and
+  # its panel is skipped when the file is absent.
+  graphml: data/graph_level_data/community_keywords/citation_network_with_community_keywords.graphml
+  topic_metrics: data/graph_level_data/topic_community/topic_community_metrics.json
+  per_community_metrics: data/graph_level_data/community_quality_metrics/community_quality_metrics_per_community.parquet
+  per_partition_metrics: data/graph_level_data/community_quality_metrics/community_quality_metrics_per_partition.parquet
+  after_cm_partition_metrics: data/graph_level_data/community_quality_metrics_after_connectivity_modifier/community_quality_metrics_after_cm_per_partition.parquet
+  connectivity_diagnostic_partition: data/graph_level_data/community_connectivity_metrics/community_connectivity_metrics_per_partition.parquet
+  connectivity_modifier_partition: data/graph_level_data/community_connectivity_modifier/connectivity_modifier_per_partition.parquet
+  community_keyword_scores: data/graph_level_data/community_keywords/community_keyword_scores.parquet
+  # Word clouds under this directory are discovered and copied into the Figures tab.
+  wordclouds_dir: data/keywords_level_data
+  output_dir: reports/website
+  default_resolution: 0.005
+  min_named_group_size: 30
+
+tracker:
+  # Hamilton UI tracker (provenance for the study's own runs). Off for package
+  # users; the study turns it on and runs `hamilton ui --base-dir ./.hamilton/db`.
+  enabled: false
+  url: http://localhost:8241
+  project_id: 1

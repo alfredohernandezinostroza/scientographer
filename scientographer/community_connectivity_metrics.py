@@ -56,11 +56,11 @@ import hamilton.log_setup
 from motor_learning_network.constants import (
     GRAPH_LEVEL_DATA_PATH,
     FIGURES_PATH,
-    DEFAULT_UI_PROJECT_ID,
-    DEFAULT_UI_USERNAME,
-    TEAM_NAME,
+    params,
+    tracker_adapters,
 )
 from motor_learning_network.community_resolution_bands import (
+    CANONICAL_RESOLUTION,
     RESOLUTIONS,
     LOW_RES_GRAPHML,
     merge_higher_band_communities,
@@ -83,13 +83,24 @@ EXECUTE = True
 # website uses to decide which communities are worth naming, so the well-
 # connected fractions reported here describe the communities a reader actually
 # sees on the map, not the singleton artifact mass.
-SUBSTANTIVE_COMMUNITY_MIN_SIZE: Final[int] = 30
+SUBSTANTIVE_COMMUNITY_MIN_SIZE: Final[int] = int(params("communities")["substantive_min_size"])
 
 INPUT_GRAPHML: Final[Path] = LOW_RES_GRAPHML
-OUTPUT_DIR: Final[Path] = GRAPH_LEVEL_DATA_PATH / "community_connectivity_metrics"
+OUTPUT_DIR: Final[Path] = Path(params("graph")["analysis_output_dir"]) / "community_connectivity_metrics"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 PER_COMMUNITY_PARQUET: Final[Path] = OUTPUT_DIR / "community_connectivity_metrics_per_community.parquet"
 PER_PARTITION_PARQUET: Final[Path] = OUTPUT_DIR / "community_connectivity_metrics_per_partition.parquet"
+# DVC-facing summaries (see community_quality_metrics.py): scalars at the canonical
+# resolution for `dvc metrics` / `dvc exp show`, the per-partition table for `dvc plots`.
+DVC_METRICS_JSON: Final[Path] = OUTPUT_DIR.parent / "metrics" / "community_connectivity_metrics.json"
+DVC_PLOTS_CSV: Final[Path] = OUTPUT_DIR.parent / "plots" / "community_connectivity_metrics_per_partition.csv"
+DVC_METRIC_FIELDS: Final[tuple[str, ...]] = (
+    "number_of_substantive_communities",
+    "number_of_well_connected_communities",
+    "fraction_well_connected_over_substantive_communities",
+    "node_weighted_fraction_well_connected",
+    "median_minimum_edge_cut_size_over_substantive_communities",
+)
 
 
 #####################
@@ -209,26 +220,19 @@ def _summarize_connectivity_metrics(per_community: list[dict]) -> dict:
 ##     Main     ##
 ##################
 def _main() -> int:
-    # Building the HamiltonTracker validates against a local UI server; only
-    # construct it when the UI adapter below is actually enabled.
-    # UI_CONFIG = adapters.HamiltonTracker(
-    #     project_id=DEFAULT_UI_PROJECT_ID,
-    #     username=DEFAULT_UI_USERNAME,
-    #     dag_name=CURRENT_FILE_NAME,
-    #     tags={"environment": "DEV", "team": TEAM_NAME, "version": "0.1"},
-    # )
     inputs = dict(
         citation_network_path=INPUT_GRAPHML,
     )
     outputs = [
         "save_per_community_connectivity_metrics",
         "save_per_partition_connectivity_metrics",
+        "save_dvc_metrics_and_plots",
     ]
     import __main__
     dr = (
         driver.Builder()
         .with_modules(__main__)
-        # .with_adapters(UI_CONFIG)
+        .with_adapters(*tracker_adapters(CURRENT_FILE_NAME))  # params.yaml `tracker.enabled`
         .build()
     )
     dr.validate_execution(outputs, inputs=inputs)
@@ -349,6 +353,23 @@ def save_per_community_connectivity_metrics(per_community_connectivity_metrics_d
 def save_per_partition_connectivity_metrics(per_partition_connectivity_metrics_df: pd.DataFrame) -> dict:
     per_partition_connectivity_metrics_df.to_parquet(PER_PARTITION_PARQUET)
     return utils.get_file_metadata(PER_PARTITION_PARQUET)
+
+
+@datasaver()
+def save_dvc_metrics_and_plots(per_partition_connectivity_metrics_df: pd.DataFrame) -> dict:
+    """See DVC_METRICS_JSON / DVC_PLOTS_CSV: what `dvc metrics` and `dvc plots` read."""
+    import json
+
+    from motor_learning_network.community_quality_metrics import _dvc_metrics_at_canonical_resolution
+
+    DVC_METRICS_JSON.parent.mkdir(parents=True, exist_ok=True)
+    DVC_PLOTS_CSV.parent.mkdir(parents=True, exist_ok=True)
+    summary = _dvc_metrics_at_canonical_resolution(
+        per_partition_connectivity_metrics_df, CANONICAL_RESOLUTION, DVC_METRIC_FIELDS)
+    with open(DVC_METRICS_JSON, "w", encoding="utf-8") as f:
+        json.dump(summary, f, indent=2)
+    per_partition_connectivity_metrics_df.sort_values("resolution").to_csv(DVC_PLOTS_CSV, index=False)
+    return {"metrics": str(DVC_METRICS_JSON), "plots": str(DVC_PLOTS_CSV), **summary}
 
 
 if __name__ == "__main__":
