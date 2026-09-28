@@ -6,7 +6,7 @@ Thank you for helping. Bug reports, questions and pull requests are all welcome.
 
 1. Install the development environment: `pip install -e ".[all,dev]"`.
 2. Run the tests: `pytest`. For changes to a stage, also run the example project end
-   to end: `cd examples/until_1990 && dvc repro`.
+   to end: `cd examples/motor_learning_open_access && dvc repro`.
 3. Add or update tests next to the code you change (`scientographer/tests/`). Stages
    keep their logic in private helper functions (`_name`) so it can be tested on tiny
    hand-built graphs without running Hamilton.

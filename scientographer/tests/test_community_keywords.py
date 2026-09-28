@@ -174,3 +174,28 @@ def test_keyword_scores_df_is_long_form_with_ranks():
     assert list(df.columns) == ["resolution", "community_id", "rank", "keyword", "corrected_tfidf_score"]
     assert df["rank"].tolist() == [1, 2]
     assert df["keyword"].tolist() == ["cerebellum", "reaching"]
+
+
+# ── label spelling + apostrophes ──────────────────────────────────────────────
+def test_unified_apostrophes_merge_typographic_and_straight_variants():
+    from scientographer.community_keywords import _normalize_keyword
+    assert _normalize_keyword("Parkinson’s Disease", unify_apostrophes=True) == "parkinson's disease"
+    assert _normalize_keyword("Parkinson’s Disease") == "parkinson’s disease"  # legacy behaviour kept
+    df = pd.DataFrame({"keywords": [["Parkinson’s disease"], ["Parkinson's disease"]], "community_id": [0, 0]})
+    assert _canonical_corpus(df, {}, unify_apostrophes=True) == {0: "parkinson's disease\tparkinson's disease"}
+
+
+def test_display_forms_pick_the_most_common_author_spelling():
+    from scientographer.community_keywords import _display_forms
+    forms = _display_forms([["tDCS", "Reaching"], ["tDCS"], ["TDCS", "reaching"]], synonym_map={})
+    assert forms["tdcs"] == "tDCS"
+    assert forms["reaching"] == "Reaching"  # 1-1 tie -> alphabetically first ("R" < "r")
+
+
+def test_labels_in_original_spelling_or_title_case():
+    scored = {0: [("tdcs", 0.9), ("parkinson's disease", 0.5)]}
+    forms = {"tdcs": "tDCS", "parkinson's disease": "Parkinson's disease"}
+    assert _labels_from_scores(scored, 2, "original", forms) == {0: "tDCS; Parkinson's disease"}
+    assert _labels_from_scores(scored, 2, "title", forms) == {0: "Tdcs; Parkinson'S Disease"}
+    with pytest.raises(ValueError, match="label_case"):
+        _labels_from_scores(scored, 2, "upper", forms)

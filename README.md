@@ -76,12 +76,16 @@ resolution sweep and `canonical` resolution are the choices that shape the map.
 
 ## Try the example
 
-`examples/until_1990/` is a complete project: 292 papers and 585 citations from the
-motor-learning literature up to 1990 (bibliographic metadata only; abstracts are left
-out because they are the publishers' copyright).
+`examples/motor_learning_open_access/` is a complete project built only from openly
+licensed data: 3,925 open-access articles on motor adaptation and motor skill and
+sequence learning (2001–2026), all published under CC BY, with their authors' own
+keywords and abstracts from Europe PMC, and the 6,860 citations between them from
+OpenAlex (CC0). The pipeline keeps the connected core (about 2,500 papers) and finds
+dozens of communities; the whole run takes a few minutes. Sources and attribution are
+in `data/ATTRIBUTION.md`.
 
 ```bash
-cd examples/until_1990
+cd examples/motor_learning_open_access
 dvc repro
 scientographer website
 ```

@@ -78,6 +78,11 @@ TOP_N_KEYWORDS: Final[int] = int(_cfg["top_n_keywords"])  # terms that make up t
 TOP_N_SCORED_KEYWORDS: Final[int] = int(_cfg["top_n_scored_keywords"])  # terms kept with scores
 KEYWORD_DIVIDING_CHARACTER: Final[str] = str(_cfg["keyword_dividing_character"])
 MIN_COMMUNITY_SIZE: Final[int] = int(_cfg["min_community_size"])
+# "original": each label term is shown in the spelling its authors use most often
+# ("tDCS", "Parkinson's Disease"); "title": Title Case, the original scripts' style.
+LABEL_CASE: Final[str] = str(_cfg.get("label_case", "original"))
+# Treat typographic apostrophes (’ ‘ ʼ) as ' so "Parkinson’s" and "Parkinson's" are one term.
+UNIFY_APOSTROPHES: Final[bool] = bool(_cfg.get("unify_apostrophes", True))
 REQUESTED_RESOLUTIONS: Final[Optional[list[float]]] = (
     [float(r) for r in _cfg["resolutions"]] if _cfg.get("resolutions") else None
 )
@@ -97,8 +102,12 @@ COMMUNITY_KEYWORD_SCORES_PARQUET: Final[Path] = OUTPUT_DIR / "community_keyword_
 #####################
 ##  Aux Functions  ##
 #####################
-def _normalize_keyword(keyword: str) -> str:
-    return keyword.lower()
+_APOSTROPHES = str.maketrans({"\u2019": "'", "\u2018": "'", "\u02bc": "'", "`": "'"})
+
+
+def _normalize_keyword(keyword: str, unify_apostrophes: bool = False) -> str:
+    keyword = keyword.lower()
+    return keyword.translate(_APOSTROPHES) if unify_apostrophes else keyword
 
 
 def community_attribute_name(resolution: float) -> str:
@@ -162,12 +171,12 @@ def _correct_tfidf(
     return scipy.sparse.csr_matrix(np.multiply(tf, corrected_idf))
 
 
-def _build_synonym_map(synonym_dict: dict) -> dict[str, str]:
+def _build_synonym_map(synonym_dict: dict, unify_apostrophes: bool = False) -> dict[str, str]:
     canonical_map: dict[str, str] = {}
     for key, values in synonym_dict.items():
-        canonical_name = _normalize_keyword(key)
+        canonical_name = _normalize_keyword(key, unify_apostrophes)
         for variant in [key] + list(values):
-            norm_variant = _normalize_keyword(variant)
+            norm_variant = _normalize_keyword(variant, unify_apostrophes)
             if norm_variant not in canonical_map:
                 canonical_map[norm_variant] = canonical_name
     return canonical_map
@@ -211,7 +220,9 @@ def _filtered_keywords_df(
     return pd.DataFrame(rows, columns=["keywords", "community_id", "community_size"])
 
 
-def _canonical_corpus(filtered_keywords_df: pd.DataFrame, synonym_map: dict) -> dict[int, str]:
+def _canonical_corpus(
+    filtered_keywords_df: pd.DataFrame, synonym_map: dict, unify_apostrophes: bool = False
+) -> dict[int, str]:
     """{community_id: "kw1\\tkw2\\t..."} -- every raw keyword rewritten to its
     canonical synonym, then joined per community into one tab-separated
     document for TF-IDF."""
@@ -221,7 +232,7 @@ def _canonical_corpus(filtered_keywords_df: pd.DataFrame, synonym_map: dict) -> 
     ):
         bucket = corpus.setdefault(int(community_id), [])
         for raw_term in keywords:
-            norm_term = _normalize_keyword(raw_term)
+            norm_term = _normalize_keyword(raw_term, unify_apostrophes)
             bucket.append(synonym_map.get(norm_term, norm_term))
     return {community_id: "\t".join(terms) for community_id, terms in sorted(corpus.items())}
 
@@ -251,12 +262,42 @@ def _scored_keywords_per_community(
     return result
 
 
+def _display_forms(
+    keyword_lists, synonym_map: dict, unify_apostrophes: bool = False
+) -> dict[str, str]:
+    """{canonical term: the spelling authors use for it most often}, counted over
+    every raw keyword that normalises (and synonym-maps) to that term. Ties go to
+    the alphabetically first spelling so the result is deterministic."""
+    counts: dict[str, dict[str, int]] = {}
+    for keywords in keyword_lists:
+        for raw_term in keywords:
+            spelling = raw_term.translate(_APOSTROPHES) if unify_apostrophes else raw_term
+            norm_term = _normalize_keyword(raw_term, unify_apostrophes)
+            canonical = synonym_map.get(norm_term, norm_term)
+            forms = counts.setdefault(canonical, {})
+            forms[spelling] = forms.get(spelling, 0) + 1
+    return {term: min(forms, key=lambda f: (-forms[f], f)) for term, forms in counts.items()}
+
+
+def _display(term: str, label_case: str, display_forms: Optional[dict]) -> str:
+    if label_case == "title":
+        return term.title()
+    if label_case == "original":
+        return (display_forms or {}).get(term) or term
+    raise ValueError(f"community_keywords.label_case must be 'original' or 'title', got {label_case!r}")
+
+
 def _labels_from_scores(
-    scored: dict[int, list[tuple[str, float]]], top_n_label: int
+    scored: dict[int, list[tuple[str, float]]],
+    top_n_label: int,
+    label_case: str = "title",
+    display_forms: Optional[dict] = None,
 ) -> dict[int, str]:
     """{community_id: "Keyword A; Keyword B; Keyword C"}."""
     return {
-        community_id: "; ".join(keyword.title() for keyword, _ in ranked[:top_n_label])
+        community_id: "; ".join(
+            _display(keyword, label_case, display_forms) for keyword, _ in ranked[:top_n_label]
+        )
         for community_id, ranked in scored.items()
         if ranked
     }
@@ -332,6 +373,8 @@ def _main() -> int:
         min_community_size=MIN_COMMUNITY_SIZE,
         top_n_keywords=TOP_N_KEYWORDS,
         top_n_scored_keywords=TOP_N_SCORED_KEYWORDS,
+        label_case=LABEL_CASE,
+        unify_apostrophes=UNIFY_APOSTROPHES,
         tfidf_norm=TFIDF_NORM,
         idf_bias=IDF_BIAS,
         output_graphml_path=OUTPUT_GRAPHML,
@@ -382,8 +425,8 @@ def synonym_dict(synonyms_file: Optional[Path], extra_synonyms: dict) -> dict:
     return groups
 
 
-def synonym_map(synonym_dict: dict) -> dict[str, str]:
-    mapping = _build_synonym_map(synonym_dict)
+def synonym_map(synonym_dict: dict, unify_apostrophes: bool) -> dict[str, str]:
+    mapping = _build_synonym_map(synonym_dict, unify_apostrophes)
     logger.info("built synonym map with %d variant entries", len(mapping))
     return mapping
 
@@ -416,6 +459,7 @@ def scored_keywords_per_resolution(
     top_n_scored_keywords: int,
     tfidf_norm: str,
     idf_bias: float,
+    unify_apostrophes: bool,
 ) -> dict[float, dict[int, list[tuple[str, float]]]]:
     """Ranked (keyword, corrected TF-IDF) lists per community, per resolution.
     A plain loop rather than a @parameterize fan-out because the resolution
@@ -425,7 +469,7 @@ def scored_keywords_per_resolution(
         df = _filtered_keywords_df(
             citation_network, resolution, keyword_dividing_character, min_community_size
         )
-        corpus = _canonical_corpus(df, synonym_map)
+        corpus = _canonical_corpus(df, synonym_map, unify_apostrophes)
         result[resolution] = _scored_keywords_per_community(
             corpus, top_n_scored_keywords, tfidf_norm, idf_bias
         )
@@ -440,12 +484,31 @@ def scored_keywords_per_resolution(
     return result
 
 
+def keyword_display_forms(
+    citation_network: ig.Graph,
+    synonym_map: dict[str, str],
+    keyword_dividing_character: str,
+    unify_apostrophes: bool,
+) -> dict[str, str]:
+    """How each canonical term is shown in labels (label_case: original)."""
+    keywords = (
+        citation_network.vs["keywords"] if "keywords" in citation_network.vs.attributes() else []
+    )
+    return _display_forms(
+        (_split_keyword_field(k, keyword_dividing_character) for k in keywords),
+        synonym_map,
+        unify_apostrophes,
+    )
+
+
 def labels_per_resolution(
     scored_keywords_per_resolution: dict[float, dict[int, list[tuple[str, float]]]],
     top_n_keywords: int,
+    label_case: str,
+    keyword_display_forms: dict[str, str],
 ) -> dict[float, dict[int, str]]:
     return {
-        resolution: _labels_from_scores(scored, top_n_keywords)
+        resolution: _labels_from_scores(scored, top_n_keywords, label_case, keyword_display_forms)
         for resolution, scored in scored_keywords_per_resolution.items()
     }
 

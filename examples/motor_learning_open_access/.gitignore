@@ -1,0 +1,6 @@
+# Only the input tables and their attribution are versioned; everything else is rebuilt by `dvc repro`.
+/data/*
+!/data/papers.parquet
+!/data/references.parquet
+!/data/ATTRIBUTION.md
+/reports/
