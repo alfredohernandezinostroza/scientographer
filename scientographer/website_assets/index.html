@@ -6,7 +6,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{SITE_TITLE}}</title>
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=2">
 
   <!-- Tabulator -->
   <link href="https://unpkg.com/tabulator-tables@6.3.1/dist/css/tabulator.min.css" rel="stylesheet">
@@ -225,6 +225,17 @@
     </div>
 
     <div class="control-row">
+      <label>Orientation</label>
+      <div class="orientation-buttons">
+        <button id="rotate-left" type="button" title="Rotate the map 15° counter-clockwise" aria-label="Rotate left">&#x27F2;</button>
+        <button id="rotate-right" type="button" title="Rotate the map 15° clockwise" aria-label="Rotate right">&#x27F3;</button>
+        <button id="flip-horizontal" type="button" title="Mirror the map left–right" aria-label="Flip horizontally">&#x21C6;</button>
+        <button id="flip-vertical" type="button" title="Mirror the map top–bottom" aria-label="Flip vertically">&#x21C5;</button>
+        <button id="orientation-reset" type="button" title="Back to the original orientation" aria-label="Reset orientation">Reset</button>
+      </div>
+    </div>
+
+    <div class="control-row">
       <label>Labels</label>
       <select id="label-mode">
         <option value="dynamic">Dynamic (zoom / hover)</option>
@@ -299,7 +310,7 @@
   <script src="https://unpkg.com/tabulator-tables@6.3.1/dist/js/tabulator.min.js"></script>
 
   <!-- App -->
-  <script type="module" src="main.js?v=20"></script>
+  <script type="module" src="main.js?v=21"></script>
   <!-- Guided tour (independent of main.js; only reads the DOM) -->
   <script type="module" src="tour.js?v=1"></script>
 </body>

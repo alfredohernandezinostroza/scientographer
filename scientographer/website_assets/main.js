@@ -126,6 +126,10 @@ const state = {
   snapshotData: null, // { cutoffs:[...], snapshots:{ "2010": {coords, centroids} } } | null
   snapshot: null, // null (All) | { cutoff, visible:Set(indexStr), centroids:{cluster,community} }
 
+  // Map orientation (the rotate / flip buttons): applied to every coordinate put
+  // into the graph and every centroid read from the data, see orient().
+  orientation: { angle: 0, flipX: false, flipY: false }, // angle in degrees
+
   // floating-label bookkeeping for the currently-active grouping
   labelMode: "dynamic", // dynamic | always
   activeLabelEls: {},
@@ -184,6 +188,7 @@ async function main() {
   // hooks are created lazily on the first loadDataset call.
   initShiftTracking();
   initControls();
+  initOrientationControls();
   initTabs();
   initGlobalFilters();
   initYearControls();
@@ -361,11 +366,12 @@ function applySnapshot(value) {
     for (let i = 0; i < nodes.length; i++) {
       const c = coords[nodes[i].id];
       if (!c) continue; // published after the cutoff (or unembedded) → hidden
-      state.graph.setNodeAttribute(String(i), "x", c[0]);
-      state.graph.setNodeAttribute(String(i), "y", c[1]);
+      const [x, y] = orient(c[0], c[1]);
+      state.graph.setNodeAttribute(String(i), "x", x);
+      state.graph.setNodeAttribute(String(i), "y", y);
       visible.add(String(i));
-      sx += c[0];
-      sy += c[1];
+      sx += x;
+      sy += y;
     }
     // Park hidden papers on the visible centroid: they don't render, but sigma's
     // layout extent (and thus the camera reset) is computed over *all* nodes, so
@@ -410,8 +416,9 @@ function applySnapshot(value) {
 function restoreBasePositions() {
   const nodes = state.nodesData.nodes;
   for (let i = 0; i < nodes.length; i++) {
-    state.graph.setNodeAttribute(String(i), "x", nodes[i].x);
-    state.graph.setNodeAttribute(String(i), "y", nodes[i].y);
+    const [x, y] = orient(nodes[i].x, nodes[i].y);
+    state.graph.setNodeAttribute(String(i), "x", x);
+    state.graph.setNodeAttribute(String(i), "y", y);
   }
 }
 
@@ -438,11 +445,49 @@ function groupCentroid(key, gid) {
   const g = grouping(key);
   const c = g && g.data[gid];
   if (!c) return null;
+  let cen = c.centroid;
   if (state.snapshot) {
     const ov = state.snapshot.centroids[key];
-    return ov ? ov[gid] || null : c.centroid;
+    cen = ov ? ov[gid] || null : c.centroid;
   }
-  return c.centroid;
+  return cen ? orient(cen[0], cen[1]) : null;
+}
+
+// ── Map orientation (rotate / flip) ─────────────────────────────────────────
+// The layout's orientation is arbitrary, so the viewer can turn and mirror it.
+// Rather than rotating the camera (which a camera reset would undo), the
+// transform is applied to the coordinates themselves: flip first, then rotate
+// about the origin. Sigma re-fits the view to the new extent on refresh.
+function orient(x, y) {
+  const o = state.orientation;
+  if (o.flipX) x = -x;
+  if (o.flipY) y = -y;
+  if (!o.angle) return [x, y];
+  const t = (o.angle * Math.PI) / 180;
+  const cos = Math.cos(t), sin = Math.sin(t);
+  return [x * cos - y * sin, x * sin + y * cos];
+}
+
+// Re-place every node under the current orientation (the active time snapshot's
+// positions, or the base layout).
+function applyOrientation() {
+  applySnapshot(state.snapshot ? state.snapshot.cutoff : "all");
+}
+
+function initOrientationControls() {
+  const act = {
+    "rotate-left": (o) => { o.angle = (o.angle + 15) % 360; },
+    "rotate-right": (o) => { o.angle = (o.angle + 345) % 360; },
+    "flip-horizontal": (o) => { o.flipX = !o.flipX; o.angle = (360 - o.angle) % 360; },
+    "flip-vertical": (o) => { o.flipY = !o.flipY; o.angle = (360 - o.angle) % 360; },
+    "orientation-reset": (o) => { o.angle = 0; o.flipX = false; o.flipY = false; },
+  };
+  for (const [id, change] of Object.entries(act)) {
+    document.getElementById(id)?.addEventListener("click", () => {
+      change(state.orientation);
+      applyOrientation();
+    });
+  }
 }
 
 // ── Resolution-indexed citation communities ─────────────────────────────────
@@ -646,9 +691,10 @@ function buildGraph() {
   for (let i = 0; i < nodes.length; i++) {
     const r = nodes[i];
     const size = nodeRenderSize(r);
+    const [x, y] = orient(r.x, r.y);
     state.graph.addNode(String(i), {
-      x: r.x,
-      y: r.y,
+      x,
+      y,
       size,
       color: nodeColor(r), // default color = first grouping
       label: "",
@@ -857,6 +903,7 @@ function positionLabels() {
   // years aren't cluttered with labels for groups of a handful of papers.
   const snapCentroids = state.snapshot ? state.snapshot.centroids[state.colorBy] : null;
   const snapCounts = state.snapshot ? state.snapshot.counts[state.colorBy] : null;
+  const labelGrouping = grouping(state.colorBy);
 
   for (const gid of Object.keys(state.activeLabelEls)) {
     const el = state.activeLabelEls[gid];
@@ -868,13 +915,19 @@ function positionLabels() {
       el.style.display = "none";
       continue;
     }
-    const c = state.activeLabelData[gid];
-    const centroid = snapCentroids ? snapCentroids[gid] : c.centroid;
-    if (!centroid) {
+    // A community hidden in the legend takes its label with it.
+    if (labelGrouping && labelGrouping.muted.has(parseInt(gid, 10))) {
       el.style.display = "none";
       continue;
     }
-    const pt = state.renderer.graphToViewport({ x: centroid[0], y: centroid[1] });
+    const c = state.activeLabelData[gid];
+    const raw = snapCentroids ? snapCentroids[gid] : c.centroid;
+    if (!raw) {
+      el.style.display = "none";
+      continue;
+    }
+    const [cx, cy] = orient(raw[0], raw[1]);
+    const pt = state.renderer.graphToViewport({ x: cx, y: cy });
     // Cull labels whose centroid is well outside the viewport.
     if (pt.x < -margin || pt.y < -margin || pt.x > width + margin || pt.y > height + margin) {
       el.style.display = "none";
@@ -1492,7 +1545,7 @@ function frameNode(idx) {
 function frameGroup(key, gid) {
   const g = grouping(key);
   const c = g.data[gid];
-  const cen = groupCentroid(key, gid) || c.centroid;
+  const cen = groupCentroid(key, gid) || orient(c.centroid[0], c.centroid[1]);
   const cx = cen[0],
     cy = cen[1];
   let bestIdx = -1;

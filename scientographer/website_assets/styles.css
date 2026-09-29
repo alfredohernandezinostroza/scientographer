@@ -1095,3 +1095,29 @@ table.health-table tr.active td { color: var(--text); background: rgba(78, 161, 
 }
 #tour-footer .tour-primary:hover { filter: brightness(1.05); }
 
+
+/* ── Orientation (rotate / flip) buttons ─────────────────────────────── */
+.orientation-buttons {
+  display: flex;
+  gap: 6px;
+}
+.orientation-buttons button {
+  flex: 1;
+  padding: 5px 0;
+  background: #161a22;
+  color: var(--text);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  transition: border-color 120ms, color 120ms;
+}
+.orientation-buttons button#orientation-reset {
+  flex: 1.6;
+  font-size: 11px;
+}
+.orientation-buttons button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
