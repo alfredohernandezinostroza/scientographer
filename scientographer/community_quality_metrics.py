@@ -36,23 +36,26 @@ Outputs (data/graph_level_data/):
     long form: resolution x {modularity, constant_potts_model_score, ...}
 """
 
-from collections import Counter, defaultdict
 import logging
 import math
-from pathlib import Path
+import multiprocessing
+import os
 import sys
+from collections import Counter, defaultdict
+from concurrent.futures import ProcessPoolExecutor
+from pathlib import Path
 from typing import Final
 
-from cdlib import NodeClustering, evaluation
-from hamilton import driver
-from hamilton.function_modifiers import dataloader, datasaver, group, parameterize, source, value
-from hamilton.io import utils
 import hamilton.log_setup
 import igraph as ig
 import leidenalg
 import networkx as nx
 import numpy as np
 import pandas as pd
+from cdlib import NodeClustering, evaluation
+from hamilton import driver
+from hamilton.function_modifiers import dataloader, datasaver, group, parameterize, source, value
+from hamilton.io import utils
 from scipy.special import comb
 from scipy.stats import hypergeom
 
@@ -89,6 +92,12 @@ EXECUTE = True
 _communities = params("communities")  # params.yaml: one value, one place
 STABILITY_SEEDS: Final[tuple[int, ...]] = tuple(int(s) for s in _communities["stability_seeds"])
 LEIDEN_ITERATIONS: Final[int] = int(_communities["leiden_iterations"])
+# How many processes compute resolutions in parallel. "auto" = one per CPU core, at most
+# one per resolution. Each worker holds its own copy of the graph's structure (plus an
+# undirected networkx copy for significance), so lower it on a small machine. 1 = no
+# worker processes at all. Results are identical for any value: every resolution's
+# Leiden re-runs use fixed seeds.
+WORKERS_SETTING = _communities.get("workers", "auto")
 
 # Adjacent resolutions whose partitions agree (NMI) at least this much are
 # flagged as sitting on the same "natural" community scale.
@@ -508,7 +517,7 @@ def _structural_partition_metrics(
     Excludes cross-seed stability and resolution-plateau detection, which are
     properties of the Leiden reseeding *at* a resolution and have no meaning for
     an arbitrary partition (e.g. a Connectivity-Modifier-remediated one). Factored
-    out of community_quality_metrics_for_resolution so the identical code scores
+    out of _quality_metrics_for_resolution so the identical code scores
     both the original partition and the CM partition, keeping the before/after
     comparison exact -- see community_quality_metrics_after_connectivity_modifier.py.
     """
@@ -565,6 +574,7 @@ def _main() -> int:
         citation_network_path=INPUT_GRAPHML,
         n_iterations=LEIDEN_ITERATIONS,
         stability_seeds=list(STABILITY_SEEDS),
+        workers=_resolve_workers(WORKERS_SETTING, len(RESOLUTIONS)),
     )
     outputs = [
         "save_citation_network_with_community_metrics",
@@ -597,14 +607,6 @@ def citation_network(citation_network_path: Path) -> tuple[ig.Graph, dict]:
     merge_higher_band_communities(graph)
     metadata = utils.get_file_metadata(citation_network_path)
     return graph, metadata
-
-
-def undirected_networkx_graph(citation_network: ig.Graph) -> nx.Graph:
-    """Undirected projection, used only by significance (no directed
-    definition exists). Collapse vs. multi-edge-preserving projection is moot
-    here: a citation network is a temporal DAG, so reciprocal edges
-    shouldn't exist (see reciprocal_edge_pair_count)."""
-    return citation_network.to_networkx().to_undirected()
 
 
 def parallel_edge_count(citation_network: ig.Graph) -> int:
@@ -663,20 +665,14 @@ def resolution_plateau_flags(community_memberships_by_resolution: list[np.ndarra
     return _resolution_plateau_flags(community_memberships_by_resolution, RESOLUTIONS, PLATEAU_NMI_THRESHOLD)
 
 
-@parameterize(**{
-    f"community_quality_metrics_at_resolution_{r}": {
-        "resolution": value(r),
-        "community_membership": source(f"community_membership_at_resolution_{r}"),
-    } for r in RESOLUTIONS
-})
-def community_quality_metrics_for_resolution(
+def _quality_metrics_for_resolution(
     citation_network: ig.Graph,
     undirected_networkx_graph: nx.Graph,
     resolution: float,
     community_membership: np.ndarray,
-    resolution_plateau_flags: dict[float, dict],
+    plateau: dict,
     n_iterations: int,
-    stability_seeds: list[int],
+    stability_seeds: tuple[int, ...],
 ) -> dict:
     """All quality metrics for one resolution's existing partition: per-
     community edge/conductance/density metrics, plus partition-level
@@ -687,7 +683,6 @@ def community_quality_metrics_for_resolution(
 
     stability = _cross_seed_stability(
         citation_network, resolution, n_iterations, community_membership, tuple(stability_seeds))
-    plateau = resolution_plateau_flags[resolution]
     per_partition = {**per_partition, **stability, **plateau}
 
     number_of_communities = per_partition["number_of_communities"]
@@ -712,11 +707,105 @@ def community_quality_metrics_for_resolution(
     return {"resolution": resolution, "per_community": per_community, "per_partition": per_partition}
 
 
-@parameterize(community_quality_metrics_all_resolutions={
-    "bundles": group(*[source(f"community_quality_metrics_at_resolution_{r}") for r in RESOLUTIONS])
-})
-def community_quality_metrics_all_resolutions(bundles: list[dict]) -> list[dict]:
-    return bundles
+# ── Parallel execution across resolutions ─────────────────────────────────────
+# Resolutions are independent, so they run in separate processes (threads would not
+# help: most of the work is Python code, serialised by the interpreter lock). Each
+# worker receives the graph's STRUCTURE once, at start-up -- vertex count and edge
+# list, in the original vertex order; every metric here uses only structure (no
+# vertex or edge attributes, no weights) -- and then one membership per task.
+_WORKER_STATE: dict = {}
+
+
+def _structure_of(graph: ig.Graph) -> tuple[int, list[tuple[int, int]], bool]:
+    return graph.vcount(), graph.get_edgelist(), graph.is_directed()
+
+
+def _init_quality_worker(structure: tuple[int, list[tuple[int, int]], bool], n_iterations: int,
+                         stability_seeds: tuple[int, ...]) -> None:
+    """Rebuild the structure-only graph (and its undirected networkx copy) once per
+    worker process."""
+    n_vertices, edges, directed = structure
+    graph = ig.Graph(n=n_vertices, edges=edges, directed=directed)
+    _WORKER_STATE.update(
+        graph=graph,
+        undirected=graph.to_networkx().to_undirected(),
+        n_iterations=n_iterations,
+        stability_seeds=tuple(stability_seeds),
+    )
+
+
+def _quality_worker_task(task: tuple[float, np.ndarray, dict]) -> dict:
+    resolution, membership, plateau = task
+    return _quality_metrics_for_resolution(
+        _WORKER_STATE["graph"], _WORKER_STATE["undirected"], resolution, membership, plateau,
+        _WORKER_STATE["n_iterations"], _WORKER_STATE["stability_seeds"])
+
+
+def _resolve_workers(setting, n_tasks: int) -> int:
+    if setting in (None, "auto"):
+        return max(1, min(os.cpu_count() or 1, n_tasks))
+    return max(1, min(int(setting), n_tasks))
+
+
+def _run_quality_metrics(
+    citation_network: ig.Graph,
+    memberships: list[np.ndarray],
+    resolutions: list[float],
+    plateau_flags: dict[float, dict],
+    n_iterations: int,
+    stability_seeds: tuple[int, ...],
+    workers: int,
+) -> list[dict]:
+    """Metrics for every resolution, returned in `resolutions` order. With
+    workers > 1, resolutions run in a pool of worker processes, the costliest
+    first (cost grows with the number of communities), so the pool stays busy;
+    with workers == 1, the same code runs in this process."""
+    structure = _structure_of(citation_network)
+    tasks = [(r, m, plateau_flags[r]) for r, m in zip(resolutions, memberships)]
+    if workers <= 1:
+        _init_quality_worker(structure, n_iterations, stability_seeds)
+        try:
+            return [_quality_worker_task(task) for task in tasks]
+        finally:
+            _WORKER_STATE.clear()
+
+    order = sorted(range(len(tasks)), key=lambda i: len(np.unique(tasks[i][1])), reverse=True)
+    # One thread per worker for numpy/BLAS: the parallelism is across processes.
+    # Spawned children inherit the environment at start-up.
+    thread_variables = ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS")
+    saved = {name: os.environ.get(name) for name in thread_variables}
+    os.environ.update({name: "1" for name in thread_variables})
+    try:
+        context = multiprocessing.get_context("spawn")
+        with ProcessPoolExecutor(
+            max_workers=workers, mp_context=context,
+            initializer=_init_quality_worker, initargs=(structure, n_iterations, tuple(stability_seeds)),
+        ) as pool:
+            futures = {i: pool.submit(_quality_worker_task, tasks[i]) for i in order}
+            return [futures[i].result() for i in range(len(tasks))]
+    finally:
+        for name, old in saved.items():
+            if old is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = old
+
+
+def community_quality_metrics_all_resolutions(
+    citation_network: ig.Graph,
+    community_memberships_by_resolution: list[np.ndarray],
+    resolution_plateau_flags: dict[float, dict],
+    n_iterations: int,
+    stability_seeds: list[int],
+    workers: int,
+) -> list[dict]:
+    """Quality metrics for every resolution of the sweep, computed in parallel
+    worker processes (params.yaml `communities.workers`)."""
+    logger.info("computing quality metrics for %d resolutions with %d worker process(es)",
+                len(RESOLUTIONS), workers)
+    return _run_quality_metrics(
+        citation_network, community_memberships_by_resolution, list(RESOLUTIONS),
+        resolution_plateau_flags, n_iterations, tuple(stability_seeds), workers)
 
 
 def per_community_quality_metrics_df(community_quality_metrics_all_resolutions: list[dict]) -> pd.DataFrame:
