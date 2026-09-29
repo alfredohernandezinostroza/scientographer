@@ -42,8 +42,9 @@ pip install "scientographer[all]"            # when published; until then:
 pip install "scientographer[all] @ git+https://github.com/alfredohernandezinostroza/scientographer"
 ```
 
-Extras: `layout` (ForceAtlas2), `wordclouds`, `dvc` (running the pipeline), `ui` (the
-Hamilton UI tracker). The core install runs every other stage.
+Extras: `layout` (ForceAtlas2), `wordclouds`, `dvc` (running the pipeline, and pushing
+data to S3-compatible storage such as DagsHub), `ui` (the Hamilton UI tracker). The core
+install runs every other stage. For other DVC storage, add its plugin (`pip install dvc-gdrive`, …).
 
 ## Quick start
 
