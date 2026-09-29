@@ -41,8 +41,10 @@ dependencies = [
 layout = ["fa2>=1.1"]
 # The word-cloud / TF-IDF histogram stage.
 wordclouds = ["fa2>=1.1", "wordcloud>=1.9", "shapely>=2", "pillow>=10"]
-# Running the pipeline with DVC (stages, caching, experiments).
-dvc = ["dvc>=3.50"]
+# Running the pipeline with DVC (stages, caching, experiments), and pushing data to
+# S3-compatible storage such as DagsHub, AWS S3 or MinIO. Other storage (Google Drive,
+# Azure, SSH, ...) needs its own DVC plugin, e.g. `pip install dvc-gdrive`.
+dvc = ["dvc>=3.50", "dvc-s3>=3"]
 # Drawing each stage's DAG to reports/figures/ (also needs the Graphviz `dot` program).
 figures = ["graphviz>=0.20"]
 # The Hamilton UI tracker (`scientographer ui`).
