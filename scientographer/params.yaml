@@ -81,6 +81,10 @@ communities:
   # Leiden re-runs (beyond the stored seed-0 assignment) for cross-seed stability.
   stability_seeds: [1, 2, 3, 4, 5]
   leiden_iterations: 10
+  # Processes computing resolutions in parallel in community_quality_metrics ("auto" =
+  # one per CPU core, at most one per resolution; 1 = none). Results do not depend on
+  # it. Each worker holds a copy of the graph's structure: lower it on a small machine.
+  workers: auto
   # Adjacent resolutions whose partitions agree (NMI) at least this much sit on
   # the same "natural" community scale.
   plateau_nmi_threshold: 0.9
