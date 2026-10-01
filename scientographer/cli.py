@@ -39,7 +39,28 @@ PROJECT_GITIGNORE = """\
 /reports/
 .env
 .hamilton/
+.pixi/
+.venv/
 """
+
+
+def _write_gitignore(gitignore: Path) -> None:
+    """Create the project's .gitignore, or add the lines it lacks to an existing one
+    (``pixi init`` and ``git init`` tooling often write one first)."""
+    if not gitignore.exists():
+        gitignore.write_text(PROJECT_GITIGNORE, encoding="utf-8")
+        return
+    text = gitignore.read_text(encoding="utf-8")
+    present = {line.strip() for line in text.splitlines()}
+    missing = [
+        line for line in PROJECT_GITIGNORE.splitlines()
+        if line and not line.startswith("#") and line not in present
+    ]
+    if missing:
+        separator = "" if text.endswith("\n") or not text else "\n"
+        gitignore.write_text(
+            text + separator + "\n# Scientographer\n" + "\n".join(missing) + "\n", encoding="utf-8"
+        )
 
 
 def _stage_modules() -> list[str]:
@@ -89,16 +110,15 @@ def init(
             shutil.copyfile(src, target)
         typer.echo(f"wrote {target}")
     (directory / "data").mkdir(exist_ok=True)
-    gitignore = directory / ".gitignore"
-    if not gitignore.exists():
-        gitignore.write_text(PROJECT_GITIGNORE, encoding="utf-8")
+    _write_gitignore(directory / ".gitignore")
     typer.echo(
         "\nNext:\n"
         f"  1. put your papers table at {directory / 'data/papers.parquet'} (a `doi` column + metadata)\n"
         f"     and your references at {directory / 'data/references.parquet'} (citing_doi, cited_dois)\n"
         "  2. adjust params.yaml (size thresholds scale with the corpus)\n"
         f"  3. cd {directory} && git init && dvc init && dvc repro\n"
-        "  4. scientographer website"
+        "  4. scientographer website\n"
+        "(in a pixi project, prefix commands with `pixi run`, or start a `pixi shell`)"
     )
 
 
