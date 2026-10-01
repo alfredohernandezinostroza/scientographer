@@ -37,20 +37,52 @@ attributes, so you can also open them in Gephi or load them with igraph or netwo
 
 ## Install
 
+We recommend [pixi](https://pixi.sh). It writes a `pixi.lock` that records the exact
+version of every package, so the same project gives the same communities on any
+machine and in a year's time: Leiden's partitions change between library versions (for
+example `leidenalg` 0.11 and 0.12) even with the same seed. pixi also installs the
+non-Python tools some stages use, such as Graphviz for the DAG figures.
+
 ```bash
+pixi init my-field && cd my-field
+pixi add python=3.12 graphviz
+```
+
+then add Scientographer to the new `pixi.toml` and install:
+
+```toml
+[pypi-dependencies]
+scientographer = { git = "https://github.com/alfredohernandezinostroza/scientographer.git", branch = "main", extras = ["all"] }
+```
+
+```bash
+pixi install
+```
+
+Commit `pixi.toml` and `pixi.lock` with your project. Run every command below inside
+the environment, with `pixi run <command>` or after `pixi shell`.
+
+**With pip** (no lock file) it works the same:
+
+```bash
+python -m venv .venv && source .venv/bin/activate
 pip install "scientographer[all]"            # when published; until then:
 pip install "scientographer[all] @ git+https://github.com/alfredohernandezinostroza/scientographer"
 ```
 
+Commit a `pip freeze > requirements.txt` so the versions behind your results are on
+record. The `figures` extra also needs Graphviz's `dot` program from your system's
+package manager.
+
 Extras: `layout` (ForceAtlas2), `wordclouds`, `dvc` (running the pipeline, and pushing
-data to S3-compatible storage such as DagsHub), `ui` (the Hamilton UI tracker). The core
-install runs every other stage. For other DVC storage, add its plugin (`pip install dvc-gdrive`, …).
+data to S3-compatible storage such as DagsHub), `figures` (the DAG drawings), `ui` (the
+Hamilton UI tracker). The core install runs every other stage. For other DVC storage,
+add its plugin (`dvc-gdrive`, …).
 
 ## Quick start
 
 ```bash
-scientographer init my-field       # params.yaml, dvc.yaml, data/, .gitignore
-cd my-field
+scientographer init .              # in my-field: params.yaml, dvc.yaml, data/, .gitignore
 ```
 
 Put two tables in `data/` (Parquet, CSV or TSV):

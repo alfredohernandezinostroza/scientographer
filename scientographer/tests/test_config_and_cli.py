@@ -85,3 +85,21 @@ def test_init_writes_a_project_whose_dvc_stages_all_exist(tmp_path):
     (proj / "params.yaml").write_text("edited: true\n")
     CliRunner().invoke(app, ["init", str(proj)])
     assert (proj / "params.yaml").read_text() == "edited: true\n"
+
+
+def test_init_adds_its_ignores_to_an_existing_gitignore(tmp_path):
+    # `pixi init` writes a .gitignore before `scientographer init` runs.
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (proj / ".gitignore").write_text("# pixi environments\n.pixi/*\n!.pixi/config.toml\n.env")
+    result = CliRunner().invoke(app, ["init", str(proj)])
+    assert result.exit_code == 0, result.output
+    lines = (proj / ".gitignore").read_text().splitlines()
+    assert lines[:4] == ["# pixi environments", ".pixi/*", "!.pixi/config.toml", ".env"]
+    for wanted in ["/reports/", ".hamilton/", ".pixi/", ".venv/"]:
+        assert lines.count(wanted) == 1, wanted
+    assert lines.count(".env") == 1
+    # Running init again adds nothing.
+    before = (proj / ".gitignore").read_text()
+    CliRunner().invoke(app, ["init", str(proj)])
+    assert (proj / ".gitignore").read_text() == before
