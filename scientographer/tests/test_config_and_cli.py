@@ -96,9 +96,10 @@ def test_init_adds_its_ignores_to_an_existing_gitignore(tmp_path):
     assert result.exit_code == 0, result.output
     lines = (proj / ".gitignore").read_text().splitlines()
     assert lines[:4] == ["# pixi environments", ".pixi/*", "!.pixi/config.toml", ".env"]
-    for wanted in ["/reports/", ".hamilton/", ".pixi/", ".venv/"]:
+    for wanted in ["/reports/", ".hamilton/", ".venv/", ".env", ".pixi/*", "!.pixi/config.toml"]:
         assert lines.count(wanted) == 1, wanted
-    assert lines.count(".env") == 1
+    # A bare `.pixi/` would make git ignore config.toml despite pixi's exception.
+    assert ".pixi/" not in lines
     # Running init again adds nothing.
     before = (proj / ".gitignore").read_text()
     CliRunner().invoke(app, ["init", str(proj)])
