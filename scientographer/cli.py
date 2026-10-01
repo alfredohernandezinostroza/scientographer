@@ -39,8 +39,11 @@ PROJECT_GITIGNORE = """\
 /reports/
 .env
 .hamilton/
-.pixi/
 .venv/
+# pixi environments (the same lines `pixi init` writes, so they merge with its file;
+# a bare `.pixi/` would hide config.toml from the exception below)
+.pixi/*
+!.pixi/config.toml
 """
 
 
@@ -116,7 +119,7 @@ def init(
         f"  1. put your papers table at {directory / 'data/papers.parquet'} (a `doi` column + metadata)\n"
         f"     and your references at {directory / 'data/references.parquet'} (citing_doi, cited_dois)\n"
         "  2. adjust params.yaml (size thresholds scale with the corpus)\n"
-        f"  3. cd {directory} && git init && dvc init && dvc repro\n"
+        f"  3. {'' if directory == Path('.') else f'cd {directory} && '}git init && dvc init && dvc repro\n"
         "  4. scientographer website\n"
         "(in a pixi project, prefix commands with `pixi run`, or start a `pixi shell`)"
     )
