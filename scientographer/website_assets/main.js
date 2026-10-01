@@ -872,6 +872,7 @@ function clamp01(x) {
 const LABEL_RATIO_ALL = 0.12; // camera ratio at/below which all labels show
 const LABEL_RATIO_FEW = 1.2; // ratio at/above which only the base set shows
 const LABEL_BASE_COUNT = 5; // labels always shown when fully zoomed out
+const LABEL_GAP = 4; // px kept clear around each label in dynamic mode
 // In a time snapshot, only label a topic/community that has at least this many
 // papers in that year — keeps early-year maps from being labelled for groups
 // that barely exist yet.
@@ -905,7 +906,17 @@ function positionLabels() {
   const snapCounts = state.snapshot ? state.snapshot.counts[state.colorBy] : null;
   const labelGrouping = grouping(state.colorBy);
 
-  for (const gid of Object.keys(state.activeLabelEls)) {
+  // Dynamic mode never lets labels overlap: they are placed largest group first
+  // (the hovered / selected node's group ahead of all), and a label that would
+  // cover one already placed is skipped. Zooming in spreads the groups apart, so
+  // more labels fit. "Always visible" shows every label regardless.
+  const avoidOverlap = state.labelMode !== "always";
+  const placed = [];
+  const priority = [activeGroupOf(state.hoveredNode), activeGroupOf(state.selectedNode)]
+    .filter((gid) => gid != null && state.activeLabelEls[gid]);
+  const order = [...new Set([...priority, ...state.activeLabelOrder])];
+
+  for (const gid of order) {
     const el = state.activeLabelEls[gid];
     if (!visible.has(gid)) {
       el.style.display = "none";
@@ -934,6 +945,24 @@ function positionLabels() {
       continue;
     }
     el.style.display = "";
+    if (avoidOverlap) {
+      // A label's size never changes, so measure it once.
+      if (el._width == null) {
+        el._width = el.offsetWidth;
+        el._height = el.offsetHeight;
+      }
+      const box = {
+        left: pt.x - el._width / 2 - LABEL_GAP,
+        right: pt.x + el._width / 2 + LABEL_GAP,
+        top: pt.y - el._height / 2 - LABEL_GAP,
+        bottom: pt.y + el._height / 2 + LABEL_GAP,
+      };
+      if (placed.some((b) => box.left < b.right && box.right > b.left && box.top < b.bottom && box.bottom > b.top)) {
+        el.style.display = "none";
+        continue;
+      }
+      placed.push(box);
+    }
     el.style.transform = `translate(-50%, -50%) translate(${pt.x}px, ${pt.y}px)`;
   }
 }
@@ -947,7 +976,8 @@ function visibleLabelIds() {
   const count = Math.round(LABEL_BASE_COUNT + f * (order.length - LABEL_BASE_COUNT));
   const visible = new Set(order.slice(0, Math.max(LABEL_BASE_COUNT, count)));
 
-  // Always reveal the group of the hovered/selected node.
+  // Always reveal the group of the hovered/selected node (placed first, so it is
+  // never the one skipped for overlapping).
   for (const gid of [activeGroupOf(state.hoveredNode), activeGroupOf(state.selectedNode)]) {
     if (gid != null && state.activeLabelData[gid]) visible.add(gid);
   }
