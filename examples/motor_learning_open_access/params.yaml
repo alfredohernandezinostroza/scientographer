@@ -85,6 +85,12 @@ communities:
   statistical_density_familywise_alpha: 0.05
   # Connectivity Modifier: clusters smaller than this are not pursued further.
   connectivity_modifier_min_cluster_size: 11
+  # Skip the Connectivity Modifier at resolutions whose largest community has more
+  # papers than this (null = never skip). Its repeated minimum cuts grow steeply with
+  # community size: on a 23,000-paper network a 7,800-paper community took an hour
+  # and a 12,600-paper one more than 16 hours. Skipped resolutions keep every other
+  # metric; only the Connectivity Modifier and after-CM results are left out.
+  connectivity_modifier_max_community_size: null
 
 community_keywords:
   # community_keywords.py: name every community by its most distinguishing keywords

@@ -36,29 +36,28 @@ Outputs (data/graph_level_data/):
     long form: resolution x {modularity, constant_potts_model_score, ...}
 """
 
+from collections import Counter, defaultdict
 import logging
 import math
-import multiprocessing
-import os
-import sys
-from collections import Counter, defaultdict
-from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
+import sys
 from typing import Final
 
+from cdlib import NodeClustering, evaluation
+from hamilton import driver
+from hamilton.function_modifiers import dataloader, datasaver, group, parameterize, source, value
+from hamilton.io import utils
 import hamilton.log_setup
 import igraph as ig
 import leidenalg
 import networkx as nx
 import numpy as np
 import pandas as pd
-from cdlib import NodeClustering, evaluation
-from hamilton import driver
-from hamilton.function_modifiers import dataloader, datasaver, group, parameterize, source, value
-from hamilton.io import utils
 from scipy.special import comb
 from scipy.stats import hypergeom
 
+from scientographer._parallel import resolve_workers as _resolve_workers
+from scientographer._parallel import run_in_worker_processes
 from scientographer.community_resolution_bands import (
     CANONICAL_RESOLUTION,
     LOW_RES_GRAPHML,
@@ -741,12 +740,6 @@ def _quality_worker_task(task: tuple[float, np.ndarray, dict]) -> dict:
         _WORKER_STATE["n_iterations"], _WORKER_STATE["stability_seeds"])
 
 
-def _resolve_workers(setting, n_tasks: int) -> int:
-    if setting in (None, "auto"):
-        return max(1, min(os.cpu_count() or 1, n_tasks))
-    return max(1, min(int(setting), n_tasks))
-
-
 def _run_quality_metrics(
     citation_network: ig.Graph,
     memberships: list[np.ndarray],
@@ -760,35 +753,15 @@ def _run_quality_metrics(
     workers > 1, resolutions run in a pool of worker processes, the costliest
     first (cost grows with the number of communities), so the pool stays busy;
     with workers == 1, the same code runs in this process."""
-    structure = _structure_of(citation_network)
     tasks = [(r, m, plateau_flags[r]) for r, m in zip(resolutions, memberships)]
-    if workers <= 1:
-        _init_quality_worker(structure, n_iterations, stability_seeds)
-        try:
-            return [_quality_worker_task(task) for task in tasks]
-        finally:
-            _WORKER_STATE.clear()
-
-    order = sorted(range(len(tasks)), key=lambda i: len(np.unique(tasks[i][1])), reverse=True)
-    # One thread per worker for numpy/BLAS: the parallelism is across processes.
-    # Spawned children inherit the environment at start-up.
-    thread_variables = ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS")
-    saved = {name: os.environ.get(name) for name in thread_variables}
-    os.environ.update({name: "1" for name in thread_variables})
-    try:
-        context = multiprocessing.get_context("spawn")
-        with ProcessPoolExecutor(
-            max_workers=workers, mp_context=context,
-            initializer=_init_quality_worker, initargs=(structure, n_iterations, tuple(stability_seeds)),
-        ) as pool:
-            futures = {i: pool.submit(_quality_worker_task, tasks[i]) for i in order}
-            return [futures[i].result() for i in range(len(tasks))]
-    finally:
-        for name, old in saved.items():
-            if old is None:
-                os.environ.pop(name, None)
-            else:
-                os.environ[name] = old
+    return run_in_worker_processes(
+        tasks, _quality_worker_task,
+        initializer=_init_quality_worker,
+        initargs=(_structure_of(citation_network), n_iterations, tuple(stability_seeds)),
+        workers=workers,
+        cost=lambda task: len(np.unique(task[1])),
+        cleanup=_WORKER_STATE.clear,
+    )
 
 
 def community_quality_metrics_all_resolutions(

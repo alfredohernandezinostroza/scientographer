@@ -49,7 +49,7 @@ Outputs (data/graph_level_data/community_connectivity_modifier/):
 import logging
 from pathlib import Path
 import sys
-from typing import Final
+from typing import Final, Optional
 
 from hamilton import driver
 from hamilton.function_modifiers import dataloader, datasaver, group, parameterize, source, value
@@ -60,6 +60,7 @@ import leidenalg
 import numpy as np
 import pandas as pd
 
+from scientographer._parallel import resolve_workers, run_in_worker_processes
 from scientographer.community_connectivity_metrics import (
     RESOLUTIONS,
     SUBSTANTIVE_COMMUNITY_MIN_SIZE,
@@ -93,6 +94,11 @@ EXECUTE = True
 # also what makes CM shed node coverage. Communities that are trees are dropped
 # too (a tree's minimum cut is 1, poorly connected for any tree of ten+ nodes).
 CM_MIN_CLUSTER_SIZE: Final[int] = int(params("communities")["connectivity_modifier_min_cluster_size"])
+# Resolutions whose largest community exceeds this are skipped (None = never).
+_max_size_setting = params("communities").get("connectivity_modifier_max_community_size")
+CM_MAX_COMMUNITY_SIZE: Final[int | None] = None if _max_size_setting is None else int(_max_size_setting)
+# Worker processes for the resolution sweep (params.yaml `communities.workers`).
+WORKERS_SETTING = params("communities").get("workers", "auto")
 
 # Seed for the Leiden-CPM re-clustering of cut pieces, so remediation is
 # reproducible. Matches the deterministic re-clustering the paper's CM performs.
@@ -186,6 +192,69 @@ def _classify_transformation(original_size: int, surviving_pieces: int, survivin
     return "split"
 
 
+_WORKER_STATE: dict = {}
+
+
+def _init_connectivity_modifier_worker(n_vertices: int, edges: list[tuple[int, int]],
+                                       min_cluster_size: int) -> None:
+    """Rebuild the undirected simple graph (structure only: minimum cuts and
+    Leiden re-clustering need nothing else) once per worker process."""
+    _WORKER_STATE.update(
+        graph=ig.Graph(n=n_vertices, edges=edges, directed=False),
+        min_cluster_size=min_cluster_size,
+    )
+
+
+def _connectivity_modifier_worker_task(task: tuple[float, np.ndarray]) -> dict:
+    resolution, membership = task
+    return _connectivity_modifier_for_resolution(
+        _WORKER_STATE["graph"], resolution, membership, _WORKER_STATE["min_cluster_size"])
+
+
+def _largest_community_size(membership: np.ndarray) -> int:
+    return int(np.bincount(membership - membership.min()).max())
+
+
+def _resolutions_to_modify(
+    resolutions: list[float], memberships: list[np.ndarray], max_community_size: Optional[int]
+) -> tuple[list[float], list[np.ndarray]]:
+    """Drop the resolutions whose largest community exceeds max_community_size."""
+    if max_community_size is None:
+        return resolutions, memberships
+    kept_resolutions, kept_memberships = [], []
+    for resolution, membership in zip(resolutions, memberships):
+        largest = _largest_community_size(membership)
+        if largest > max_community_size:
+            logger.warning(
+                "resolution=%s: skipping the Connectivity Modifier, its largest community has "
+                "%d papers (connectivity_modifier_max_community_size: %d)",
+                resolution, largest, max_community_size)
+            continue
+        kept_resolutions.append(resolution)
+        kept_memberships.append(membership)
+    return kept_resolutions, kept_memberships
+
+
+def _run_connectivity_modifier(
+    undirected_simple_graph: ig.Graph,
+    memberships: list[np.ndarray],
+    resolutions: list[float],
+    min_cluster_size: int,
+    workers: int,
+) -> list[dict]:
+    """CM for every resolution, returned in `resolutions` order. Its cost is driven
+    by the largest community (repeated minimum cuts over it), so with workers > 1
+    the resolutions with the largest communities start first."""
+    return run_in_worker_processes(
+        list(zip(resolutions, memberships)), _connectivity_modifier_worker_task,
+        initializer=_init_connectivity_modifier_worker,
+        initargs=(undirected_simple_graph.vcount(), undirected_simple_graph.get_edgelist(), min_cluster_size),
+        workers=workers,
+        cost=lambda task: _largest_community_size(task[1]),
+        cleanup=_WORKER_STATE.clear,
+    )
+
+
 ##################
 ##     Main     ##
 ##################
@@ -194,6 +263,8 @@ def _main() -> int:
     inputs = dict(
         citation_network_path=INPUT_GRAPHML,
         min_cluster_size=CM_MIN_CLUSTER_SIZE,
+        max_community_size=CM_MAX_COMMUNITY_SIZE,
+        workers=resolve_workers(WORKERS_SETTING, len(RESOLUTIONS)),
     )
     outputs = [
         "save_connectivity_modifier_membership",
@@ -241,13 +312,7 @@ def community_membership_for_resolution(citation_network: ig.Graph, resolution: 
     return np.array([int(float(v)) for v in citation_network.vs[attribute_name]])
 
 
-@parameterize(**{
-    f"connectivity_modifier_at_resolution_{r}": {
-        "resolution": value(r),
-        "community_membership": source(f"community_membership_at_resolution_{r}"),
-    } for r in RESOLUTIONS
-})
-def connectivity_modifier_for_resolution(
+def _connectivity_modifier_for_resolution(
     undirected_simple_graph: ig.Graph,
     resolution: float,
     community_membership: np.ndarray,
@@ -336,11 +401,29 @@ def connectivity_modifier_for_resolution(
     }
 
 
-@parameterize(connectivity_modifier_all_resolutions={
-    "bundles": group(*[source(f"connectivity_modifier_at_resolution_{r}") for r in RESOLUTIONS])
+@parameterize(community_memberships_by_resolution={
+    "memberships": group(*[source(f"community_membership_at_resolution_{r}") for r in RESOLUTIONS])
 })
-def connectivity_modifier_all_resolutions(bundles: list[dict]) -> list[dict]:
-    return bundles
+def community_memberships_for_all_resolutions(memberships: list[np.ndarray]) -> list[np.ndarray]:
+    return memberships
+
+
+def connectivity_modifier_all_resolutions(
+    undirected_simple_graph: ig.Graph,
+    community_memberships_by_resolution: list[np.ndarray],
+    min_cluster_size: int,
+    max_community_size: Optional[int],
+    workers: int,
+) -> list[dict]:
+    """The Connectivity Modifier at every resolution of the sweep, computed in
+    parallel worker processes (params.yaml `communities.workers`), except at
+    resolutions whose largest community exceeds `max_community_size`."""
+    resolutions, memberships = _resolutions_to_modify(
+        list(RESOLUTIONS), community_memberships_by_resolution, max_community_size)
+    logger.info("running the Connectivity Modifier at %d resolutions with %d worker process(es)",
+                len(resolutions), workers)
+    return _run_connectivity_modifier(
+        undirected_simple_graph, memberships, resolutions, min_cluster_size, workers)
 
 
 def connectivity_modifier_membership_df(

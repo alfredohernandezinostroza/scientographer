@@ -33,7 +33,7 @@ stability/plateau columns).
 import logging
 from pathlib import Path
 import sys
-from typing import Final
+from typing import Final, Optional
 
 from hamilton import driver
 from hamilton.function_modifiers import dataloader, datasaver, group, parameterize, source, value
@@ -155,7 +155,12 @@ def cm_membership_df(cm_membership_path: Path) -> pd.DataFrame:
 })
 def after_membership_for_resolution(
     citation_network: ig.Graph, cm_membership_df: pd.DataFrame, resolution: float
-) -> np.ndarray:
+) -> Optional[np.ndarray]:
+    """None when the Connectivity Modifier skipped this resolution
+    (`communities.connectivity_modifier_max_community_size`)."""
+    if _cm_community_attribute_name(resolution) not in cm_membership_df.columns:
+        logger.info("resolution=%s: no Connectivity Modifier result, skipped", resolution)
+        return None
     return _after_membership(citation_network, cm_membership_df, resolution)
 
 
@@ -169,10 +174,13 @@ def quality_after_cm_for_resolution(
     citation_network: ig.Graph,
     undirected_networkx_graph: nx.Graph,
     resolution: float,
-    after_membership: np.ndarray,
-) -> dict:
+    after_membership: Optional[np.ndarray],
+) -> Optional[dict]:
     """Structural quality metrics for one resolution's CM-remediated partition,
-    computed with the same code that scores the original partition."""
+    computed with the same code that scores the original partition (None when
+    the Connectivity Modifier skipped this resolution)."""
+    if after_membership is None:
+        return None
     per_community, per_partition = _structural_partition_metrics(
         citation_network, undirected_networkx_graph, after_membership, resolution)
     logger.info(
@@ -188,8 +196,8 @@ def quality_after_cm_for_resolution(
 @parameterize(quality_after_cm_all_resolutions={
     "bundles": group(*[source(f"quality_after_cm_at_resolution_{r}") for r in RESOLUTIONS])
 })
-def quality_after_cm_all_resolutions(bundles: list[dict]) -> list[dict]:
-    return bundles
+def quality_after_cm_all_resolutions(bundles: list[Optional[dict]]) -> list[dict]:
+    return [bundle for bundle in bundles if bundle is not None]
 
 
 def per_community_quality_after_cm_df(quality_after_cm_all_resolutions: list[dict]) -> pd.DataFrame:
