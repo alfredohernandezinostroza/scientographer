@@ -225,8 +225,21 @@ main().catch((err) => {
   if (el) el.textContent = "Failed to load: " + err.message;
 });
 
-// For the Word map tab (wordmap.js): which resolution the map is coloured by.
-window.scientographer = { communityResolution: () => state.communityResolution };
+// For the Word map tab (wordmap.js): it follows, and can set, the map's
+// community resolution and its "Well-connected papers only" filter.
+window.scientographer = {
+  communityResolution: () => state.communityResolution,
+  setCommunityResolution(resolution) {
+    if (resolution !== state.communityResolution) applyCommunityResolution(resolution);
+  },
+  wellConnectedOnly: () => state.wellConnectedOnly,
+  setWellConnectedOnly(on) {
+    state.wellConnectedOnly = !!on;
+    const box = document.getElementById("well-connected-only");
+    if (box) box.checked = state.wellConnectedOnly;
+    if (state.communityResolution != null) applyCommunityResolution(state.communityResolution);
+  },
+};
 
 async function main() {
   // One-time wiring (event listeners on static DOM); the renderer + per-frame

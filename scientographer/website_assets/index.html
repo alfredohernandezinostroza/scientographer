@@ -6,7 +6,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{SITE_TITLE}}</title>
-  <link rel="stylesheet" href="styles.css?v=7">
+  <link rel="stylesheet" href="styles.css?v=8">
 
   <!-- Tabulator -->
   <link href="https://unpkg.com/tabulator-tables@6.3.1/dist/css/tabulator.min.css" rel="stylesheet">
@@ -202,6 +202,11 @@
           <label for="wm-bw">Bandwidth <span id="wm-bw-val">2.0%</span></label>
           <input id="wm-bw" type="range" min="5" max="60" value="20">
         </div>
+        <div class="wm-ctl">
+          <label for="wm-resolution">Community resolution</label>
+          <select id="wm-resolution" title="The same setting as on the Graph tab: it chooses the communities named under each panel and, with the filter on, which papers count"></select>
+        </div>
+        <label class="wm-check" title="The same filter as on the Graph tab: only papers in well-connected communities at this resolution"><input id="wm-well-connected" type="checkbox" checked> well-connected papers only</label>
         <label class="wm-check"><input id="wm-dots" type="checkbox" checked> paper dots</label>
         <label class="wm-check"><input id="wm-rings" type="checkbox"> match rings</label>
       </div>
@@ -406,10 +411,10 @@
   <script src="https://unpkg.com/tabulator-tables@6.3.1/dist/js/tabulator.min.js"></script>
 
   <!-- App -->
-  <script type="module" src="main.js?v=29"></script>
+  <script type="module" src="main.js?v=30"></script>
   <!-- Guided tour (independent of main.js; only reads the DOM) -->
   <script type="module" src="tour.js?v=2"></script>
   <!-- Word map tab (lazy: loads its data the first time the tab is opened) -->
-  <script type="module" src="wordmap.js?v=1"></script>
+  <script type="module" src="wordmap.js?v=2"></script>
 </body>
 </html>

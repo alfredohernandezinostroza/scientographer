@@ -11,6 +11,11 @@
 // Views can hold different papers (an embedding view only has the papers with
 // embeddings), so each view keeps its own paper list; the text is matched once
 // per paper id and every view looks its papers up.
+//
+// The tab follows the map's community resolution and its "Well-connected
+// papers only" filter (and its own controls for both set the map's): with the
+// filter on, only the papers the Connectivity Modifier keeps at that resolution
+// are counted, smoothed and drawn.
 
 import { MATCH_MODES, buildMatcher, parseTerms } from "./textmatch.js";
 
@@ -94,7 +99,23 @@ function geometry(xs, ys) {
 }
 
 function currentResolution() {
-  return window.scientographer?.communityResolution?.() ?? null;
+  return el("wm-resolution")?.value || window.scientographer?.communityResolution?.() || null;
+}
+
+// Which of a view's papers are drawn: those the Connectivity Modifier keeps at
+// the selected resolution when the filter is on (null = every paper).
+function keptMask(L) {
+  if (!el("wm-well-connected")?.checked) return null;
+  const resolution = currentResolution();
+  const encoded = L.wellConnected?.resolutions?.[resolution];
+  if (!encoded) return null;
+  if (!L.masks[resolution]) {
+    const bytes = Uint8Array.from(atob(encoded), (c) => c.charCodeAt(0));
+    const mask = new Uint8Array(L.n);
+    for (let i = 0; i < L.n; i++) mask[i] = (bytes[i >> 3] >> (i & 7)) & 1;
+    L.masks[resolution] = mask;
+  }
+  return L.masks[resolution];
 }
 
 async function load() {
@@ -104,9 +125,10 @@ async function load() {
   const { list, shared } = await views();
   const texts = new Map();
   state.layouts = await Promise.all(list.map(async (v) => {
-    const [payload, communities] = await Promise.all([
+    const [payload, communities, wellConnected] = await Promise.all([
       fetchJson(`${v.dir}/nodes.json`),
       fetchJson(`${v.dir}/communities_by_resolution.json`).catch(() => null),
+      fetchJson(`${v.dir}/well_connected.json`).catch(() => null),
     ]);
     const nodes = payload.nodes;
     const n = nodes.length;
@@ -120,7 +142,7 @@ async function load() {
     }
     return {
       key: v.key, label: v.label, note: v.subtitle || "", ids, xs, ys, n,
-      communities: communitiesById, legend: communities, ...geometry(xs, ys),
+      communities: communitiesById, legend: communities, wellConnected, masks: {}, ...geometry(xs, ys),
     };
   }));
   status.textContent = "Loading the abstracts…";
@@ -136,7 +158,9 @@ function histogram(L, weights, grid, extent) {
   const [x0, x1, y0, y1] = extent;
   const h = new Float32Array(gx * gy);
   const sx = gx / (x1 - x0), sy = gy / (y1 - y0);
+  const kept = keptMask(L);
   for (let i = 0; i < L.n; i++) {
+    if (kept && !kept[i]) continue;
     const w = weights ? weights[i] : 1;
     if (!w) continue;
     const cx = Math.min(gx - 1, Math.max(0, (L.xs[i] - x0) * sx | 0));
@@ -237,7 +261,9 @@ function wordsIn(id, field) {
 function weightsFor(L, byId, field, how) {
   const counts = new Int32Array(L.n);
   const weights = new Float32Array(L.n);
+  const kept = keptMask(L);
   for (let i = 0; i < L.n; i++) {
+    if (kept && !kept[i]) continue;
     const id = L.ids[i];
     const c = field === "both"
       ? (byId.abstract.get(id) || 0) + (byId.keywords.get(id) || 0)
@@ -266,7 +292,9 @@ function paint(canvas, L, f, counts, grid, extent, pxW, exporting) {
   if (el("wm-dots").checked) {
     ctx.fillStyle = exporting ? DOT_COLOR_EXPORT : DOT_COLOR;
     const size = Math.max(1, 1.1 * k);
+    const kept = keptMask(L);
     for (let i = 0; i < L.n; i++) {
+      if (kept && !kept[i]) continue;
       ctx.fillRect((L.xs[i] - x0) * sx, canvas.height - (L.ys[i] - y0) * sy, size, size);
     }
   }
@@ -332,7 +360,7 @@ function buildGrid() {
     FIELDS.map((f) => `<div class="wm-colhead">${f.label}<div class="wm-n" id="wm-n-${f.key}"></div></div>`).join("");
   for (const L of state.layouts) {
     grid.insertAdjacentHTML("beforeend",
-      `<div class="wm-rowhead"><div class="wm-lab">${L.label}</div><div class="wm-note">${L.n.toLocaleString()} papers</div></div>`);
+      `<div class="wm-rowhead"><div class="wm-lab">${L.label}</div><div class="wm-note" id="wm-note-${L.key}"></div></div>`);
     for (const f of FIELDS) {
       grid.insertAdjacentHTML("beforeend", `
         <div class="wm-cell">
@@ -436,6 +464,12 @@ async function recompute() {
 
   const dpr = window.devicePixelRatio || 1;
   for (const L of state.layouts) {
+    const kept = keptMask(L);
+    let shown = L.n;
+    if (kept) { shown = 0; for (let i = 0; i < L.n; i++) shown += kept[i]; }
+    el(`wm-note-${L.key}`).textContent = kept
+      ? `${shown.toLocaleString()} of ${L.n.toLocaleString()} papers (well connected at ${currentResolution()})`
+      : `${L.n.toLocaleString()} papers`;
     state.last[L.key] = {};
     for (const f of FIELDS) {
       if (token !== state.token) return;
@@ -469,6 +503,19 @@ async function start() {
     return;
   }
   buildGrid();
+  const resolutions = Object.keys(state.layouts[0]?.legend?.by_resolution || {})
+    .sort((a, b) => parseFloat(a) - parseFloat(b));
+  const sel = el("wm-resolution");
+  sel.innerHTML = resolutions.map((r) => `<option value="${r}">${r}</option>`).join("");
+  syncFromMap();
+  sel.addEventListener("change", () => {
+    window.scientographer?.setCommunityResolution?.(sel.value);
+    recompute();
+  });
+  el("wm-well-connected").addEventListener("change", () => {
+    window.scientographer?.setWellConnectedOnly?.(el("wm-well-connected").checked);
+    recompute();
+  });
   el("wm-words").addEventListener("input", schedule);
   for (const id of ["wm-match", "wm-weight", "wm-mode", "wm-dots", "wm-rings"]) {
     el(id).addEventListener("change", recompute);
@@ -486,10 +533,25 @@ async function start() {
   recompute();
 }
 
-// Loads lazily, the first time the tab is opened (the abstracts are large).
+// Take the map's current resolution and filter setting.
+function syncFromMap() {
+  const map = window.scientographer;
+  const resolution = map?.communityResolution?.();
+  const sel = el("wm-resolution");
+  if (sel && resolution != null && [...sel.options].some((o) => o.value === String(resolution))) {
+    sel.value = String(resolution);
+  }
+  const box = el("wm-well-connected");
+  if (box && map?.wellConnectedOnly) box.checked = map.wellConnectedOnly();
+  const anyMasks = state.layouts.some((L) => L.wellConnected);
+  if (box) box.closest(".wm-check").hidden = !anyMasks;
+}
+
+// Loads lazily, the first time the tab is opened (the abstracts are large);
+// afterwards it picks up any change made on the map meanwhile.
 document.getElementById("tab-wordmap")?.addEventListener("click", () => {
   if (state.started) {
-    setTimeout(recompute, 0); // the resolution may have changed meanwhile
+    setTimeout(() => { syncFromMap(); recompute(); }, 0);
   } else {
     setTimeout(start, 0);
   }
