@@ -585,6 +585,7 @@ function initExportControls() {
         longSide: parseInt(document.getElementById("export-size").value, 10),
         edges: document.getElementById("export-edges").value,
         nodeScale: parseFloat(document.getElementById("export-nodes").value),
+        background: document.getElementById("export-background")?.value || "transparent",
         labels: document.getElementById("export-labels").checked,
       });
     } catch (err) {
@@ -617,7 +618,7 @@ function visibleNodeDrawData() {
   return out;
 }
 
-async function exportMapPng({ area, longSide, edges, nodeScale, labels }) {
+async function exportMapPng({ area, longSide, edges, nodeScale, labels, background }) {
   const nodes = visibleNodeDrawData();
   const { width: viewWidth, height: viewHeight } = state.renderer.getDimensions();
 
@@ -648,8 +649,11 @@ async function exportMapPng({ area, longSide, edges, nodeScale, labels }) {
   if (!ctx) throw new Error(`the browser could not allocate a ${canvas.width}×${canvas.height} canvas`);
   const px = (n) => [(n.x - x0) * scale, (n.y - y0) * scale];
 
-  ctx.fillStyle = getComputedStyle(document.body).backgroundColor || "#0e1116";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  // Transparent by default (for slides and figures); "dark" fills the site's colour.
+  if (background === "dark") {
+    ctx.fillStyle = getComputedStyle(document.body).backgroundColor || "#0e1116";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
 
   // Edges: citations between two visible papers with at least one end in the
   // region, coloured by the citing paper, one path per colour.

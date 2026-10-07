@@ -8,6 +8,9 @@ Two modes (params.yaml ``layout.mode``):
 - ``forceatlas2``: run ForceAtlas2 (the ``fa2`` package, the same call
   ``build_citation_network.py`` and the keyword DAGs make) on the undirected
   graph, in-pipeline, ``forceatlas2_iterations`` steps.
+Either way the layout is then turned to a default orientation (``layout.orientation``:
+``principal`` = long axis along x, long tail down, most-cited side left; ``none``).
+
 - ``import``: copy x/y from a file exported by Gephi -- a graphml (Gephi writes
   ``x``/``y`` vertex attributes) or a node CSV with ``id``/``name`` + ``x``/``y``
   columns -- matched by the vertex ``name`` (the DOI). Tuning a layout by hand
@@ -31,7 +34,9 @@ from hamilton.function_modifiers import dataloader, datasaver
 from hamilton.io import utils
 import hamilton.log_setup
 import igraph as ig
+import numpy as np
 import pandas as pd
+from scipy.stats import skew
 
 from scientographer.config import FIGURES_PATH, draw_dag, ensure_dirs, params, tracker_adapters
 
@@ -51,6 +56,14 @@ MODE: Final[str] = str(_cfg.get("mode", "forceatlas2"))
 FORCEATLAS2_ITERATIONS: Final[int] = int(_cfg.get("forceatlas2_iterations", 500))
 IMPORT_PATH: Final[Optional[Path]] = Path(_cfg["import_path"]) if _cfg.get("import_path") else None
 OVERWRITE_EXISTING: Final[bool] = bool(_cfg.get("overwrite_existing", False))
+# How the computed or imported layout is turned before it is saved: "principal" puts
+# the main body's long axis along x, its long tail pointing down and its most-cited
+# side on the left; "none" keeps the coordinates as they are.
+ORIENTATION: Final[str] = str(_cfg.get("orientation", "principal"))
+ORIENTATIONS: Final[tuple[str, ...]] = ("principal", "none")
+# The main body: the papers closest to the median position (outlying communities
+# would otherwise steer the axes).
+ORIENTATION_CORE_SHARE: Final[float] = 0.9
 
 MODES: Final[tuple[str, ...]] = ("forceatlas2", "import")
 
@@ -112,6 +125,72 @@ def _imported_positions(graph: ig.Graph, import_path: Path) -> tuple[list[float]
     return xs, ys
 
 
+def _geometric_median(points: np.ndarray, iterations: int = 200) -> np.ndarray:
+    """The point minimising the summed distance to all points (Weiszfeld). Unlike
+    the per-axis median it does not depend on how the layout is rotated."""
+    centre = np.median(points, axis=0)
+    for _ in range(iterations):
+        distance = np.maximum(np.linalg.norm(points - centre, axis=1), 1e-12)
+        updated = (points / distance[:, None]).sum(axis=0) / (1.0 / distance).sum()
+        if np.linalg.norm(updated - centre) < 1e-10 * (1.0 + np.linalg.norm(centre)):
+            return updated
+        centre = updated
+    return centre
+
+
+def _principal_orientation(
+    xs: list[float], ys: list[float], citations: list[int]
+) -> tuple[list[float], list[float], dict]:
+    """Turn a layout into a reproducible default orientation, using its main body
+    (the ORIENTATION_CORE_SHARE of papers closest to the median position):
+
+    1. rotate so the main body's long (first principal) axis lies along x;
+    2. flip y so the body's long tail points down (negative skewness in y: the
+       bulk of the papers on top);
+    3. flip x so the most-cited side is on the left (the citation-weighted
+       centre of the body left of its plain centre).
+
+    A force-directed layout has no meaningful orientation, so this only fixes
+    one; the map's rotate/flip buttons still apply on top. Returns the new
+    coordinates and what was done."""
+    xy = np.column_stack([xs, ys]).astype(float)
+    distance = np.linalg.norm(xy - _geometric_median(xy), axis=1)
+    core = distance <= np.quantile(distance, ORIENTATION_CORE_SHARE)
+    centre = xy[core].mean(axis=0)
+    eigenvalues, eigenvectors = np.linalg.eigh(np.cov((xy[core] - centre).T))
+    major = eigenvectors[:, int(np.argmax(eigenvalues))]
+    angle = -np.arctan2(major[1], major[0])
+    rotation = np.array([[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]])
+    turned = (xy - centre) @ rotation.T
+
+    flip_y = bool(skew(turned[core, 1]) > 0)
+    weights = np.asarray(citations, dtype=float)[core]
+    flip_x = bool(weights.sum() > 0 and np.average(turned[core, 0], weights=weights) > turned[core, 0].mean())
+    turned *= np.array([-1.0 if flip_x else 1.0, -1.0 if flip_y else 1.0])
+    turned += centre
+
+    # Two flips are a half turn; one flip is a mirror image.
+    rotation_degrees = (np.degrees(angle) + (180.0 if flip_x and flip_y else 0.0)) % 360.0
+    info = {"rotation_degrees": round(float(rotation_degrees), 2), "mirrored": bool(flip_x != flip_y),
+            "mirror_axis": "x" if flip_x and not flip_y else ("y" if flip_y and not flip_x else "")}
+    return turned[:, 0].tolist(), turned[:, 1].tolist(), info
+
+
+def _oriented(graph: ig.Graph, xs: list[float], ys: list[float], orientation: str):
+    if orientation == "none":
+        graph["layout_orientation"] = "none"
+        return xs, ys
+    if orientation != "principal":
+        raise ValueError(f"layout.orientation must be one of {ORIENTATIONS}, got {orientation!r}")
+    xs, ys, info = _principal_orientation(xs, ys, graph.degree(mode="in"))
+    logger.info("oriented the layout: rotated %.1f degrees%s", info["rotation_degrees"],
+                f", mirrored in {info['mirror_axis']}" if info["mirrored"] else "")
+    graph["layout_orientation"] = "principal"
+    graph["layout_rotation_degrees"] = info["rotation_degrees"]
+    graph["layout_mirrored"] = info["mirrored"]
+    return xs, ys
+
+
 def _with_positions(
     graph: ig.Graph, xs: list[float], ys: list[float], mode: str, iterations: Optional[int]
 ) -> ig.Graph:
@@ -135,6 +214,7 @@ def _main() -> int:
         forceatlas2_iterations=FORCEATLAS2_ITERATIONS,
         import_path=IMPORT_PATH,
         overwrite_existing=OVERWRITE_EXISTING,
+        orientation=ORIENTATION,
         output_graphml_path=OUTPUT_GRAPHML,
     )
     outputs = ["save_citation_network_with_layout"]
@@ -172,6 +252,7 @@ def citation_network_with_layout(
     forceatlas2_iterations: int,
     import_path: Optional[Path],
     overwrite_existing: bool,
+    orientation: str = "none",
 ) -> ig.Graph:
     if _has_complete_layout(citation_network) and not overwrite_existing:
         logger.info(
@@ -185,12 +266,14 @@ def citation_network_with_layout(
             citation_network.vcount(),
         )
         xs, ys = _forceatlas2_positions(citation_network, forceatlas2_iterations)
+        xs, ys = _oriented(citation_network, xs, ys, orientation)
         return _with_positions(citation_network, xs, ys, mode, forceatlas2_iterations)
     if mode == "import":
         if import_path is None:
             raise ValueError("layout.mode is 'import' but layout.import_path is not set")
         logger.info("importing x/y from %s", import_path)
         xs, ys = _imported_positions(citation_network, import_path)
+        xs, ys = _oriented(citation_network, xs, ys, orientation)
         return _with_positions(citation_network, xs, ys, mode, None)
     raise ValueError(f"unknown layout mode {mode!r}; use one of {MODES}")
 

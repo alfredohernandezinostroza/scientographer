@@ -6,7 +6,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{SITE_TITLE}}</title>
-  <link rel="stylesheet" href="styles.css?v=5">
+  <link rel="stylesheet" href="styles.css?v=6">
 
   <!-- Tabulator -->
   <link href="https://unpkg.com/tabulator-tables@6.3.1/dist/css/tabulator.min.css" rel="stylesheet">
@@ -259,6 +259,10 @@
           <option value="straight">Straight edges</option>
           <option value="curved">Curved edges</option>
         </select>
+        <select id="export-background" aria-label="Image background">
+          <option value="transparent">Transparent</option>
+          <option value="dark">Dark background</option>
+        </select>
       </div>
       <div class="export-actions">
         <select id="export-nodes" aria-label="Node size">
@@ -346,7 +350,7 @@
   <script src="https://unpkg.com/tabulator-tables@6.3.1/dist/js/tabulator.min.js"></script>
 
   <!-- App -->
-  <script type="module" src="main.js?v=26"></script>
+  <script type="module" src="main.js?v=27"></script>
   <!-- Guided tour (independent of main.js; only reads the DOM) -->
   <script type="module" src="tour.js?v=2"></script>
 </body>

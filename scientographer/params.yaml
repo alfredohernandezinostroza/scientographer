@@ -65,6 +65,10 @@ layout:
   forceatlas2_iterations: 500
   import_path: null
   overwrite_existing: false
+  # Default orientation of the map: "principal" turns the layout so the main body's
+  # long axis is horizontal, its long tail points down and its most-cited side is on
+  # the left (reproducible, unlike ForceAtlas2's arbitrary one); "none" keeps it.
+  orientation: principal
 
 graph:
   # The graph the community-analysis stages read. When the partitions come from
