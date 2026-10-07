@@ -16,6 +16,7 @@
 
 import Graph from "https://cdn.jsdelivr.net/npm/graphology@0.25.4/+esm";
 import { Sigma } from "https://cdn.jsdelivr.net/npm/sigma@2.4.0/+esm";
+import { MATCH_MODES, makeFilter } from "./textmatch.js";
 
 // ── Dataset definitions ─────────────────────────────────────────────────────
 // Each grouping: key (also the "Color by" value), label (detail panel + color
@@ -169,6 +170,7 @@ const state = {
   wellConnected: null,
   wellConnectedMasks: {},
   wellConnectedOnly: true, // the "Papers" control
+  matchMode: "word", // search + filters: word | prefix | substring | regex (textmatch.js)
 
   // floating-label bookkeeping for the currently-active grouping
   labelMode: "dynamic", // dynamic | always
@@ -222,6 +224,9 @@ main().catch((err) => {
   const el = document.getElementById("loading");
   if (el) el.textContent = "Failed to load: " + err.message;
 });
+
+// For the Word map tab (wordmap.js): which resolution the map is coloured by.
+window.scientographer = { communityResolution: () => state.communityResolution };
 
 async function main() {
   // One-time wiring (event listeners on static DOM); the renderer + per-frame
@@ -2172,17 +2177,26 @@ function initSearch() {
   });
 
   function runSearch(q) {
-    q = q.trim().toLowerCase();
+    q = q.trim();
     if (q.length < 3) {
       list.hidden = true;
       list.innerHTML = "";
       return;
     }
+    // Titles and authors in the chosen matching mode; DOIs anywhere.
+    let test;
+    try {
+      test = makeFilter(q, state.matchMode);
+    } catch {
+      list.hidden = true;
+      return;
+    }
+    const doi = q.toLowerCase();
     const hits = [];
     const nodes = state.nodesData.nodes;
     const idx = state.index;
     for (let i = 0; i < nodes.length && hits.length < 25; i++) {
-      if (idx.title[i].includes(q) || idx.authors[i].includes(q) || idx.doi[i].includes(q)) hits.push(i);
+      if (test(idx.title[i]) || test(idx.authors[i]) || idx.doi[i].includes(doi)) hits.push(i);
     }
     list.innerHTML = hits
       .map((i) => {
@@ -2341,6 +2355,7 @@ function initTabs() {
     { tabId: "tab-graph", viewId: "view-graph" },
     { tabId: "tab-metrics", viewId: "view-metrics" },
     { tabId: "tab-figures", viewId: "view-figures" },
+    { tabId: "tab-wordmap", viewId: "view-wordmap" },
   ];
   for (const { tabId, viewId } of TABS) {
     const tabEl = document.getElementById(tabId);
@@ -2399,6 +2414,16 @@ function initGlobalFilters() {
 
   btn.addEventListener("click", run);
 
+  const mode = document.getElementById("match-mode");
+  if (mode) {
+    mode.innerHTML = MATCH_MODES.map((m) => `<option value="${m.value}">${escapeHtml(m.label)}</option>`).join("");
+    mode.value = state.matchMode;
+    mode.addEventListener("change", () => {
+      state.matchMode = mode.value;
+      if (state.filteredSet) run();
+    });
+  }
+
   const inputs = [elTitle, elAuthor, elAbstract, elJournal, elKeywords].filter(Boolean);
   for (const input of inputs) {
     input.addEventListener("keydown", (e) => {
@@ -2409,16 +2434,6 @@ function initGlobalFilters() {
   }
 }
 
-function splitCommaQueries(s) {
-  return s
-    .split(",")
-    .map((x) => x.trim().toLowerCase())
-    .filter(Boolean);
-}
-function matchesAll(pipeLc, queries) {
-  for (const q of queries) if (!pipeLc.includes(q)) return false;
-  return true;
-}
 
 async function ensureAbstractsLoadedIfNeeded() {
   if (state.filters.abstract.trim() && !state.abstracts) await loadAbstract("n2");
@@ -2428,12 +2443,17 @@ async function applyGlobalFilters() {
   await ensureAbstractsLoadedIfNeeded();
 
   const f = state.filters;
-  const qTitle = f.title.trim().toLowerCase();
-  const qJournal = f.journal.trim().toLowerCase();
-  const qAbstract = f.abstract.trim().toLowerCase();
-  const authorQs = splitCommaQueries(f.author);
-  const keywordQs = splitCommaQueries(f.keywords);
-  const meshQs = splitCommaQueries(f.mesh);
+  // Every field: comma-separated queries that must all match, in the chosen
+  // matching mode (whole words by default, so "dance" skips "guidance").
+  let tests;
+  try {
+    tests = Object.fromEntries(["title", "journal", "abstract", "author", "keywords", "mesh"]
+      .map((k) => [k, makeFilter(f[k] || "", state.matchMode)]));
+  } catch (err) {
+    const el = document.getElementById("selected-count");
+    if (el) el.textContent = `Invalid regular expression: ${err.message}`;
+    return;
+  }
 
   const lo = state.yearMin;
   const hi = state.yearMax;
@@ -2446,15 +2466,12 @@ async function applyGlobalFilters() {
     if (state.snapshot && !state.snapshot.visible.has(String(i))) continue;
     if (r.year != null && (r.year < lo || r.year > hi)) continue;
     if (nodeHiddenByMute(r) || removedByModifier(i)) continue;
-    if (qTitle && !idx.title[i].includes(qTitle)) continue;
-    if (qJournal && !idx.journal[i].includes(qJournal)) continue;
-    if (authorQs.length && !matchesAll(idx.authors[i], authorQs)) continue;
-    if (keywordQs.length && !matchesAll(idx.keywords[i], keywordQs)) continue;
-    if (meshQs.length && !matchesAll(idx.mesh[i], meshQs)) continue;
-    if (qAbstract) {
-      const abs = (state.abstracts?.[r.id] || "").toLowerCase();
-      if (!abs.includes(qAbstract)) continue;
-    }
+    if (tests.title && !tests.title(idx.title[i])) continue;
+    if (tests.journal && !tests.journal(idx.journal[i])) continue;
+    if (tests.author && !tests.author(idx.authors[i])) continue;
+    if (tests.keywords && !tests.keywords(idx.keywords[i])) continue;
+    if (tests.mesh && !tests.mesh(idx.mesh[i])) continue;
+    if (tests.abstract && !tests.abstract(state.abstracts?.[r.id] || "")) continue;
     out.add(String(i));
   }
 

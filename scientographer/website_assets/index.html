@@ -6,7 +6,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{SITE_TITLE}}</title>
-  <link rel="stylesheet" href="styles.css?v=6">
+  <link rel="stylesheet" href="styles.css?v=7">
 
   <!-- Tabulator -->
   <link href="https://unpkg.com/tabulator-tables@6.3.1/dist/css/tabulator.min.css" rel="stylesheet">
@@ -163,6 +163,54 @@
     </div>
   </div>
 
+  <!-- Word map tab pane (wordmap.js): where words sit on every view of the map,
+       as smoothed densities of the papers whose abstract / keywords match. -->
+  <div id="view-wordmap" class="view">
+    <div id="wordmap-wrap" class="panel">
+      <div class="metrics-head">
+        <h2>Word maps</h2>
+        <p class="meta">Where words sit on the map, computed live: papers whose text matches are smoothed
+           into a density over each view (a fixed-bandwidth kernel density), normalised to each panel's
+           peak. Rows are the map's views, columns the text searched. <em>Enrichment</em> divides by the
+           density of all papers, so it shows where a word is over-represented rather than where papers
+           are many.</p>
+      </div>
+      <div class="wm-controls">
+        <div class="wm-ctl wm-grow">
+          <label for="wm-words">Words (several are OR'd together; "quote a phrase")</label>
+          <input id="wm-words" type="text" value="cerebellum" spellcheck="false"
+                 placeholder='bird   or   "motor imagery"   or   zebra birdsong'>
+        </div>
+        <div class="wm-ctl"><label for="wm-match">Match</label><select id="wm-match"></select></div>
+        <div class="wm-ctl">
+          <label for="wm-weight">Weight</label>
+          <select id="wm-weight">
+            <option value="presence">presence</option>
+            <option value="count">count</option>
+            <option value="log">log(1+count)</option>
+            <option value="rate">per 1000 words</option>
+          </select>
+        </div>
+        <div class="wm-ctl">
+          <label for="wm-mode">Colour</label>
+          <select id="wm-mode">
+            <option value="density">density</option>
+            <option value="enrichment">enrichment</option>
+          </select>
+        </div>
+        <div class="wm-ctl">
+          <label for="wm-bw">Bandwidth <span id="wm-bw-val">2.0%</span></label>
+          <input id="wm-bw" type="range" min="5" max="60" value="20">
+        </div>
+        <label class="wm-check"><input id="wm-dots" type="checkbox" checked> paper dots</label>
+        <label class="wm-check"><input id="wm-rings" type="checkbox"> match rings</label>
+      </div>
+      <div class="wm-forms" id="wm-forms"></div>
+      <div id="wm-status">Open this tab to load the word maps.</div>
+      <div class="wm-grid" id="wm-grid"></div>
+    </div>
+  </div>
+
   <!-- Controls panel -->
   <div id="controls" class="panel collapsed">
     <button id="controls-toggle" class="icon-btn" type="button" aria-label="Show controls">⟩</button>
@@ -177,6 +225,7 @@
         <button id="tab-graph" class="tab active" type="button">Graph</button>
         <button id="tab-metrics" class="tab" type="button" hidden>Metrics</button>
         <button id="tab-figures" class="tab" type="button" hidden>Figures</button>
+        <button id="tab-wordmap" class="tab" type="button">Word map</button>
         <!-- <button id="tab-table" class="tab" type="button">Table</button> -->
       </div>
     </div>
@@ -194,6 +243,11 @@
     <input id="filter-abstract" type="search" placeholder="Filter by abstracts...">
     <input id="filter-journal" type="search" placeholder="Filter by journal...">
     <input id="filter-keywords" type="search" placeholder="Filter by keywords, comma-separated...">
+
+    <div class="control-row">
+      <label>Text matching</label>
+      <select id="match-mode" title="How search and filters match text: whole words (with plurals), word beginnings, anywhere, or a regular expression. Comma-separated queries must all match."></select>
+    </div>
     <!-- <input id="filter-mesh" type="search" placeholder="Filter by MeSH headers, comma-separated..."> -->
 
     <div class="control-row">
@@ -352,8 +406,10 @@
   <script src="https://unpkg.com/tabulator-tables@6.3.1/dist/js/tabulator.min.js"></script>
 
   <!-- App -->
-  <script type="module" src="main.js?v=28"></script>
+  <script type="module" src="main.js?v=29"></script>
   <!-- Guided tour (independent of main.js; only reads the DOM) -->
   <script type="module" src="tour.js?v=2"></script>
+  <!-- Word map tab (lazy: loads its data the first time the tab is opened) -->
+  <script type="module" src="wordmap.js?v=1"></script>
 </body>
 </html>
