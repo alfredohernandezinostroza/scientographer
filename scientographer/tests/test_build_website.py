@@ -332,3 +332,37 @@ def test_extra_layout_key_and_columns_are_checked(tmp_path):
         _extra_view({"key": "ok", "positions": str(table)}, [], [], {}, {}, [], None)
     with pytest.raises(ValueError, match="key"):
         _extra_view({"key": "network", "positions": str(table)}, [], [], {}, {}, [], None)
+
+
+# ── well-connected papers (Connectivity Modifier) ─────────────────────────────
+def test_well_connected_masks_sizes_and_bitset():
+    import base64
+
+    import numpy as np
+
+    from scientographer.build_website import (
+        _add_well_connected_sizes,
+        _well_connected_masks,
+        _well_connected_payload,
+    )
+
+    recs = node_records([_mk_node(f"n{i}", topic=0, community=5) for i in range(10)],
+                        resolutions=[RES, 0.01], community_resolution=RES)
+    cm = pd.DataFrame({
+        "node_name": [f"DOIn{i}" for i in range(10)],  # matched case-insensitively
+        f"connectivity_modified_community_at_res={RES}": [0, 0, 0, -1, -1, 0, 0, 0, 0, -1],
+    })  # no column at 0.01: the Modifier skipped that resolution
+    masks = _well_connected_masks(recs, cm, [RES, 0.01])
+    assert list(masks) == [str(RES)]
+    assert masks[str(RES)].tolist() == [True, True, True, False, False, True, True, True, True, False]
+    assert _well_connected_masks(recs, None, [RES]) == {}
+
+    legend = {str(RES): {"5": {"size": 10}}, "0.01": {"15": {"size": 10}}}
+    _add_well_connected_sizes(legend, recs, masks)
+    assert legend[str(RES)]["5"]["well_connected_size"] == 7
+    assert "well_connected_size" not in legend["0.01"]["15"]
+
+    payload = _well_connected_payload(masks, len(recs))
+    bits = np.unpackbits(np.frombuffer(base64.b64decode(payload["resolutions"][str(RES)]), dtype=np.uint8),
+                         bitorder="little")[: payload["n"]]
+    assert bits.astype(bool).tolist() == masks[str(RES)].tolist()

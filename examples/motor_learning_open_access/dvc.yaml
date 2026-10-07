@@ -143,6 +143,7 @@ stages:
       - ${website.after_cm_partition_metrics}
       - ${website.connectivity_diagnostic_partition}
       - ${website.connectivity_modifier_partition}
+      - ${website.connectivity_modifier_membership}
       - ${website.community_keyword_scores}
       - ${wordclouds.output_dir}
     params:

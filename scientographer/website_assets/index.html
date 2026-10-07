@@ -6,7 +6,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{SITE_TITLE}}</title>
-  <link rel="stylesheet" href="styles.css?v=4">
+  <link rel="stylesheet" href="styles.css?v=5">
 
   <!-- Tabulator -->
   <link href="https://unpkg.com/tabulator-tables@6.3.1/dist/css/tabulator.min.css" rel="stylesheet">
@@ -224,6 +224,13 @@
       <select id="community-resolution"></select>
     </div>
 
+    <div class="control-row checkbox-row" id="well-connected-row" hidden>
+      <label title="At each resolution the Connectivity Modifier keeps the papers that sit in a well-connected community (minimum cut above log10 of its size) of at least 11 papers. Uncheck to show every paper.">
+        <input id="well-connected-only" type="checkbox" checked> Well-connected papers only
+      </label>
+      <span class="meta well-connected-note" id="well-connected-note"></span>
+    </div>
+
     <div class="control-row">
       <label>Orientation</label>
       <div class="orientation-buttons">
@@ -339,7 +346,7 @@
   <script src="https://unpkg.com/tabulator-tables@6.3.1/dist/js/tabulator.min.js"></script>
 
   <!-- App -->
-  <script type="module" src="main.js?v=25"></script>
+  <script type="module" src="main.js?v=26"></script>
   <!-- Guided tour (independent of main.js; only reads the DOM) -->
   <script type="module" src="tour.js?v=2"></script>
 </body>

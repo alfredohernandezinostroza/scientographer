@@ -53,6 +53,7 @@ Output (default ``reports/website/``)::
 Serve with ``python -m http.server 8123 --directory reports/website``.
 """
 
+import base64
 from collections import Counter, defaultdict
 import html
 import json
@@ -69,6 +70,7 @@ import xml.etree.ElementTree as ET
 from hamilton import driver
 from hamilton.function_modifiers import datasaver, unpack_fields
 import hamilton.log_setup
+import numpy as np
 import pandas as pd
 
 from scientographer.config import FIGURES_PATH, draw_dag, ensure_dirs, params, tracker_adapters
@@ -138,6 +140,7 @@ DEFAULT_INPUTS: Final[dict] = dict(
     after_cm_partition_metrics_path=_optional_path("after_cm_partition_metrics"),
     connectivity_diagnostic_partition_path=_optional_path("connectivity_diagnostic_partition"),
     connectivity_modifier_partition_path=_optional_path("connectivity_modifier_partition"),
+    connectivity_modifier_membership_path=_optional_path("connectivity_modifier_membership"),
     community_keyword_scores_path=_optional_path("community_keyword_scores"),
     default_resolution=DEFAULT_COMMUNITY_RESOLUTION,
     website_dir=Path(_cfg["output_dir"]),
@@ -367,6 +370,7 @@ def _extra_view(
     community_labels_from_graph: dict,
     resolutions: list[float],
     community_resolution: Optional[float],
+    connectivity_modifier_membership_df: Optional[pd.DataFrame] = None,
 ) -> dict:
     """One extra view: the papers of `spec["positions"]` (a table with `doi`, `x`,
     `y`, optionally `topic` (integer, -1 = none) and `topic_name`) placed on that
@@ -419,6 +423,8 @@ def _extra_view(
                                 if str(r["community"]) in named_here else OUTLIER_COLOR)
 
     view_edges = [(new_index[s], new_index[t]) for s, t in edges if s in new_index and t in new_index]
+    masks = _well_connected_masks(records, connectivity_modifier_membership_df, resolutions)
+    _add_well_connected_sizes(communities, records, masks)
 
     snapshots = None
     if spec.get("snapshots"):
@@ -440,7 +446,48 @@ def _extra_view(
         "clusters": clusters,
         "communities": communities,
         "snapshots": snapshots,
+        "well_connected": _well_connected_payload(masks, len(records)) if masks else None,
     }
+
+
+def _well_connected_masks(records: list[dict], cm_membership: Optional[pd.DataFrame],
+                          resolutions: list[float]) -> dict[str, np.ndarray]:
+    """resolution (str) -> per-record bool: the paper is in a community the
+    Connectivity Modifier kept at that resolution. Only resolutions with a
+    Modifier result appear (it can skip resolutions, see
+    `communities.connectivity_modifier_max_community_size`)."""
+    if cm_membership is None:
+        return {}
+    by_doi = cm_membership.assign(_doi=cm_membership["node_name"].astype(str).str.strip().str.lower()) \
+        .drop_duplicates("_doi").set_index("_doi")
+    position = by_doi.index.get_indexer([r["doi"].strip().lower() for r in records])
+    masks = {}
+    for resolution in resolutions:
+        column = f"connectivity_modified_community_at_res={resolution}"
+        if column not in by_doi.columns:
+            continue
+        kept_ids = by_doi[column].to_numpy()
+        masks[str(resolution)] = np.where(position >= 0, kept_ids[np.maximum(position, 0)] >= 0, False)
+    return masks
+
+
+def _add_well_connected_sizes(communities: dict, records: list[dict], masks: dict[str, np.ndarray]) -> None:
+    """Each community's number of well-connected papers (`well_connected_size`)
+    at every resolution with a Connectivity Modifier result."""
+    for res_key, mask in masks.items():
+        legend = communities.get(res_key)
+        if not legend:
+            continue
+        counts: Counter = Counter(r["communities"].get(res_key, OUTLIER) for r, kept in zip(records, mask) if kept)
+        for cid, entry in legend.items():
+            entry["well_connected_size"] = int(counts.get(int(cid), 0))
+
+
+def _well_connected_payload(masks: dict[str, np.ndarray], n_records: int) -> dict:
+    """The masks as little-endian bitsets over the view's node order, base64."""
+    return {"n": n_records, "resolutions": {
+        res_key: base64.b64encode(np.packbits(mask.astype(np.uint8), bitorder="little").tobytes()).decode("ascii")
+        for res_key, mask in masks.items()}}
 
 
 def _optional_parquet(path) -> Optional[pd.DataFrame]:
@@ -877,13 +924,29 @@ def extra_views(
     community_labels_from_graph: dict,
     resolutions: list[float],
     community_resolution: Optional[float],
+    connectivity_modifier_membership_df: Optional[pd.DataFrame],
 ) -> list[dict]:
     """Every extra layout of params.yaml `website.extra_layouts`, as a view."""
     return [
         _extra_view(spec, node_records, edges, community_quality_lookup, community_labels_from_graph,
-                    resolutions, community_resolution)
+                    resolutions, community_resolution, connectivity_modifier_membership_df)
         for spec in extra_layouts
     ]
+
+
+def connectivity_modifier_membership_df(connectivity_modifier_membership_path: Optional[Path]) -> Optional[pd.DataFrame]:
+    """The Connectivity Modifier's per-paper membership (node_name + one column per
+    resolution, -1 = removed), if the project has it."""
+    return _optional_parquet(connectivity_modifier_membership_path)
+
+
+def well_connected_masks(
+    node_records: list[dict], connectivity_modifier_membership_df: Optional[pd.DataFrame], resolutions: list[float]
+) -> dict:
+    masks = _well_connected_masks(node_records, connectivity_modifier_membership_df, resolutions)
+    if masks:
+        logger.info("well-connected papers (Connectivity Modifier) at %d resolutions", len(masks))
+    return masks
 
 
 def _data_dir(website_dir: Path) -> Path:
@@ -927,8 +990,10 @@ def save_clusters_json(clusters_legend: dict, website_dir: Path) -> dict:
 
 @datasaver()
 def save_communities_by_resolution_json(
-    communities_legend_by_resolution: dict, community_resolution: Optional[float], website_dir: Path
+    communities_legend_by_resolution: dict, community_resolution: Optional[float], website_dir: Path,
+    node_records: list[dict], well_connected_masks: dict,
 ) -> dict:
+    _add_well_connected_sizes(communities_legend_by_resolution, node_records, well_connected_masks)
     path = _data_dir(website_dir) / "communities_by_resolution.json"
     present = bool(communities_legend_by_resolution)
     _write_optional_json(path, {"default_resolution": str(community_resolution),
@@ -1006,6 +1071,16 @@ def save_figures(figure_entries: list[dict], graphml_path: Path, website_dir: Pa
 
 
 @datasaver()
+def save_well_connected_json(well_connected_masks: dict, node_records: list[dict], website_dir: Path) -> dict:
+    """Which papers the Connectivity Modifier keeps at each resolution (the map's
+    "well-connected papers only" filter)."""
+    path = _data_dir(website_dir) / "well_connected.json"
+    written = _write_optional_json(path, _well_connected_payload(well_connected_masks, len(node_records)),
+                                   bool(well_connected_masks))
+    return {"path": written, "n_resolutions": len(well_connected_masks)}
+
+
+@datasaver()
 def save_abstracts_json(abstracts: dict, website_dir: Path) -> dict:
     path = _data_dir(website_dir) / "abstracts.json"
     _write_json(path, abstracts)
@@ -1043,6 +1118,7 @@ def save_extra_views(extra_views: list[dict], community_resolution: Optional[flo
                              {"default_resolution": str(community_resolution), "by_resolution": view["communities"]},
                              bool(view["communities"]))
         _write_optional_json(d / "snapshots.json", view["snapshots"], view["snapshots"] is not None)
+        _write_optional_json(d / "well_connected.json", view["well_connected"], view["well_connected"] is not None)
         written[view["key"]] = {"dir": d.name, "nodes": n, "edges": len(view["edges"]),
                                 "topics": len(view["clusters"]),
                                 "snapshots": len(view["snapshots"]["cutoffs"]) if view["snapshots"] else 0}
@@ -1080,6 +1156,7 @@ def assembled_website(
     save_abstracts_json: dict,
     save_edges_bins: dict,
     save_views_manifest: dict,
+    save_well_connected_json: dict,
     website_dir: Path,
     site_title: str,
 ) -> dict:
@@ -1110,6 +1187,7 @@ def assembled_website(
         "abstracts": save_abstracts_json["n_abstracts"],
         "edges": save_edges_bins["n_edges"],
         "views": save_views_manifest["views"],
+        "well_connected_resolutions": save_well_connected_json["n_resolutions"],
         "extra_views": save_views_manifest["extra"],
     }
     logger.info("assembled website: %s", manifest)

@@ -164,6 +164,12 @@ const state = {
   // into the graph and every centroid read from the data, see orient().
   orientation: { angle: 0, flipX: false, flipY: false }, // angle in degrees
 
+  // The Connectivity Modifier's verdict per resolution (well_connected.json):
+  // { n, resolutions: { "<r>": base64 bitset } }, decoded lazily into masks.
+  wellConnected: null,
+  wellConnectedMasks: {},
+  wellConnectedOnly: true, // the "Papers" control
+
   // floating-label bookkeeping for the currently-active grouping
   labelMode: "dynamic", // dynamic | always
   activeLabelEls: {},
@@ -225,6 +231,7 @@ async function main() {
   initControls();
   initOrientationControls();
   initExportControls();
+  initWellConnectedControl();
   initTabs();
   initGlobalFilters();
   initYearControls();
@@ -274,6 +281,15 @@ async function loadDataset(name) {
   cfg.groupings.forEach((g) => { state.muted[g.key] = new Set(); });
   fileGroupings.forEach((g, i) => { state.groupData[g.key] = groupingPayloads[i]; });
   state.colorBy = cfg.groupings[0].key;
+
+  state.wellConnected = null;
+  state.wellConnectedMasks = {};
+  try {
+    const response = await fetch(`${cfg.dir}/well_connected.json`);
+    state.wellConnected = response.ok ? await response.json() : null;
+  } catch {
+    state.wellConnected = null;
+  }
 
   // Reset transient view state and the abstracts cache (per-dataset).
   state.selectedNode = null;
@@ -460,6 +476,7 @@ function computeSnapshotGroupStats() {
     sums[g.key] = {};
   }
   for (const idxStr of snapshot.visible) {
+    if (removedByModifier(parseInt(idxStr, 10))) continue;
     const r = nodes[parseInt(idxStr, 10)];
     const c = snapshot.coords[r.id];
     for (const g of activeGroupings()) {
@@ -842,7 +859,9 @@ async function setupResolutionMetrics(cfg) {
   // community_color: build_website.py already baked those at this same
   // default resolution). applyCommunityResolution() handles later switches.
   state.communityResolution = defaultRes;
-  state.groupData.community = commByRes.by_resolution[defaultRes];
+  state.groupData.community = communityLegend(defaultRes);
+  updateWellConnectedRow();
+  refreshResolutionOptions();
   // Switching views keeps the resolution the user picked, when this view has it.
   if (state.chosenResolution && state.chosenResolution !== defaultRes && commByRes.by_resolution[state.chosenResolution]) {
     applyCommunityResolution(state.chosenResolution);
@@ -855,13 +874,90 @@ async function setupResolutionMetrics(cfg) {
   renderKeywordsSection();
 }
 
+// ── Well-connected papers (Connectivity Modifier) ──────────────────────────
+// At each resolution the Connectivity Modifier keeps the papers that sit in a
+// well-connected community; the "Well-connected papers only" control hides the
+// rest. Resolutions the Modifier skipped have no mask, and every paper shows.
+function wellConnectedMask(resolution) {
+  const wc = state.wellConnected;
+  if (!wc || resolution == null || !wc.resolutions[resolution]) return null;
+  if (!state.wellConnectedMasks[resolution]) {
+    const bytes = Uint8Array.from(atob(wc.resolutions[resolution]), (c) => c.charCodeAt(0));
+    const mask = new Uint8Array(wc.n);
+    for (let i = 0; i < wc.n; i++) mask[i] = (bytes[i >> 3] >> (i & 7)) & 1;
+    state.wellConnectedMasks[resolution] = mask;
+  }
+  return state.wellConnectedMasks[resolution];
+}
+
+function activeWellConnectedMask() {
+  return state.wellConnectedOnly ? wellConnectedMask(state.communityResolution) : null;
+}
+
+// True when the filter hides this paper (index i) at the current resolution.
+function removedByModifier(i) {
+  const mask = activeWellConnectedMask();
+  return mask !== null && !mask[i];
+}
+
+// The community legend at a resolution: with the filter on, only communities
+// that keep well-connected papers, sized by them.
+function communityLegend(resolution) {
+  const legend = state.communitiesByResolution?.by_resolution[resolution];
+  if (!legend || !state.wellConnectedOnly || !wellConnectedMask(resolution)) return legend;
+  const kept = {};
+  for (const [cid, entry] of Object.entries(legend)) {
+    const size = entry.well_connected_size;
+    if (size == null || size > 0) kept[cid] = size == null ? entry : { ...entry, size, all_papers: entry.size };
+  }
+  return kept;
+}
+
+function updateWellConnectedRow() {
+  const row = document.getElementById("well-connected-row");
+  if (!row) return;
+  row.hidden = !state.wellConnected;
+  const note = document.getElementById("well-connected-note");
+  if (!state.wellConnected || !note) return;
+  const mask = wellConnectedMask(state.communityResolution);
+  if (!mask) {
+    note.textContent = "No Connectivity Modifier result at this resolution: all papers shown.";
+    return;
+  }
+  let kept = 0;
+  for (let i = 0; i < mask.length; i++) kept += mask[i];
+  note.textContent = state.wellConnectedOnly
+    ? `${kept.toLocaleString()} of ${mask.length.toLocaleString()} papers are in well-connected communities.`
+    : `Showing all papers; ${(mask.length - kept).toLocaleString()} are outside well-connected communities.`;
+}
+
+function refreshResolutionOptions() {
+  const sel = document.getElementById("community-resolution");
+  if (!sel || !state.communitiesByResolution) return;
+  for (const option of sel.options) {
+    const legend = communityLegend(option.value) || {};
+    option.textContent = `${option.value} (${Object.keys(legend).length.toLocaleString()} communities)`;
+  }
+}
+
+function initWellConnectedControl() {
+  const box = document.getElementById("well-connected-only");
+  if (!box) return;
+  box.checked = state.wellConnectedOnly;
+  box.addEventListener("change", (e) => {
+    state.wellConnectedOnly = e.target.checked;
+    if (state.communityResolution != null) applyCommunityResolution(state.communityResolution);
+  });
+}
+
 // Switch which resolution's Leiden/CPM communities colour the map: recomputes
 // every node's `community`/`community_color`, swaps the legend data, and
 // (unless called during initial setup) refreshes the map + open panels.
 function applyCommunityResolution(resolution) {
   const commByRes = state.communitiesByResolution;
-  const legend = commByRes && commByRes.by_resolution[resolution];
-  if (!legend) return;
+  if (!(commByRes && commByRes.by_resolution[resolution])) return;
+  state.communityResolution = resolution;
+  const legend = communityLegend(resolution);
 
   state.communityResolution = resolution;
   state.chosenResolution = resolution;
@@ -874,6 +970,8 @@ function applyCommunityResolution(resolution) {
   state.groupData.community = legend;
   state.muted.community = new Set();
   computeSnapshotGroupStats();
+  updateWellConnectedRow();
+  refreshResolutionOptions();
 
   const sel = document.getElementById("community-resolution");
   if (sel && sel.value !== resolution) sel.value = resolution;
@@ -1036,6 +1134,10 @@ function nodeReducer(node, attrs) {
   }
   // Two independent, stacking mutes (named groups + the ungrouped bucket).
   if (nodeHiddenByMute(r)) {
+    a.hidden = true;
+    return a;
+  }
+  if (removedByModifier(parseInt(node, 10))) {
     a.hidden = true;
     return a;
   }
@@ -2291,7 +2393,7 @@ async function applyGlobalFilters() {
     const r = nodes[i];
     if (state.snapshot && !state.snapshot.visible.has(String(i))) continue;
     if (r.year != null && (r.year < lo || r.year > hi)) continue;
-    if (nodeHiddenByMute(r)) continue;
+    if (nodeHiddenByMute(r) || removedByModifier(i)) continue;
     if (qTitle && !idx.title[i].includes(qTitle)) continue;
     if (qJournal && !idx.journal[i].includes(qJournal)) continue;
     if (authorQs.length && !matchesAll(idx.authors[i], authorQs)) continue;
@@ -2327,7 +2429,7 @@ function updateSelectedCount() {
       const r = nodes[i];
       if (state.snapshot && !state.snapshot.visible.has(String(i))) continue;
       if (r.year != null && (r.year < state.yearMin || r.year > state.yearMax)) continue;
-      if (nodeHiddenByMute(r)) continue;
+      if (nodeHiddenByMute(r) || removedByModifier(i)) continue;
       c++;
     }
     el.textContent = `Nodes selected: ${c.toLocaleString()}`;

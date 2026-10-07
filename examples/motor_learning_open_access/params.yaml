@@ -145,6 +145,9 @@ website:
   after_cm_partition_metrics: data/analysis/community_quality_metrics_after_connectivity_modifier/community_quality_metrics_after_cm_per_partition.parquet
   connectivity_diagnostic_partition: data/analysis/community_connectivity_metrics/community_connectivity_metrics_per_partition.parquet
   connectivity_modifier_partition: data/analysis/community_connectivity_modifier/connectivity_modifier_per_partition.parquet
+  # Per-paper Connectivity Modifier result: lets the map show only the papers in
+  # well-connected communities at each resolution (its "Papers" control).
+  connectivity_modifier_membership: data/analysis/community_connectivity_modifier/connectivity_modifier_membership.parquet
   community_keyword_scores: data/analysis/community_keywords/community_keyword_scores.parquet
   # Word clouds under this directory are discovered and shown in the Figures tab.
   wordclouds_dir: data/wordclouds

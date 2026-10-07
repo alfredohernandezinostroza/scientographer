@@ -1171,3 +1171,13 @@ table.health-table tr.active td { color: var(--text); background: rgba(78, 161, 
   opacity: 0.6;
   cursor: progress;
 }
+
+/* ── Well-connected papers (Connectivity Modifier) filter ────────────── */
+#well-connected-row {
+  flex-wrap: wrap;
+}
+.well-connected-note {
+  flex-basis: 100%;
+  font-size: 11px;
+  color: var(--text-dim);
+}
