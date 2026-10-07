@@ -189,6 +189,7 @@ async function main() {
   initShiftTracking();
   initControls();
   initOrientationControls();
+  initExportControls();
   initTabs();
   initGlobalFilters();
   initYearControls();
@@ -472,6 +473,203 @@ function orient(x, y) {
 // positions, or the base layout).
 function applyOrientation() {
   applySnapshot(state.snapshot ? state.snapshot.cutoff : "all");
+}
+
+// ── Export the map as a high-resolution PNG ─────────────────────────────────
+// Redraws what the map shows (nodes that pass the current filters, year range,
+// hidden communities and time snapshot, in their current colours) onto an
+// offscreen canvas at the chosen size, with optional citation edges (straight,
+// or curved like Gephi's) and the labels of the communities that have visible
+// papers. "Current view" exports the visible window; "Whole map" every visible
+// node, framed to fit.
+const EXPORT_FONT = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+const EXPORT_EDGE_ALPHA = 0.16;
+const EXPORT_CURVATURE = 0.25; // control-point offset as a fraction of edge length
+
+function initExportControls() {
+  const button = document.getElementById("export-png");
+  if (!button) return;
+  button.addEventListener("click", async () => {
+    const label = button.textContent;
+    button.disabled = true;
+    button.textContent = "Exporting…";
+    // Let the button repaint before the (synchronous) drawing starts.
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    try {
+      await exportMapPng({
+        area: document.getElementById("export-area").value,
+        longSide: parseInt(document.getElementById("export-size").value, 10),
+        edges: document.getElementById("export-edges").value,
+        nodeScale: parseFloat(document.getElementById("export-nodes").value),
+        labels: document.getElementById("export-labels").checked,
+      });
+    } catch (err) {
+      console.error(err);
+      alert(`Export failed: ${err.message}`);
+    } finally {
+      button.disabled = false;
+      button.textContent = label;
+    }
+  });
+}
+
+// Every node as the map currently draws it: viewport position, on-screen radius
+// and colour, or null when it is hidden.
+function visibleNodeDrawData() {
+  const renderer = state.renderer;
+  const out = new Array(state.graph.order).fill(null);
+  state.graph.forEachNode((node, attrs) => {
+    const shown = nodeReducer(node, attrs);
+    if (shown.hidden) return;
+    const pt = renderer.graphToViewport({ x: attrs.x, y: attrs.y });
+    out[parseInt(node, 10)] = {
+      x: pt.x,
+      y: pt.y,
+      r: renderer.scaleSize(shown.size),
+      color: shown.color,
+      z: shown.zIndex || 0,
+    };
+  });
+  return out;
+}
+
+async function exportMapPng({ area, longSide, edges, nodeScale, labels }) {
+  const nodes = visibleNodeDrawData();
+  const { width: viewWidth, height: viewHeight } = state.renderer.getDimensions();
+
+  // The exported region, in viewport pixels.
+  let x0 = 0, y0 = 0, x1 = viewWidth, y1 = viewHeight;
+  if (area === "all") {
+    x0 = Infinity; y0 = Infinity; x1 = -Infinity; y1 = -Infinity;
+    for (const n of nodes) {
+      if (!n) continue;
+      x0 = Math.min(x0, n.x - n.r); y0 = Math.min(y0, n.y - n.r);
+      x1 = Math.max(x1, n.x + n.r); y1 = Math.max(y1, n.y + n.r);
+    }
+    if (!isFinite(x0)) throw new Error("no visible papers to export");
+    const pad = 0.03 * Math.max(x1 - x0, y1 - y0);
+    x0 -= pad; y0 -= pad; x1 += pad; y1 += pad;
+  }
+  const inRegion = (n) => n && n.x + n.r >= x0 && n.x - n.r <= x1 && n.y + n.r >= y0 && n.y - n.r <= y1;
+  const scale = longSide / Math.max(x1 - x0, y1 - y0);
+  // Sizes (radius, line width, font) are kept in proportion to the screen when
+  // exporting the current view; for the whole map they follow the same scale but
+  // never shrink below what reads at the exported size.
+  const sizeScale = area === "all" ? Math.max(scale, longSide / Math.max(viewWidth, viewHeight)) : scale;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round((x1 - x0) * scale);
+  canvas.height = Math.round((y1 - y0) * scale);
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error(`the browser could not allocate a ${canvas.width}×${canvas.height} canvas`);
+  const px = (n) => [(n.x - x0) * scale, (n.y - y0) * scale];
+
+  ctx.fillStyle = getComputedStyle(document.body).backgroundColor || "#0e1116";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Edges: citations between two visible papers with at least one end in the
+  // region, coloured by the citing paper, one path per colour.
+  if (edges !== "none" && state.outCSR) {
+    const byColor = new Map();
+    for (let i = 0; i < state.outCSR.n; i++) {
+      const source = nodes[i];
+      if (!source) continue;
+      for (const t of csrNeighbors(state.outCSR, i)) {
+        const target = nodes[t];
+        if (!target || (!inRegion(source) && !inRegion(target))) continue;
+        if (!byColor.has(source.color)) byColor.set(source.color, []);
+        byColor.get(source.color).push(i, t);
+      }
+    }
+    ctx.globalAlpha = EXPORT_EDGE_ALPHA;
+    ctx.lineWidth = Math.max(0.5, 0.35 * sizeScale);
+    for (const [color, pairs] of byColor) {
+      ctx.strokeStyle = color;
+      ctx.beginPath();
+      for (let k = 0; k < pairs.length; k += 2) {
+        const [sx, sy] = px(nodes[pairs[k]]);
+        const [tx, ty] = px(nodes[pairs[k + 1]]);
+        ctx.moveTo(sx, sy);
+        if (edges === "curved") {
+          // Gephi-style arc: bend to the same side of every source→target line.
+          const mx = (sx + tx) / 2, my = (sy + ty) / 2;
+          ctx.quadraticCurveTo(mx + (ty - sy) * EXPORT_CURVATURE, my - (tx - sx) * EXPORT_CURVATURE, tx, ty);
+        } else {
+          ctx.lineTo(tx, ty);
+        }
+      }
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // Nodes (nodeScale 0 = edges only), raised ones (selected / highlighted) last.
+  const order = [];
+  for (let i = 0; i < nodes.length; i++) if (inRegion(nodes[i])) order.push(i);
+  order.sort((a, b) => nodes[a].z - nodes[b].z);
+  if (nodeScale > 0) {
+    for (const i of order) {
+      const n = nodes[i];
+      const [x, y] = px(n);
+      ctx.fillStyle = n.color;
+      ctx.beginPath();
+      ctx.arc(x, y, Math.max(0.6, n.r * sizeScale * nodeScale), 0, 2 * Math.PI);
+      ctx.fill();
+    }
+  }
+
+  // Labels of the active grouping's communities with visible papers in the
+  // region, at the centre of those papers, largest first, never overlapping.
+  const g = labels ? grouping(state.colorBy) : null;
+  if (g) {
+    const sums = new Map();
+    for (const i of order) {
+      const gid = String(state.nodesData.nodes[i][g.nodeField]);
+      if (!g.data[gid]) continue;
+      const [x, y] = px(nodes[i]);
+      const a = sums.get(gid) || { x: 0, y: 0, n: 0 };
+      a.x += x; a.y += y; a.n += 1;
+      sums.set(gid, a);
+    }
+    const fontSize = 13 * sizeScale;
+    ctx.font = `600 ${fontSize}px ${EXPORT_FONT}`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.lineJoin = "round"; // a mitred halo spikes on letters such as M
+    ctx.miterLimit = 2;
+    const placed = [];
+    const gap = 3 * sizeScale;
+    const groupIds = [...sums.keys()].sort((a, b) => g.data[b].size - g.data[a].size);
+    for (const gid of groupIds) {
+      const { x, y, n } = sums.get(gid);
+      const text = g.data[gid].name;
+      const w = ctx.measureText(text).width;
+      // Keep the whole label inside the image.
+      const margin = gap + 3 * sizeScale;
+      const cx = Math.min(Math.max(x / n, w / 2 + margin), canvas.width - w / 2 - margin);
+      const cy = Math.min(Math.max(y / n, fontSize / 2 + margin), canvas.height - fontSize / 2 - margin);
+      const box = { l: cx - w / 2 - gap, r: cx + w / 2 + gap, t: cy - fontSize / 2 - gap, b: cy + fontSize / 2 + gap };
+      if (placed.some((o) => box.l < o.r && box.r > o.l && box.t < o.b && box.b > o.t)) continue;
+      placed.push(box);
+      ctx.lineWidth = 3 * sizeScale; // dark halo keeps text readable over edges
+      ctx.strokeStyle = "rgba(0,0,0,0.75)";
+      ctx.strokeText(text, cx, cy);
+      ctx.fillStyle = g.data[gid].color || "#e6e9ef";
+      ctx.fillText(text, cx, cy);
+    }
+  }
+
+  const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+  if (!blob) throw new Error("the browser could not encode the PNG (try a smaller size)");
+  const resolution = state.colorBy === "community" && state.communityResolution != null
+    ? `-resolution-${state.communityResolution}` : "";
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = `citation-map${resolution}-${canvas.width}x${canvas.height}.png`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(link.href), 10000);
 }
 
 function initOrientationControls() {

@@ -6,7 +6,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{SITE_TITLE}}</title>
-  <link rel="stylesheet" href="styles.css?v=2">
+  <link rel="stylesheet" href="styles.css?v=4">
 
   <!-- Tabulator -->
   <link href="https://unpkg.com/tabulator-tables@6.3.1/dist/css/tabulator.min.css" rel="stylesheet">
@@ -235,6 +235,35 @@
       </div>
     </div>
 
+    <div class="control-row export-row">
+      <label>Export image</label>
+      <div class="export-options">
+        <select id="export-area" aria-label="Area to export">
+          <option value="view">View</option>
+          <option value="all">Whole map</option>
+        </select>
+        <select id="export-size" aria-label="Image size (long side)">
+          <option value="4000">4,000 px</option>
+          <option value="8000" selected>8,000 px</option>
+          <option value="12000">12,000 px</option>
+        </select>
+        <select id="export-edges" aria-label="Citation edges">
+          <option value="none">No edges</option>
+          <option value="straight">Straight edges</option>
+          <option value="curved">Curved edges</option>
+        </select>
+      </div>
+      <div class="export-actions">
+        <select id="export-nodes" aria-label="Node size">
+          <option value="1">Nodes</option>
+          <option value="0.35">Small nodes</option>
+          <option value="0">No nodes</option>
+        </select>
+        <label class="export-check"><input id="export-labels" type="checkbox" checked> Labels</label>
+        <button id="export-png" type="button">Export PNG</button>
+      </div>
+    </div>
+
     <div class="control-row">
       <label>Labels</label>
       <select id="label-mode">
@@ -310,7 +339,7 @@
   <script src="https://unpkg.com/tabulator-tables@6.3.1/dist/js/tabulator.min.js"></script>
 
   <!-- App -->
-  <script type="module" src="main.js?v=22"></script>
+  <script type="module" src="main.js?v=24"></script>
   <!-- Guided tour (independent of main.js; only reads the DOM) -->
   <script type="module" src="tour.js?v=1"></script>
 </body>
