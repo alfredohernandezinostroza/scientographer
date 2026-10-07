@@ -143,8 +143,7 @@ const STEPS = [
     title: "Also try the topic view",
     body:
       "You're on the <strong>citation-graph</strong> layout. Also try a " +
-      "<strong>topic view</strong> (<strong>Gemini</strong> or " +
-      "<strong>Specter</strong>) from the <strong>Dataset</strong> menu: papers are " +
+      "<strong>topic view</strong> from the <strong>View</strong> menu: papers are " +
       "placed by <strong>text content</strong> and grouped into topics, with extra " +
       "topic tools like clickable topic labels.",
   },
@@ -203,11 +202,12 @@ function isUsable(el) {
   return r.width > 0 && r.height > 0;
 }
 
-// "citation" = the ForceAtlas citation-graph layout; "topic" = the
-// text-embedding layouts (Gemini / Specter).
+// "citation" = the first view (the citation-graph layout); "topic" = any other
+// view (text-embedding layouts such as Gemini or SPECTER2).
 function currentView() {
-  const d = document.getElementById("dataset-select")?.value;
-  return d === "gemini" || d === "specter" ? "topic" : "citation";
+  const sel = document.getElementById("dataset-select");
+  if (!sel || !sel.options.length) return "citation";
+  return sel.selectedIndex > 0 ? "topic" : "citation";
 }
 
 function stepIsAvailable(step) {

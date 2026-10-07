@@ -161,6 +161,17 @@ website:
   output_dir: reports/website
   default_resolution: 0.005
   min_named_group_size: 30
+  # Name of the citation-layout view in the site's View menu.
+  view_label: Citation network
+  # Extra views of the same papers on other 2-D layouts, e.g. text-embedding maps
+  # (UMAP of SPECTER2 or Gemini embeddings). Each needs `key`, `label` and a
+  # `positions` table (Parquet/CSV/TSV) with `doi`, `x`, `y`, optionally `topic`
+  # (integer, -1 = none) and `topic_name`; optional `subtitle`, `topic_label`
+  # ("Topic", "Cluster", ...) and `snapshots` (JSON: {"cutoffs": [1990, ...],
+  # "snapshots": {"1990": {"<doi>": [x, y], ...}}} for the Time menu). Every view
+  # is coloured by the same communities; papers absent from a layout are left
+  # out of that view only.
+  extra_layouts: []
 
 tracker:
   # Hamilton UI tracker: run-level provenance (every node, input and output) in a

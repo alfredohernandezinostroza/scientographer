@@ -252,3 +252,83 @@ def test_figure_entries_skip_missing_and_deduplicate_names(tmp_path):
     entries = figure_entries(manifest, tmp_path / "graph.graphml")
     assert [e["file"] for e in entries] == ["cloud.svg", "b__cloud.svg"]
     assert entries[0]["title"] == "cloud"
+
+
+# ── extra layouts (views) ─────────────────────────────────────────────────────
+def test_extra_view_places_shared_papers_recomputes_communities_and_converts_snapshots(tmp_path):
+    import json
+
+    from scientographer.build_website import _extra_view, save_extra_views, save_views_manifest
+
+    big = [_mk_node(f"b{i}", topic=3, community=5, **{"top_keywords_at_res=0.005": "Cerebellum"})
+           for i in range(MIN_NAMED_GROUP_SIZE)]
+    other = [_mk_node(f"o{i}", topic=3, community=7) for i in range(MIN_NAMED_GROUP_SIZE)]
+    recs = node_records(big + other, resolutions=[RES, 0.01], community_resolution=RES)
+    last_o = 2 * MIN_NAMED_GROUP_SIZE - 1  # an `o` paper missing from the layout below
+    edges = [(0, 1), (1, MIN_NAMED_GROUP_SIZE), (MIN_NAMED_GROUP_SIZE, MIN_NAMED_GROUP_SIZE + 1),
+             (MIN_NAMED_GROUP_SIZE, last_o)]
+    labels = community_labels_from_graph(big + other, [RES, 0.01])
+
+    # The layout has every `b` paper and only half of the `o` papers (plus one
+    # paper outside the graph), with topics and their names.
+    half = MIN_NAMED_GROUP_SIZE // 2
+    rows = [{"doi": f"DOI{'b'}{i}", "x": i, "y": -i, "topic": 0, "topic_name": "Motor control"}
+            for i in range(MIN_NAMED_GROUP_SIZE)]
+    rows += [{"doi": f"doio{i}", "x": 100 + i, "y": 0, "topic": 1, "topic_name": "Rehab"} for i in range(half)]
+    rows += [{"doi": "not-in-graph", "x": 0, "y": 0, "topic": 1, "topic_name": "Rehab"}]
+    positions = tmp_path / "layout.csv"
+    pd.DataFrame(rows).to_csv(positions, index=False)
+    snapshots = tmp_path / "snapshots.json"
+    snapshots.write_text(json.dumps({"cutoffs": [1990], "snapshots": {"1990": {"doib0": [1, 2], "gone": [0, 0]}}}))
+
+    spec = {"key": "gemini", "label": "Gemini", "positions": str(positions), "topic_label": "Cluster",
+            "snapshots": str(snapshots)}
+    view = _extra_view(spec, recs, edges, {}, labels, [RES, 0.01], RES)
+
+    assert len(view["records"]) == MIN_NAMED_GROUP_SIZE + half  # DOIs matched case-insensitively
+    by_id = {r["id"]: r for r in view["records"]}
+    assert by_id["b3"]["x"] == 3.0 and by_id["b3"]["y"] == -3.0
+    assert by_id["b3"]["cluster"] == 0 and by_id["o0"]["cluster"] == 1
+    assert by_id["b3"]["communities"] == recs[3]["communities"]  # communities come from the graph
+    assert {c["name"] for c in view["clusters"].values()} == {"Motor control", "Rehab"}
+    # Community 5 stays named; community 7 has only `half` papers here, below the
+    # naming threshold, so it is unnamed and greyed in this view.
+    assert set(view["communities"][str(RES)]) == {"5"}
+    assert view["communities"][str(RES)]["5"]["name"] == "Cerebellum"
+    assert by_id["o0"]["community_color"] == OUTLIER_COLOR
+    # Citations among the view's papers only, re-indexed (o0 -> o1 stays: both are
+    # in the layout).
+    assert view["edges"] == [(0, 1), (1, MIN_NAMED_GROUP_SIZE), (MIN_NAMED_GROUP_SIZE, MIN_NAMED_GROUP_SIZE + 1)]
+    assert view["snapshots"] == {"cutoffs": [1990], "snapshots": {"1990": {"coords": {"b0": [1.0, 2.0]}}}}
+
+    written = save_extra_views([view], RES, tmp_path / "site")
+    assert written["gemini"]["dir"] == "gemini_data" and written["gemini"]["snapshots"] == 1
+    for name in ["nodes.json", "edges_out.bin", "edges_in.bin", "clusters.json",
+                 "communities_by_resolution.json", "snapshots.json"]:
+        assert (tmp_path / "site" / "gemini_data" / name).exists(), name
+    manifest = save_views_manifest(written, [view], "Citation network", tmp_path / "site")
+    views = json.loads((tmp_path / "site" / "views.json").read_text())
+    assert manifest["views"] == ["network", "gemini"]
+    assert views["shared_dir"] == "network_data" and views["views"][1]["snapshots"] is True
+    assert views["views"][1]["groupings"][1]["label"] == "Cluster"
+
+
+def test_no_extra_layouts_means_no_views_manifest(tmp_path):
+    from scientographer.build_website import save_views_manifest
+
+    (tmp_path / "views.json").write_text("stale")
+    assert save_views_manifest({}, [], "Citation network", tmp_path)["views"] == ["network"]
+    assert not (tmp_path / "views.json").exists()
+
+
+def test_extra_layout_key_and_columns_are_checked(tmp_path):
+    import pytest
+
+    from scientographer.build_website import _extra_view
+
+    table = tmp_path / "t.csv"
+    pd.DataFrame({"doi": ["a"], "x": [1]}).to_csv(table, index=False)
+    with pytest.raises(ValueError, match="lacks column"):
+        _extra_view({"key": "ok", "positions": str(table)}, [], [], {}, {}, [], None)
+    with pytest.raises(ValueError, match="key"):
+        _extra_view({"key": "network", "positions": str(table)}, [], [], {}, {}, [], None)

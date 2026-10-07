@@ -114,6 +114,11 @@ OUTLIER_COLOR: Final[str] = "#cccccc"
 ASSETS_DIR: Final[Path] = Path(__file__).resolve().parent / "website_assets"
 FRONTEND_FILES: Final[tuple[str, ...]] = ("index.html", "main.js", "styles.css", "tour.js")
 DATA_SUBDIR: Final[str] = "network_data"
+# Extra views of the same papers on other 2-D layouts (e.g. text-embedding maps);
+# each becomes `<key>_data/` next to network_data/ and an entry in views.json.
+EXTRA_LAYOUTS: Final[list[dict]] = list(_cfg.get("extra_layouts") or [])
+BASE_VIEW_LABEL: Final[str] = str(_cfg.get("view_label") or "Citation network")
+VIEW_KEY_PATTERN: Final[re.Pattern] = re.compile(r"^[a-z][a-z0-9_]*$")
 FIGURES_SUBDIR: Final[str] = "figures"
 WORDCLOUDS_DIR: Final[Path] = Path(_cfg["wordclouds_dir"])
 
@@ -137,6 +142,8 @@ DEFAULT_INPUTS: Final[dict] = dict(
     default_resolution=DEFAULT_COMMUNITY_RESOLUTION,
     website_dir=Path(_cfg["output_dir"]),
     site_title=str(_cfg.get("title") or "Citation map"),
+    extra_layouts=EXTRA_LAYOUTS,
+    base_view_label=BASE_VIEW_LABEL,
 )
 
 
@@ -330,6 +337,110 @@ def _label_from_keywords(top_keywords: list[dict], fallback: str) -> str:
 def _resolution_communities(a: dict, resolutions: list[float]) -> dict[str, int]:
     """This paper's community id at every resolution the graph carries."""
     return {str(r): _to_int(a.get(f"{COMMUNITY_ATTRIBUTE_PREFIX}{r}"), OUTLIER) for r in resolutions}
+
+
+def _read_table(path: Path) -> pd.DataFrame:
+    """A Parquet, CSV or TSV table, by file extension."""
+    path = Path(path)
+    if path.suffix == ".parquet":
+        return pd.read_parquet(path)
+    return pd.read_csv(path, sep="\t" if path.suffix in (".tsv", ".tab") else ",")
+
+
+def _view_groupings(topic_label: str) -> list[dict]:
+    """The frontend's grouping config for a view: the resolution-indexed citation
+    communities, then the layout's own topics/clusters (if any)."""
+    return [
+        {"key": "community", "label": "Community", "legendLabel": "Communities", "nodeField": "community",
+         "colorField": "community_color", "noneLabel": "No community", "citation": True},
+        {"key": "cluster", "label": topic_label, "legendLabel": f"{topic_label}s", "file": "clusters.json",
+         "nodeField": "cluster", "colorField": "color", "noneLabel": f"No {topic_label.lower()}",
+         "semantic": True},
+    ]
+
+
+def _extra_view(
+    spec: dict,
+    node_records: list[dict],
+    edges: list,
+    community_quality_lookup: dict,
+    community_labels_from_graph: dict,
+    resolutions: list[float],
+    community_resolution: Optional[float],
+) -> dict:
+    """One extra view: the papers of `spec["positions"]` (a table with `doi`, `x`,
+    `y`, optionally `topic` (integer, -1 = none) and `topic_name`) placed on that
+    layout, with the citation communities of every resolution recomputed for
+    those papers, the citations among them, and optional time snapshots
+    (`spec["snapshots"]`: {"cutoffs": [...], "snapshots": {"<year>": {"<doi>": [x, y]}}}).
+    Papers of the layout that are not in the citation graph are left out."""
+    key = str(spec["key"])
+    if not VIEW_KEY_PATTERN.match(key) or key == DATA_SUBDIR.removesuffix("_data"):
+        raise ValueError(f"extra layout key {key!r}: use lower-case letters, digits and _ (not 'network')")
+    table = _read_table(Path(spec["positions"]))
+    missing = {"doi", "x", "y"} - set(table.columns)
+    if missing:
+        raise ValueError(f"extra layout {key!r}: {spec['positions']} lacks column(s) {sorted(missing)}")
+    table = table.assign(doi=table["doi"].astype(str).str.strip().str.lower()).drop_duplicates("doi")
+    by_doi = table.set_index("doi")
+    has_topics = "topic" in table.columns
+
+    keep = [i for i, r in enumerate(node_records) if r["doi"].lower() in by_doi.index]
+    new_index = {old: new for new, old in enumerate(keep)}
+    records = []
+    for i in keep:
+        row = by_doi.loc[node_records[i]["doi"].lower()]
+        topic = _to_int(row["topic"], OUTLIER) if has_topics and pd.notna(row["topic"]) else OUTLIER
+        records.append({
+            **node_records[i],
+            "x": round(float(row["x"]), 3),
+            "y": round(float(row["y"]), 3),
+            "cluster": topic,
+            "color": _cluster_color(topic),
+        })
+    logger.info("extra layout %s: %d of %d papers of %s are in the citation graph", key, len(records),
+                len(table), spec["positions"])
+
+    clusters = clusters_legend(records, {})
+    if has_topics and "topic_name" in table.columns:
+        names = table.dropna(subset=["topic_name"]).groupby("topic")["topic_name"].agg(lambda v: v.mode().iat[0])
+        for cid, name in names.items():
+            entry = clusters.get(str(_to_int(cid, OUTLIER)))
+            if entry is not None and str(name).strip():
+                entry["name"] = str(name).strip()
+
+    communities = communities_legend_by_resolution(
+        records, community_quality_lookup, community_labels_from_graph, resolutions)
+    # The baked community colours follow this view's legend (a community can be
+    # named on the full graph but fall below MIN_NAMED_GROUP_SIZE here).
+    named_here = communities.get(str(community_resolution), {})
+    for r in records:
+        r["community_color"] = (named_here[str(r["community"])]["color"]
+                                if str(r["community"]) in named_here else OUTLIER_COLOR)
+
+    view_edges = [(new_index[s], new_index[t]) for s, t in edges if s in new_index and t in new_index]
+
+    snapshots = None
+    if spec.get("snapshots"):
+        with open(spec["snapshots"], "r", encoding="utf-8") as f:
+            raw = json.load(f)
+        id_by_doi = {r["doi"].lower(): r["id"] for r in records}
+        snapshots = {"cutoffs": list(raw["cutoffs"]), "snapshots": {}}
+        for cutoff, coords in raw["snapshots"].items():
+            snapshots["snapshots"][str(cutoff)] = {"coords": {
+                id_by_doi[doi.strip().lower()]: [round(float(x), 3), round(float(y), 3)]
+                for doi, (x, y) in coords.items() if doi.strip().lower() in id_by_doi}}
+    return {
+        "key": key,
+        "label": str(spec.get("label") or key),
+        "subtitle": str(spec.get("subtitle") or ""),
+        "topic_label": str(spec.get("topic_label") or "Topic"),
+        "records": records,
+        "edges": view_edges,
+        "clusters": clusters,
+        "communities": communities,
+        "snapshots": snapshots,
+    }
 
 
 def _optional_parquet(path) -> Optional[pd.DataFrame]:
@@ -758,6 +869,23 @@ def figure_entries(figure_manifest: list, graphml_path: Path) -> list[dict]:
     return entries
 
 
+def extra_views(
+    extra_layouts: list,
+    node_records: list[dict],
+    edges: list,
+    community_quality_lookup: dict,
+    community_labels_from_graph: dict,
+    resolutions: list[float],
+    community_resolution: Optional[float],
+) -> list[dict]:
+    """Every extra layout of params.yaml `website.extra_layouts`, as a view."""
+    return [
+        _extra_view(spec, node_records, edges, community_quality_lookup, community_labels_from_graph,
+                    resolutions, community_resolution)
+        for spec in extra_layouts
+    ]
+
+
 def _data_dir(website_dir: Path) -> Path:
     d = Path(website_dir) / DATA_SUBDIR
     d.mkdir(parents=True, exist_ok=True)
@@ -895,6 +1023,50 @@ def save_edges_bins(node_records: list[dict], edges: list, website_dir: Path) ->
     return {"path": str(d), "n_edges": len(edges)}
 
 
+@datasaver()
+def save_extra_views(extra_views: list[dict], community_resolution: Optional[float], website_dir: Path) -> dict:
+    """Each extra view's own bundle in `<key>_data/`: nodes, citations among them,
+    its topics, the communities of every resolution, and time snapshots."""
+    written = {}
+    for view in extra_views:
+        d = Path(website_dir) / f"{view['key']}_data"
+        d.mkdir(parents=True, exist_ok=True)
+        years = [r["year"] for r in view["records"] if r["year"] is not None]
+        _write_json(d / "nodes.json", {"year_min": min(years) if years else None,
+                                       "year_max": max(years) if years else None,
+                                       "nodes": view["records"]})
+        n = len(view["records"])
+        _write_csr(d / "edges_out.bin", *_build_csr(n, view["edges"], "out"))
+        _write_csr(d / "edges_in.bin", *_build_csr(n, view["edges"], "in"))
+        _write_json(d / "clusters.json", view["clusters"])
+        _write_optional_json(d / "communities_by_resolution.json",
+                             {"default_resolution": str(community_resolution), "by_resolution": view["communities"]},
+                             bool(view["communities"]))
+        _write_optional_json(d / "snapshots.json", view["snapshots"], view["snapshots"] is not None)
+        written[view["key"]] = {"dir": d.name, "nodes": n, "edges": len(view["edges"]),
+                                "topics": len(view["clusters"]),
+                                "snapshots": len(view["snapshots"]["cutoffs"]) if view["snapshots"] else 0}
+    return written
+
+
+@datasaver()
+def save_views_manifest(
+    save_extra_views: dict, extra_views: list[dict], base_view_label: str, website_dir: Path
+) -> dict:
+    """views.json, the list of views the site offers, when there is more than the
+    citation layout (otherwise any stale copy is removed)."""
+    views = [{"key": "network", "label": base_view_label, "dir": DATA_SUBDIR,
+              "subtitle": "Citation-network layout", "snapshots": False,
+              "groupings": _view_groupings("Topic")}]
+    for view in extra_views:
+        views.append({"key": view["key"], "label": view["label"], "dir": save_extra_views[view["key"]]["dir"],
+                      "subtitle": view["subtitle"], "snapshots": view["snapshots"] is not None,
+                      "groupings": _view_groupings(view["topic_label"])})
+    path = Path(website_dir) / "views.json"
+    _write_optional_json(path, {"default": "network", "shared_dir": DATA_SUBDIR, "views": views}, len(views) > 1)
+    return {"views": [v["key"] for v in views], "extra": save_extra_views}
+
+
 def assembled_website(
     save_nodes_json: dict,
     save_clusters_json: dict,
@@ -907,6 +1079,7 @@ def assembled_website(
     save_figures: dict,
     save_abstracts_json: dict,
     save_edges_bins: dict,
+    save_views_manifest: dict,
     website_dir: Path,
     site_title: str,
 ) -> dict:
@@ -936,6 +1109,8 @@ def assembled_website(
         "figures": save_figures["n_figures"],
         "abstracts": save_abstracts_json["n_abstracts"],
         "edges": save_edges_bins["n_edges"],
+        "views": save_views_manifest["views"],
+        "extra_views": save_views_manifest["extra"],
     }
     logger.info("assembled website: %s", manifest)
     logger.info("serve with: python -m http.server 8123 --directory %s", website_dir)

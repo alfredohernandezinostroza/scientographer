@@ -36,7 +36,7 @@ import { Sigma } from "https://cdn.jsdelivr.net/npm/sigma@2.4.0/+esm";
 // legend per swept Leiden/CPM resolution), so its `state.groupData.community`
 // is populated by setupResolutionMetrics()/applyCommunityResolution() instead
 // of the generic per-grouping fetch loop in loadDataset().
-const DATASETS = {
+let DATASETS = {
   network: {
     label: "Citation network",
     dir: "network_data",
@@ -47,7 +47,41 @@ const DATASETS = {
     ],
   },
 };
-const DEFAULT_DATASET = "network";
+let DEFAULT_DATASET = "network";
+
+// build_website.py writes views.json when the site has more than one layout
+// (params.yaml `website.extra_layouts`: e.g. text-embedding maps next to the
+// citation layout). Each view is a dataset as above; `shared_dir` holds the
+// files every view shares (metrics, keywords, figures, abstracts).
+async function loadViewsManifest() {
+  let manifest = null;
+  try {
+    const response = await fetch("views.json");
+    manifest = response.ok ? await response.json() : null;
+  } catch {
+    manifest = null;
+  }
+  if (!manifest || !Array.isArray(manifest.views) || !manifest.views.length) return;
+  const views = {};
+  for (const v of manifest.views) {
+    views[v.key] = {
+      label: v.label,
+      dir: v.dir,
+      subtitle: v.subtitle || "",
+      snapshots: !!v.snapshots,
+      sharedDir: manifest.shared_dir || v.dir,
+      groupings: v.groupings,
+    };
+  }
+  DATASETS = views;
+  DEFAULT_DATASET = views[manifest.default] ? manifest.default : manifest.views[0].key;
+  state.dataset = DEFAULT_DATASET;
+}
+
+// Files shared by every view live in the default view's directory.
+function sharedDir(cfg) {
+  return cfg.sharedDir || cfg.dir;
+}
 
 // ── State ─────────────────────────────────────────────────────────────────
 const state = {
@@ -186,6 +220,7 @@ main().catch((err) => {
 async function main() {
   // One-time wiring (event listeners on static DOM); the renderer + per-frame
   // hooks are created lazily on the first loadDataset call.
+  await loadViewsManifest();
   initShiftTracking();
   initControls();
   initOrientationControls();
@@ -295,6 +330,12 @@ async function loadDataset(name) {
 function initDatasetSelector() {
   const sel = document.getElementById("dataset-select");
   if (!sel) return;
+  const keys = Object.keys(DATASETS);
+  sel.innerHTML = keys
+    .map((k) => `<option value="${escapeHtml(k)}">${escapeHtml(DATASETS[k].label || k)}</option>`)
+    .join("");
+  const row = sel.closest(".control-row");
+  if (row) row.hidden = keys.length < 2;
   sel.value = state.dataset;
   sel.addEventListener("change", async (e) => {
     sel.disabled = true;
@@ -384,18 +425,7 @@ function applySnapshot(value) {
       state.graph.setNodeAttribute(String(i), "x", cx);
       state.graph.setNodeAttribute(String(i), "y", cy);
     }
-    // Per-grouping member counts within this snapshot, so labels can be limited
-    // to groups that are actually substantial in the given year (see MIN_SNAPSHOT
-    // _LABEL in positionLabels). Computed here once per snapshot switch.
-    const counts = {};
-    for (const g of activeGroupings()) counts[g.key] = {};
-    for (const idxStr of visible) {
-      const r = nodes[parseInt(idxStr, 10)];
-      for (const g of activeGroupings()) {
-        const gid = String(r[g.nodeField]);
-        counts[g.key][gid] = (counts[g.key][gid] || 0) + 1;
-      }
-    }
+
     // Apply the snapshot's own per-node sizes (forceatlas / Gephi exports).
     if (snap.sizes) {
       for (const idxStr of visible) {
@@ -406,12 +436,49 @@ function applySnapshot(value) {
         state.graph.setNodeAttribute(idxStr, "_baseSize", rs);
       }
     }
-    state.snapshot = { cutoff: value, visible, centroids: snap.centroids || {}, counts };
+    state.snapshot = { cutoff: value, visible, coords, centroids: {}, counts: {} };
+    computeSnapshotGroupStats();
   }
 
   state.renderer.refresh(); // recomputes the layout extent for the new positions
   resetCamera();
   scheduleRefilter();
+}
+
+// Per-grouping member counts and centroids within the active snapshot, from the
+// snapshot's own coordinates: labels sit at the centre of each group's papers
+// that year and are limited to groups substantial enough then (MIN_SNAPSHOT_LABEL
+// in positionLabels). Recomputed when the community resolution changes, since
+// the communities themselves change with it.
+function computeSnapshotGroupStats() {
+  const snapshot = state.snapshot;
+  if (!snapshot) return;
+  const nodes = state.nodesData.nodes;
+  const counts = {}, sums = {};
+  for (const g of activeGroupings()) {
+    counts[g.key] = {};
+    sums[g.key] = {};
+  }
+  for (const idxStr of snapshot.visible) {
+    const r = nodes[parseInt(idxStr, 10)];
+    const c = snapshot.coords[r.id];
+    for (const g of activeGroupings()) {
+      const gid = String(r[g.nodeField]);
+      counts[g.key][gid] = (counts[g.key][gid] || 0) + 1;
+      const a = sums[g.key][gid] || (sums[g.key][gid] = [0, 0]);
+      a[0] += c[0];
+      a[1] += c[1];
+    }
+  }
+  const centroids = {};
+  for (const key of Object.keys(sums)) {
+    centroids[key] = {};
+    for (const [gid, [sx, sy]] of Object.entries(sums[key])) {
+      centroids[key][gid] = [sx / counts[key][gid], sy / counts[key][gid]];
+    }
+  }
+  snapshot.counts = counts;
+  snapshot.centroids = centroids;
 }
 
 function restoreBasePositions() {
@@ -724,20 +791,20 @@ async function setupResolutionMetrics(cfg) {
   try {
     [commByRes, resMetrics, distributions, resMetricsAfterCm, connectivityMetrics, communityKeywords] = await Promise.all([
       fetch(`${cfg.dir}/communities_by_resolution.json`).then((r) => (r.ok ? r.json() : null)),
-      fetch(`${cfg.dir}/resolution_metrics.json`).then((r) => (r.ok ? r.json() : null)),
+      fetch(`${sharedDir(cfg)}/resolution_metrics.json`).then((r) => (r.ok ? r.json() : null)),
       // Optional: every community's health metrics, including the ones too small
       // to appear in the legend. Absent => the per-community health views are
       // skipped but the whole-graph charts still render.
-      fetch(`${cfg.dir}/community_distributions.json`).then((r) => (r.ok ? r.json() : null)),
+      fetch(`${sharedDir(cfg)}/community_distributions.json`).then((r) => (r.ok ? r.json() : null)),
       // Optional: the same whole-graph metrics after Connectivity-Modifier
       // remediation (a second "after CM" line), and the well-connectedness
       // diagnostic + CM before/after summary. Absent => those overlays/panels
       // are skipped, everything else renders unchanged.
-      fetch(`${cfg.dir}/resolution_metrics_after_cm.json`).then((r) => (r.ok ? r.json() : null)),
-      fetch(`${cfg.dir}/connectivity_metrics.json`).then((r) => (r.ok ? r.json() : null)),
+      fetch(`${sharedDir(cfg)}/resolution_metrics_after_cm.json`).then((r) => (r.ok ? r.json() : null)),
+      fetch(`${sharedDir(cfg)}/connectivity_metrics.json`).then((r) => (r.ok ? r.json() : null)),
       // Optional: per-community distinguishing keywords (bars in the Metrics
       // tab + detail panel). Absent => the legend's plain keyword list is used.
-      fetch(`${cfg.dir}/community_keywords.json`).then((r) => (r.ok ? r.json() : null)),
+      fetch(`${sharedDir(cfg)}/community_keywords.json`).then((r) => (r.ok ? r.json() : null)),
     ]);
   } catch {
     commByRes = null;
@@ -776,6 +843,10 @@ async function setupResolutionMetrics(cfg) {
   // default resolution). applyCommunityResolution() handles later switches.
   state.communityResolution = defaultRes;
   state.groupData.community = commByRes.by_resolution[defaultRes];
+  // Switching views keeps the resolution the user picked, when this view has it.
+  if (state.chosenResolution && state.chosenResolution !== defaultRes && commByRes.by_resolution[state.chosenResolution]) {
+    applyCommunityResolution(state.chosenResolution);
+  }
 
   if (row) row.hidden = false;
   if (tab) tab.hidden = !(resMetrics || communityKeywords);
@@ -793,6 +864,7 @@ function applyCommunityResolution(resolution) {
   if (!legend) return;
 
   state.communityResolution = resolution;
+  state.chosenResolution = resolution;
   for (const r of state.nodesData.nodes) {
     const cid = r.communities && r.communities[resolution] != null ? r.communities[resolution] : -1;
     r.community = cid;
@@ -801,6 +873,7 @@ function applyCommunityResolution(resolution) {
   }
   state.groupData.community = legend;
   state.muted.community = new Set();
+  computeSnapshotGroupStats();
 
   const sel = document.getElementById("community-resolution");
   if (sel && sel.value !== resolution) sel.value = resolution;
@@ -2277,7 +2350,7 @@ function initShiftTracking() {
 function loadAbstract(nodeId) {
   if (state.abstracts) return Promise.resolve(state.abstracts[nodeId] || "");
   if (!state.abstractsPromise) {
-    state.abstractsPromise = fetch(`${DATASETS[state.dataset].dir}/abstracts.json`)
+    state.abstractsPromise = fetch(`${sharedDir(DATASETS[state.dataset])}/abstracts.json`)
       .then((r) => r.json())
       .then((obj) => {
         state.abstracts = obj;
@@ -3365,7 +3438,7 @@ async function setupFigures(cfg) {
   if (tab) tab.hidden = true;
   let figs = null;
   try {
-    figs = await fetch(`${cfg.dir}/figures.json`).then((r) => (r.ok ? r.json() : null));
+    figs = await fetch(`${sharedDir(cfg)}/figures.json`).then((r) => (r.ok ? r.json() : null));
   } catch {
     figs = null;
   }
