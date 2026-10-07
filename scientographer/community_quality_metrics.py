@@ -58,6 +58,15 @@ from scipy.stats import hypergeom
 
 from scientographer._parallel import resolve_workers as _resolve_workers
 from scientographer._parallel import run_in_worker_processes
+from scientographer._resolution_store import (
+    STORE_SUBDIR,
+    ResolutionStore,
+    array_fingerprint,
+    library_versions,
+    result_settings,
+    reuse_or_compute,
+    structure_fingerprint,
+)
 from scientographer.community_resolution_bands import (
     CANONICAL_RESOLUTION,
     LOW_RES_GRAPHML,
@@ -97,6 +106,9 @@ LEIDEN_ITERATIONS: Final[int] = int(_communities["leiden_iterations"])
 # worker processes at all. Results are identical for any value: every resolution's
 # Leiden re-runs use fixed seeds.
 WORKERS_SETTING = _communities.get("workers", "auto")
+# Per-resolution results kept between runs (see _resolution_store.py), inside the
+# stage's output directory. Bump RESULTS_VERSION when a change alters the results.
+RESULTS_VERSION: Final[int] = 1
 
 # Adjacent resolutions whose partitions agree (NMI) at least this much are
 # flagged as sitting on the same "natural" community scale.
@@ -574,6 +586,7 @@ def _main() -> int:
         n_iterations=LEIDEN_ITERATIONS,
         stability_seeds=list(STABILITY_SEEDS),
         workers=_resolve_workers(WORKERS_SETTING, len(RESOLUTIONS)),
+        store_dir=OUTPUT_DIR / STORE_SUBDIR,
     )
     outputs = [
         "save_citation_network_with_community_metrics",
@@ -669,20 +682,20 @@ def _quality_metrics_for_resolution(
     undirected_networkx_graph: nx.Graph,
     resolution: float,
     community_membership: np.ndarray,
-    plateau: dict,
     n_iterations: int,
     stability_seeds: tuple[int, ...],
 ) -> dict:
     """All quality metrics for one resolution's existing partition: per-
     community edge/conductance/density metrics, plus partition-level
     modularity, constant Potts model score, surprise, significance,
-    coverage, cross-seed stability, and plateau status."""
+    coverage and cross-seed stability. (Plateau status depends on the
+    neighbouring resolutions and is added afterwards, see _with_plateau.)"""
     per_community, per_partition = _structural_partition_metrics(
         citation_network, undirected_networkx_graph, community_membership, resolution)
 
     stability = _cross_seed_stability(
         citation_network, resolution, n_iterations, community_membership, tuple(stability_seeds))
-    per_partition = {**per_partition, **stability, **plateau}
+    per_partition = {**per_partition, **stability}
 
     number_of_communities = per_partition["number_of_communities"]
     logger.info(
@@ -733,27 +746,31 @@ def _init_quality_worker(structure: tuple[int, list[tuple[int, int]], bool], n_i
     )
 
 
-def _quality_worker_task(task: tuple[float, np.ndarray, dict]) -> dict:
-    resolution, membership, plateau = task
+def _quality_worker_task(task: tuple[float, np.ndarray]) -> dict:
+    resolution, membership = task
     return _quality_metrics_for_resolution(
-        _WORKER_STATE["graph"], _WORKER_STATE["undirected"], resolution, membership, plateau,
+        _WORKER_STATE["graph"], _WORKER_STATE["undirected"], resolution, membership,
         _WORKER_STATE["n_iterations"], _WORKER_STATE["stability_seeds"])
+
+
+def _with_plateau(bundle: dict, plateau: dict) -> dict:
+    """The bundle with this resolution's plateau status appended to its partition row."""
+    return {**bundle, "per_partition": {**bundle["per_partition"], **plateau}}
 
 
 def _run_quality_metrics(
     citation_network: ig.Graph,
     memberships: list[np.ndarray],
     resolutions: list[float],
-    plateau_flags: dict[float, dict],
     n_iterations: int,
     stability_seeds: tuple[int, ...],
     workers: int,
 ) -> list[dict]:
-    """Metrics for every resolution, returned in `resolutions` order. With
-    workers > 1, resolutions run in a pool of worker processes, the costliest
-    first (cost grows with the number of communities), so the pool stays busy;
-    with workers == 1, the same code runs in this process."""
-    tasks = [(r, m, plateau_flags[r]) for r, m in zip(resolutions, memberships)]
+    """Metrics (without plateau status) for the given resolutions, returned in
+    `resolutions` order. With workers > 1, resolutions run in a pool of worker
+    processes, the costliest first (cost grows with the number of communities),
+    so the pool stays busy; with workers == 1, the same code runs in this process."""
+    tasks = list(zip(resolutions, memberships))
     return run_in_worker_processes(
         tasks, _quality_worker_task,
         initializer=_init_quality_worker,
@@ -764,6 +781,14 @@ def _run_quality_metrics(
     )
 
 
+def _store(citation_network: ig.Graph, store_dir: Path) -> ResolutionStore:
+    return ResolutionStore(
+        store_dir, "community_quality_metrics", RESULTS_VERSION,
+        {"graph": structure_fingerprint(citation_network),
+         "settings": result_settings(_communities, ignore=("plateau_nmi_threshold",)),
+         "libraries": library_versions("leidenalg", "igraph", "networkx", "cdlib", "scipy")})
+
+
 def community_quality_metrics_all_resolutions(
     citation_network: ig.Graph,
     community_memberships_by_resolution: list[np.ndarray],
@@ -771,14 +796,25 @@ def community_quality_metrics_all_resolutions(
     n_iterations: int,
     stability_seeds: list[int],
     workers: int,
+    store_dir: Path,
 ) -> list[dict]:
-    """Quality metrics for every resolution of the sweep, computed in parallel
-    worker processes (params.yaml `communities.workers`)."""
-    logger.info("computing quality metrics for %d resolutions with %d worker process(es)",
-                len(RESOLUTIONS), workers)
-    return _run_quality_metrics(
-        citation_network, community_memberships_by_resolution, list(RESOLUTIONS),
-        resolution_plateau_flags, n_iterations, tuple(stability_seeds), workers)
+    """Quality metrics for every resolution of the sweep. Results stored by an
+    earlier run for the same graph, partition and settings are reused; the rest
+    are computed in parallel worker processes (params.yaml `communities.workers`)."""
+    store = _store(citation_network, store_dir)
+    membership_of = dict(zip(RESOLUTIONS, community_memberships_by_resolution))
+
+    def compute(missing: list[float]) -> dict[float, dict]:
+        logger.info("computing quality metrics for %d resolution(s) with %d worker process(es)",
+                    len(missing), min(workers, len(missing)))
+        bundles = _run_quality_metrics(
+            citation_network, [membership_of[r] for r in missing], missing,
+            n_iterations, tuple(stability_seeds), min(workers, len(missing)))
+        return dict(zip(missing, bundles))
+
+    fingerprints = {r: store.fingerprint(r, membership=array_fingerprint(membership_of[r])) for r in RESOLUTIONS}
+    results = reuse_or_compute(store, RESOLUTIONS, fingerprints, compute)
+    return [_with_plateau(results[r], resolution_plateau_flags[r]) for r in RESOLUTIONS]
 
 
 def per_community_quality_metrics_df(community_quality_metrics_all_resolutions: list[dict]) -> pd.DataFrame:

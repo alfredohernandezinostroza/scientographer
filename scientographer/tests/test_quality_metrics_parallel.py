@@ -7,7 +7,6 @@ import leidenalg
 import numpy as np
 
 from scientographer.community_quality_metrics import (
-    _resolution_plateau_flags,
     _resolve_workers,
     _run_quality_metrics,
 )
@@ -40,9 +39,8 @@ def _same(a, b) -> bool:
 
 def test_parallel_and_in_process_runs_give_identical_results():
     g, resolutions, memberships = _graph_and_memberships()
-    plateau = _resolution_plateau_flags(memberships, resolutions, 0.9)
-    serial = _run_quality_metrics(g, memberships, resolutions, plateau, 3, (1, 2), workers=1)
-    parallel = _run_quality_metrics(g, memberships, resolutions, plateau, 3, (1, 2), workers=3)
+    serial = _run_quality_metrics(g, memberships, resolutions, 3, (1, 2), workers=1)
+    parallel = _run_quality_metrics(g, memberships, resolutions, 3, (1, 2), workers=3)
     assert [b["resolution"] for b in parallel] == resolutions        # input order kept
     assert _same(parallel, serial)                                   # every number identical
 

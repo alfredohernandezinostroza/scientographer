@@ -12,6 +12,7 @@ in its ``dvc.yaml`` and keeps every setting in its ``params.yaml``::
     scientographer website [--port 8123]  serve the built site
     scientographer ui [--port 8241]       start the Hamilton UI tracker for this project
     scientographer params                 show which params.yaml is in effect
+    scientographer store-existing-results fill the per-resolution stores from current outputs
 """
 
 from importlib import resources
@@ -226,6 +227,25 @@ def ui(port: int = typer.Option(8241, help="port for the Hamilton UI")) -> None:
     finally:
         if server.poll() is None:
             server.terminate()
+
+
+@app.command(name="store-existing-results")
+def store_existing_results(
+    stage: Optional[list[str]] = typer.Option(None, "--stage", help="only this stage (repeatable)"),
+) -> None:
+    """Fill the per-resolution result stores from the project's current outputs.
+
+    Stages reuse stored results, so adding a resolution to the sweep computes only
+    that resolution. Outputs made before the stores existed are not in them; run
+    this once (with `dvc status` up to date) instead of recomputing everything."""
+    from scientographer._seed_stores import STAGES, seed_stores
+
+    unknown = set(stage or ()) - set(STAGES)
+    if unknown:
+        typer.echo(f"unknown stage(s) {sorted(unknown)}. Known: {', '.join(STAGES)}", err=True)
+        raise typer.Exit(code=2)
+    for name, stored in seed_stores(tuple(stage) if stage else STAGES).items():
+        typer.echo(f"{name}: stored {stored} resolution(s)")
 
 
 @app.command(name="params")

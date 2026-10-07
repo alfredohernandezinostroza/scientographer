@@ -29,13 +29,21 @@ import sys
 from typing import Final
 
 from hamilton import driver
-from hamilton.function_modifiers import dataloader, datasaver, group, parameterize, source, value
+from hamilton.function_modifiers import dataloader, datasaver
 from hamilton.io import utils
 import hamilton.log_setup
 import igraph as ig
 import leidenalg
+import numpy as np
 import pandas as pd
 
+from scientographer._resolution_store import (
+    STORE_SUBDIR,
+    ResolutionStore,
+    library_versions,
+    reuse_or_compute,
+    structure_fingerprint,
+)
 from scientographer.community_resolution_bands import RESOLUTIONS, community_attribute_name
 from scientographer.config import FIGURES_PATH, draw_dag, ensure_dirs, params, tracker_adapters
 
@@ -55,8 +63,13 @@ SUMMARY_PARQUET: Final[Path] = Path(_cfg["summary_parquet"])
 SEED: Final[int] = int(_cfg["seed"])
 ITERATIONS: Final[int] = int(_cfg["iterations"])
 MIN_DEGREE: Final[int] = int(_cfg.get("min_degree", 0) or 0)
+# Per-resolution memberships kept between runs (see _resolution_store.py): adding a
+# resolution to the sweep runs Leiden for that resolution only. A DVC output with
+# `persist: true`.
+STORE_DIR: Final[Path] = Path(_cfg.get("store_dir") or Path(_cfg["summary_parquet"]).parent / STORE_SUBDIR)
+# Bump when a change alters the memberships this stage computes.
+RESULTS_VERSION: Final[int] = 1
 
-_res_node_names: Final[list[str]] = [f"res_{str(r).replace('.', '_')}" for r in RESOLUTIONS]
 
 
 #####################
@@ -129,6 +142,7 @@ def _main() -> int:
         n_iterations=ITERATIONS,
         output_graphml_path=OUTPUT_GRAPHML,
         summary_parquet_path=SUMMARY_PARQUET,
+        store_dir=STORE_DIR,
     )
     outputs = ["save_citation_network_with_communities", "save_partition_summary"]
 
@@ -173,27 +187,30 @@ def filtered_citation_network(citation_network: ig.Graph, min_degree: int) -> ig
     return filtered
 
 
-@parameterize(
-    **{
-        f"membership_{name}": {"resolution": value(r)}
-        for name, r in zip(_res_node_names, RESOLUTIONS)
-    }
-)
-def membership(
-    filtered_citation_network: ig.Graph, resolution: float, seed: int, n_iterations: int
-) -> list[int]:
-    result = _leiden_cpm_membership(filtered_citation_network, resolution, seed, n_iterations)
-    logger.info("[res=%s] %d communities", resolution, len(set(result)))
-    return result
+def _store(graph: ig.Graph, seed: int, n_iterations: int, store_dir: Path) -> ResolutionStore:
+    return ResolutionStore(
+        store_dir, "detect_communities", RESULTS_VERSION,
+        {"seed": seed, "n_iterations": n_iterations, "graph": structure_fingerprint(graph),
+         "libraries": library_versions("leidenalg", "igraph")})
 
 
-@parameterize(
-    memberships_by_resolution={
-        "results": group(*[source(f"membership_{name}") for name in _res_node_names])
-    }
-)
-def memberships_by_resolution(results: list[list[int]]) -> dict[float, list[int]]:
-    return dict(zip(RESOLUTIONS, results))
+def memberships_by_resolution(
+    filtered_citation_network: ig.Graph, seed: int, n_iterations: int, store_dir: Path
+) -> dict[float, list[int]]:
+    """Leiden/CPM membership at every resolution of the sweep; memberships stored
+    by an earlier run for the same graph and settings are reused."""
+    store = _store(filtered_citation_network, seed, n_iterations, store_dir)
+
+    def compute(missing: list[float]) -> dict[float, dict]:
+        computed = {}
+        for resolution in missing:
+            membership = _leiden_cpm_membership(filtered_citation_network, resolution, seed, n_iterations)
+            logger.info("[res=%s] %d communities", resolution, len(set(membership)))
+            computed[resolution] = {"membership": np.asarray(membership, dtype=np.int64)}
+        return computed
+
+    results = reuse_or_compute(store, RESOLUTIONS, {r: store.fingerprint(r) for r in RESOLUTIONS}, compute)
+    return {r: [int(c) for c in results[r]["membership"]] for r in RESOLUTIONS}
 
 
 def citation_network_with_communities(

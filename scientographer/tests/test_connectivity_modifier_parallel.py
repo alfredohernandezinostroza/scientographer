@@ -64,9 +64,8 @@ def test_after_cm_stage_skips_resolutions_without_a_modifier_result():
     import pandas as pd
 
     from scientographer.community_quality_metrics_after_connectivity_modifier import (
+        _quality_after_cm_for_resolution,
         after_membership_for_resolution,
-        quality_after_cm_all_resolutions,
-        quality_after_cm_for_resolution,
     )
 
     graph = ig.Graph(n=3, edges=[(0, 1)], directed=True)
@@ -74,5 +73,4 @@ def test_after_cm_stage_skips_resolutions_without_a_modifier_result():
     cm = pd.DataFrame({"node_name": ["a", "b", "c"], "connectivity_modified_community_at_res=0.01": [0, 0, -1]})
     assert after_membership_for_resolution(graph, cm, 0.001) is None
     assert after_membership_for_resolution(graph, cm, 0.01) is not None
-    assert quality_after_cm_for_resolution(graph, None, 0.001, None) is None
-    assert quality_after_cm_all_resolutions([None, {"resolution": 0.01}]) == [{"resolution": 0.01}]
+    assert _quality_after_cm_for_resolution(graph, None, 0.001, None) is None

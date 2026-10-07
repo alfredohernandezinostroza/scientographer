@@ -53,6 +53,14 @@ import igraph as ig
 import numpy as np
 import pandas as pd
 
+from scientographer._resolution_store import (
+    STORE_SUBDIR,
+    ResolutionStore,
+    array_fingerprint,
+    library_versions,
+    reuse_or_compute,
+    structure_fingerprint,
+)
 from scientographer.community_resolution_bands import (
     CANONICAL_RESOLUTION,
     LOW_RES_GRAPHML,
@@ -85,6 +93,9 @@ EXECUTE = True
 # connected fractions reported here describe the communities a reader actually
 # sees on the map, not the singleton artifact mass.
 SUBSTANTIVE_COMMUNITY_MIN_SIZE: Final[int] = int(params("communities")["substantive_min_size"])
+# Per-resolution results kept between runs (see _resolution_store.py), inside the
+# stage's output directory. Bump RESULTS_VERSION when a change alters the results.
+RESULTS_VERSION: Final[int] = 1
 
 INPUT_GRAPHML: Final[Path] = LOW_RES_GRAPHML
 OUTPUT_DIR: Final[Path] = Path(params("graph")["analysis_output_dir"]) / "community_connectivity_metrics"
@@ -223,6 +234,7 @@ def _main() -> int:
     ensure_dirs(FIGURES_PATH, OUTPUT_DIR)
     inputs = dict(
         citation_network_path=INPUT_GRAPHML,
+        store_dir=OUTPUT_DIR / STORE_SUBDIR,
     )
     outputs = [
         "save_per_community_connectivity_metrics",
@@ -267,13 +279,7 @@ def community_membership_for_resolution(citation_network: ig.Graph, resolution: 
     return np.array([int(float(v)) for v in citation_network.vs[attribute_name]])
 
 
-@parameterize(**{
-    f"community_connectivity_metrics_at_resolution_{r}": {
-        "resolution": value(r),
-        "community_membership": source(f"community_membership_at_resolution_{r}"),
-    } for r in RESOLUTIONS
-})
-def community_connectivity_metrics_for_resolution(
+def _connectivity_metrics_for_resolution(
     citation_network: ig.Graph,
     resolution: float,
     community_membership: np.ndarray,
@@ -315,11 +321,35 @@ def community_connectivity_metrics_for_resolution(
     return {"resolution": resolution, "per_community": per_community, "per_partition": per_partition}
 
 
-@parameterize(community_connectivity_metrics_all_resolutions={
-    "bundles": group(*[source(f"community_connectivity_metrics_at_resolution_{r}") for r in RESOLUTIONS])
+@parameterize(community_memberships_by_resolution={
+    "memberships": group(*[source(f"community_membership_at_resolution_{r}") for r in RESOLUTIONS])
 })
-def community_connectivity_metrics_all_resolutions(bundles: list[dict]) -> list[dict]:
-    return bundles
+def community_memberships_for_all_resolutions(memberships: list[np.ndarray]) -> list[np.ndarray]:
+    return memberships
+
+
+def _store(citation_network: ig.Graph, store_dir: Path) -> ResolutionStore:
+    return ResolutionStore(
+        store_dir, "community_connectivity_metrics", RESULTS_VERSION,
+        {"graph": structure_fingerprint(citation_network),
+         "substantive_min_size": SUBSTANTIVE_COMMUNITY_MIN_SIZE,
+         "libraries": library_versions("igraph")})
+
+
+def community_connectivity_metrics_all_resolutions(
+    citation_network: ig.Graph, community_memberships_by_resolution: list[np.ndarray], store_dir: Path
+) -> list[dict]:
+    """Well-connectedness metrics at every resolution; results stored by an
+    earlier run for the same graph, partition and settings are reused."""
+    store = _store(citation_network, store_dir)
+    membership_of = dict(zip(RESOLUTIONS, community_memberships_by_resolution))
+
+    def compute(missing: list[float]) -> dict[float, dict]:
+        return {r: _connectivity_metrics_for_resolution(citation_network, r, membership_of[r]) for r in missing}
+
+    fingerprints = {r: store.fingerprint(r, membership=array_fingerprint(membership_of[r])) for r in RESOLUTIONS}
+    results = reuse_or_compute(store, RESOLUTIONS, fingerprints, compute)
+    return [results[r] for r in RESOLUTIONS]
 
 
 def per_community_connectivity_metrics_df(

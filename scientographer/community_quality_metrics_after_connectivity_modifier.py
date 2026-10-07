@@ -44,6 +44,15 @@ import networkx as nx
 import numpy as np
 import pandas as pd
 
+from scientographer._resolution_store import (
+    STORE_SUBDIR,
+    ResolutionStore,
+    array_fingerprint,
+    library_versions,
+    result_settings,
+    reuse_or_compute,
+    structure_fingerprint,
+)
 from scientographer.community_connectivity_modifier import (
     MEMBERSHIP_PARQUET as CM_MEMBERSHIP_PARQUET,
 )
@@ -71,6 +80,9 @@ EXECUTE = True
 
 INPUT_GRAPHML: Final[Path] = LOW_RES_GRAPHML
 OUTPUT_DIR: Final[Path] = Path(params("graph")["analysis_output_dir"]) / "community_quality_metrics_after_connectivity_modifier"
+# Per-resolution results kept between runs (see _resolution_store.py), inside the
+# stage's output directory. Bump RESULTS_VERSION when a change alters the results.
+RESULTS_VERSION: Final[int] = 1
 PER_COMMUNITY_PARQUET: Final[Path] = OUTPUT_DIR / "community_quality_metrics_after_cm_per_community.parquet"
 PER_PARTITION_PARQUET: Final[Path] = OUTPUT_DIR / "community_quality_metrics_after_cm_per_partition.parquet"
 
@@ -109,6 +121,7 @@ def _main() -> int:
     inputs = dict(
         citation_network_path=INPUT_GRAPHML,
         cm_membership_path=CM_MEMBERSHIP_PARQUET,
+        store_dir=OUTPUT_DIR / STORE_SUBDIR,
     )
     outputs = [
         "save_per_community_quality_after_cm",
@@ -164,13 +177,7 @@ def after_membership_for_resolution(
     return _after_membership(citation_network, cm_membership_df, resolution)
 
 
-@parameterize(**{
-    f"quality_after_cm_at_resolution_{r}": {
-        "resolution": value(r),
-        "after_membership": source(f"after_membership_at_resolution_{r}"),
-    } for r in RESOLUTIONS
-})
-def quality_after_cm_for_resolution(
+def _quality_after_cm_for_resolution(
     citation_network: ig.Graph,
     undirected_networkx_graph: nx.Graph,
     resolution: float,
@@ -193,11 +200,43 @@ def quality_after_cm_for_resolution(
     return {"resolution": resolution, "per_community": per_community, "per_partition": per_partition}
 
 
-@parameterize(quality_after_cm_all_resolutions={
-    "bundles": group(*[source(f"quality_after_cm_at_resolution_{r}") for r in RESOLUTIONS])
+@parameterize(after_memberships_by_resolution={
+    "memberships": group(*[source(f"after_membership_at_resolution_{r}") for r in RESOLUTIONS])
 })
-def quality_after_cm_all_resolutions(bundles: list[Optional[dict]]) -> list[dict]:
-    return [bundle for bundle in bundles if bundle is not None]
+def after_memberships_for_all_resolutions(memberships: list[Optional[np.ndarray]]) -> list[Optional[np.ndarray]]:
+    return memberships
+
+
+def _store(citation_network: ig.Graph, store_dir: Path) -> ResolutionStore:
+    return ResolutionStore(
+        store_dir, "community_quality_metrics_after_connectivity_modifier", RESULTS_VERSION,
+        {"graph": structure_fingerprint(citation_network),
+         "settings": result_settings(params("communities"), ignore=(
+             "plateau_nmi_threshold", "connectivity_modifier_min_cluster_size",
+             "connectivity_modifier_max_community_size")),
+         "libraries": library_versions("igraph", "networkx", "cdlib", "scipy")})
+
+
+def quality_after_cm_all_resolutions(
+    citation_network: ig.Graph,
+    undirected_networkx_graph: nx.Graph,
+    after_memberships_by_resolution: list[Optional[np.ndarray]],
+    store_dir: Path,
+) -> list[dict]:
+    """Quality of the CM-remediated partition at every resolution the Connectivity
+    Modifier covered; results stored by an earlier run for the same graph and
+    remediated partition are reused."""
+    membership_of = {r: m for r, m in zip(RESOLUTIONS, after_memberships_by_resolution) if m is not None}
+    resolutions = [r for r in RESOLUTIONS if r in membership_of]
+    store = _store(citation_network, store_dir)
+
+    def compute(missing: list[float]) -> dict[float, dict]:
+        return {r: _quality_after_cm_for_resolution(citation_network, undirected_networkx_graph, r, membership_of[r])
+                for r in missing}
+
+    fingerprints = {r: store.fingerprint(r, membership=array_fingerprint(membership_of[r])) for r in resolutions}
+    results = reuse_or_compute(store, resolutions, fingerprints, compute)
+    return [results[r] for r in resolutions]
 
 
 def per_community_quality_after_cm_df(quality_after_cm_all_resolutions: list[dict]) -> pd.DataFrame:

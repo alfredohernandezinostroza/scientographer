@@ -39,6 +39,10 @@ stages:
     outs:
       - ${detect_communities.output_graphml}
       - ${detect_communities.summary_parquet}
+      # Memberships per resolution, reused when the sweep changes (see
+      # scientographer/_resolution_store.py); persist: DVC keeps it between runs.
+      - ${detect_communities.store_dir}:
+          persist: true
 
   layout_graph:
     cmd: scientographer run layout_graph
@@ -58,7 +62,9 @@ stages:
       - resolutions
       - communities
     outs:
-      - ${graph.analysis_output_dir}/community_quality_metrics
+      # Holds by_resolution/, the per-resolution results reused when the sweep changes.
+      - ${graph.analysis_output_dir}/community_quality_metrics:
+          persist: true
       - ${graph.analysis_output_dir}/citation_network_with_community_metrics.graphml
     metrics:
       - ${graph.analysis_output_dir}/metrics/community_quality_metrics.json:
@@ -78,7 +84,9 @@ stages:
       - resolutions
       - communities
     outs:
-      - ${graph.analysis_output_dir}/community_connectivity_metrics
+      # Holds by_resolution/, the per-resolution results reused when the sweep changes.
+      - ${graph.analysis_output_dir}/community_connectivity_metrics:
+          persist: true
     metrics:
       - ${graph.analysis_output_dir}/metrics/community_connectivity_metrics.json:
           cache: false
@@ -99,7 +107,9 @@ stages:
       - resolutions.high
       - communities
     outs:
-      - ${graph.analysis_output_dir}/community_connectivity_modifier
+      # Holds by_resolution/, the per-resolution results reused when the sweep changes.
+      - ${graph.analysis_output_dir}/community_connectivity_modifier:
+          persist: true
 
   community_quality_metrics_after_connectivity_modifier:
     cmd: scientographer run community_quality_metrics_after_connectivity_modifier
@@ -113,7 +123,9 @@ stages:
       - resolutions.high
       - communities
     outs:
-      - ${graph.analysis_output_dir}/community_quality_metrics_after_connectivity_modifier
+      # Holds by_resolution/, the per-resolution results reused when the sweep changes.
+      - ${graph.analysis_output_dir}/community_quality_metrics_after_connectivity_modifier:
+          persist: true
 
   community_keywords:
     cmd: scientographer run community_keywords

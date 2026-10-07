@@ -44,6 +44,10 @@ detect_communities:
   input_graphml: data/citation_network.graphml
   output_graphml: data/citation_network_with_communities.graphml
   summary_parquet: data/detect_communities/partition_summary.parquet
+  # Memberships per resolution, kept between runs: adding a resolution to the sweep
+  # runs Leiden for that resolution only (every analysis stage does the same, under
+  # by_resolution/ in its output directory).
+  store_dir: data/detect_communities/by_resolution
   seed: 0
   iterations: 10
   # Pre-detection total-degree cut (0 = none). Filtering communities afterwards is

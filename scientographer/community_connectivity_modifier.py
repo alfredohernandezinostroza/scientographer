@@ -61,6 +61,14 @@ import numpy as np
 import pandas as pd
 
 from scientographer._parallel import resolve_workers, run_in_worker_processes
+from scientographer._resolution_store import (
+    STORE_SUBDIR,
+    ResolutionStore,
+    array_fingerprint,
+    library_versions,
+    reuse_or_compute,
+    structure_fingerprint,
+)
 from scientographer.community_connectivity_metrics import (
     RESOLUTIONS,
     SUBSTANTIVE_COMMUNITY_MIN_SIZE,
@@ -97,6 +105,9 @@ CM_MIN_CLUSTER_SIZE: Final[int] = int(params("communities")["connectivity_modifi
 # Resolutions whose largest community exceeds this are skipped (None = never).
 _max_size_setting = params("communities").get("connectivity_modifier_max_community_size")
 CM_MAX_COMMUNITY_SIZE: Final[int | None] = None if _max_size_setting is None else int(_max_size_setting)
+# Per-resolution results kept between runs (see _resolution_store.py), inside the
+# stage's output directory. Bump RESULTS_VERSION when a change alters the results.
+RESULTS_VERSION: Final[int] = 1
 # Worker processes for the resolution sweep (params.yaml `communities.workers`).
 WORKERS_SETTING = params("communities").get("workers", "auto")
 
@@ -264,6 +275,7 @@ def _main() -> int:
         citation_network_path=INPUT_GRAPHML,
         min_cluster_size=CM_MIN_CLUSTER_SIZE,
         max_community_size=CM_MAX_COMMUNITY_SIZE,
+        store_dir=OUTPUT_DIR / STORE_SUBDIR,
         workers=resolve_workers(WORKERS_SETTING, len(RESOLUTIONS)),
     )
     outputs = [
@@ -408,22 +420,43 @@ def community_memberships_for_all_resolutions(memberships: list[np.ndarray]) -> 
     return memberships
 
 
+def _store(undirected_simple_graph: ig.Graph, min_cluster_size: int, store_dir: Path) -> ResolutionStore:
+    return ResolutionStore(
+        store_dir, "community_connectivity_modifier", RESULTS_VERSION,
+        {"graph": structure_fingerprint(undirected_simple_graph), "min_cluster_size": min_cluster_size,
+         "substantive_min_size": SUBSTANTIVE_COMMUNITY_MIN_SIZE,
+         "recluster_seed": CM_RECLUSTER_SEED, "recluster_iterations": CM_RECLUSTER_ITERATIONS,
+         "libraries": library_versions("leidenalg", "igraph")})
+
+
 def connectivity_modifier_all_resolutions(
     undirected_simple_graph: ig.Graph,
     community_memberships_by_resolution: list[np.ndarray],
     min_cluster_size: int,
     max_community_size: Optional[int],
     workers: int,
+    store_dir: Path,
 ) -> list[dict]:
-    """The Connectivity Modifier at every resolution of the sweep, computed in
-    parallel worker processes (params.yaml `communities.workers`), except at
-    resolutions whose largest community exceeds `max_community_size`."""
+    """The Connectivity Modifier at every resolution of the sweep, except at
+    resolutions whose largest community exceeds `max_community_size`. Results
+    stored by an earlier run for the same graph, partition and settings are
+    reused; the rest run in parallel worker processes (`communities.workers`)."""
     resolutions, memberships = _resolutions_to_modify(
         list(RESOLUTIONS), community_memberships_by_resolution, max_community_size)
-    logger.info("running the Connectivity Modifier at %d resolutions with %d worker process(es)",
-                len(resolutions), workers)
-    return _run_connectivity_modifier(
-        undirected_simple_graph, memberships, resolutions, min_cluster_size, workers)
+    store = _store(undirected_simple_graph, min_cluster_size, store_dir)
+    membership_of = dict(zip(resolutions, memberships))
+
+    def compute(missing: list[float]) -> dict[float, dict]:
+        logger.info("running the Connectivity Modifier at %d resolution(s) with %d worker process(es)",
+                    len(missing), min(workers, len(missing)))
+        bundles = _run_connectivity_modifier(
+            undirected_simple_graph, [membership_of[r] for r in missing], missing,
+            min_cluster_size, min(workers, len(missing)))
+        return dict(zip(missing, bundles))
+
+    fingerprints = {r: store.fingerprint(r, membership=array_fingerprint(membership_of[r])) for r in resolutions}
+    results = reuse_or_compute(store, resolutions, fingerprints, compute)
+    return [results[r] for r in resolutions]
 
 
 def connectivity_modifier_membership_df(
