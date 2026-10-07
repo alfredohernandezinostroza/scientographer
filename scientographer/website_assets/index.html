@@ -260,7 +260,9 @@
           <option value="curved">Curved edges</option>
         </select>
         <select id="export-background" aria-label="Image background">
-          <option value="transparent">Transparent</option>
+          <option value="transparent-light">Transparent, for white pages</option>
+          <option value="transparent">Transparent, for dark slides</option>
+          <option value="white">White background</option>
           <option value="dark">Dark background</option>
         </select>
       </div>
@@ -350,7 +352,7 @@
   <script src="https://unpkg.com/tabulator-tables@6.3.1/dist/js/tabulator.min.js"></script>
 
   <!-- App -->
-  <script type="module" src="main.js?v=27"></script>
+  <script type="module" src="main.js?v=28"></script>
   <!-- Guided tour (independent of main.js; only reads the DOM) -->
   <script type="module" src="tour.js?v=2"></script>
 </body>
