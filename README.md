@@ -1,5 +1,10 @@
 # Scientographer
 
+[![PyPI](https://img.shields.io/pypi/v/scientographer)](https://pypi.org/project/scientographer/)
+[![Python](https://img.shields.io/pypi/pyversions/scientographer)](https://pypi.org/project/scientographer/)
+[![Tests](https://github.com/alfredohernandezinostroza/scientographer/actions/workflows/tests.yml/badge.svg)](https://github.com/alfredohernandezinostroza/scientographer/actions/workflows/tests.yml)
+[![License: AGPL v3+](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)](https://github.com/alfredohernandezinostroza/scientographer/blob/main/LICENSE)
+
 Map a scientific literature from its citation network.
 
 Give Scientographer two tables — the papers of a field and the references between
@@ -58,7 +63,7 @@ tools some stages use, such as Graphviz for the DAG drawings.
 ```bash
 pixi init my-field && cd my-field
 pixi add python=3.12 graphviz
-pixi add --pypi "scientographer[pipeline] @ git+https://github.com/alfredohernandezinostroza/scientographer.git"
+pixi add --pypi "scientographer[pipeline]"
 pixi shell                    # or prefix every command below with `pixi run`
 ```
 
@@ -68,7 +73,7 @@ Commit `pixi.toml` and `pixi.lock` with your project.
 
 ```bash
 python -m venv .venv && source .venv/bin/activate      # Windows: .venv\Scripts\activate
-pip install "scientographer[pipeline] @ git+https://github.com/alfredohernandezinostroza/scientographer.git"
+pip install "scientographer[pipeline]"
 ```
 
 There is no lock file, so commit a `pip freeze > requirements.txt` to keep the versions
@@ -76,7 +81,9 @@ behind your results on record. The DAG drawings also need Graphviz's `dot` progr
 your system's package manager (`apt install graphviz`, `brew install graphviz`); without
 it the stages still run and only skip the drawings.
 
-To check the install: `scientographer --help`.
+To check the install: `scientographer --help`. The development version installs
+from GitHub: replace `scientographer[pipeline]` by
+`scientographer[pipeline] @ git+https://github.com/alfredohernandezinostroza/scientographer.git`.
 
 ## Try the example
 
@@ -318,7 +325,7 @@ its data in `.hamilton/` inside the project.
 
 ## Using it with an AI coding agent
 
-[`skills/scientographer/SKILL.md`](skills/scientographer/SKILL.md) teaches an agent
+[`skills/scientographer/SKILL.md`](https://github.com/alfredohernandezinostroza/scientographer/blob/main/skills/scientographer/SKILL.md) teaches an agent
 (Claude Code, Codex, Cursor, …) how to set up, run, configure and troubleshoot a
 Scientographer project. For Claude Code, copy the folder into your project's
 `.claude/skills/` (or `~/.claude/skills/` for all projects):
@@ -339,24 +346,24 @@ pip install -e ".[all,dev]"
 pytest
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for how a stage is built.
+See [CONTRIBUTING.md](https://github.com/alfredohernandezinostroza/scientographer/blob/main/CONTRIBUTING.md) for how a stage is built.
 
 ## License
 
 - **The pipeline** (the `scientographer` package) is licensed under the
-  [GNU Affero General Public License v3.0 or later](LICENSE). You can use, study,
+  [GNU Affero General Public License v3.0 or later](https://github.com/alfredohernandezinostroza/scientographer/blob/main/LICENSE). You can use, study,
   modify and share it freely. If you distribute a modified version, or let people use
   a modified version over a network (for example as a hosted service), you must offer
   them its source code under the same license.
 - **The map frontend** (`scientographer/website_assets/`) and **the project templates**
-  (`params.yaml`, `templates/dvc.yaml`) are [MIT-licensed](LICENSE-MIT). These are the
+  (`params.yaml`, `templates/dvc.yaml`) are [MIT-licensed](https://github.com/alfredohernandezinostroza/scientographer/blob/main/LICENSE-MIT). These are the
   files Scientographer copies into your maps and projects, so maps and projects you
   publish carry no license obligations.
 - **Your data and results** are yours: the graphs, metrics, JSON and figures the pipeline
   computes are its output, not part of the software.
 
 Each file states its license in an `SPDX-License-Identifier` header. If you use
-Scientographer in research, please cite it (see [CITATION.cff](CITATION.cff)).
+Scientographer in research, please cite it (see [CITATION.cff](https://github.com/alfredohernandezinostroza/scientographer/blob/main/CITATION.cff)).
 
 ## Origin
 

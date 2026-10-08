@@ -10,14 +10,24 @@ readme = "README.md"
 authors = [{ name = "Alfredo Hernández Inostroza" }]
 requires-python = ">=3.10"
 # The pipeline is AGPL-3.0-or-later; the map frontend and the project templates that
-# are copied into users' sites and projects are MIT (see LICENSE-MIT).
-license = "AGPL-3.0-or-later AND MIT"
-license-files = ["LICENSE", "LICENSE-MIT"]
+# are copied into users' sites and projects are MIT (see LICENSE-MIT). The bundled
+# example's data: the articles' own CC BY licenses and OpenAlex's CC0 (see LICENSES/).
+license = "AGPL-3.0-or-later AND MIT AND CC0-1.0 AND LicenseRef-CC-BY-per-article"
+license-files = ["LICENSE", "LICENSE-MIT", "LICENSES/*.txt"]
 keywords = ["citation network", "bibliometrics", "science mapping", "community detection", "leiden", "scientometrics"]
 classifiers = [
-    "Programming Language :: Python :: 3",
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
     "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Information Analysis",
+    "Topic :: Scientific/Engineering :: Visualization",
 ]
 dependencies = [
     "sf-hamilton[sdk]>=1.89,<2",
@@ -59,9 +69,17 @@ dev = ["pytest>=8", "ruff>=0.4"]
 
 [project.urls]
 Homepage = "https://github.com/alfredohernandezinostroza/scientographer"
+Documentation = "https://github.com/alfredohernandezinostroza/scientographer#readme"
+Source = "https://github.com/alfredohernandezinostroza/scientographer"
+Issues = "https://github.com/alfredohernandezinostroza/scientographer/issues"
+Changelog = "https://github.com/alfredohernandezinostroza/scientographer/blob/main/CHANGELOG.md"
 
 [project.scripts]
 scientographer = "scientographer.cli:app"
+
+[tool.flit.sdist]
+# The source archive also carries what a contributor or packager needs.
+include = ["CHANGELOG.md", "CITATION.cff", "CONTRIBUTING.md", "CLA.md", "REUSE.toml", "LICENSES/", "skills/"]
 
 [tool.ruff]
 line-length = 110

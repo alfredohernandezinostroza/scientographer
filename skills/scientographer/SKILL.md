@@ -37,11 +37,11 @@ project's `params.yaml`**, which documents itself. Read it before changing anyth
 # pixi (recommended: a lock file pins every version)
 pixi init my-field && cd my-field
 pixi add python=3.12 graphviz
-pixi add --pypi "scientographer[pipeline] @ git+https://github.com/alfredohernandezinostroza/scientographer.git"
+pixi add --pypi "scientographer[pipeline]"
 
 # or pip
 python -m venv .venv && source .venv/bin/activate
-pip install "scientographer[pipeline] @ git+https://github.com/alfredohernandezinostroza/scientographer.git"
+pip install "scientographer[pipeline]"
 ```
 
 Extras: `pipeline` (DVC, ForceAtlas2, word clouds, DAG drawings: what a new project

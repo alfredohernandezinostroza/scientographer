@@ -3,7 +3,7 @@
 version = 1
 
 [[annotations]]
-path = ["README.md", "CONTRIBUTING.md", "CLA.md", "CITATION.cff", "pyproject.toml", ".gitignore", ".github/**", "REUSE.toml", "scientographer/examples/motor_learning_open_access/data/ATTRIBUTION.md"]
+path = ["README.md", "CHANGELOG.md", "CONTRIBUTING.md", "CLA.md", "CITATION.cff", "pyproject.toml", ".gitignore", ".github/**", "REUSE.toml", "scientographer/examples/motor_learning_open_access/data/ATTRIBUTION.md"]
 SPDX-FileCopyrightText = "2026 Alfredo Hernández Inostroza and the Scientographer contributors"
 SPDX-License-Identifier = "AGPL-3.0-or-later"
 
