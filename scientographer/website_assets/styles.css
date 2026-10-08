@@ -267,6 +267,7 @@ html, body {
   margin-top: 6px;
 }
 #controls input[type="search"]:focus { border-color: var(--accent); }
+#controls input[type="search"][hidden] { display: none; }
 
 .control-row {
   margin-top: 10px;

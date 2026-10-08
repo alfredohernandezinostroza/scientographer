@@ -1215,6 +1215,9 @@ function buildIndex() {
     mesh[i] = (r.mesh || "").toLowerCase();
   }
   state.index = { title, authors, journal, doi, keywords, mesh };
+  // The MeSH filter only makes sense when papers carry MeSH terms (a PubMed corpus).
+  const meshInput = document.getElementById("filter-mesh");
+  if (meshInput) meshInput.hidden = !mesh.some(Boolean);
 }
 
 // ── Graph build ───────────────────────────────────────────────────────────
@@ -1872,6 +1875,14 @@ function integrationBlock(c) {
 }
 
 // ── Detail panel ──────────────────────────────────────────────────────────
+// A paper's "|"-separated terms as one line, or nothing when it has none.
+function termList(label, value) {
+  const terms = (value || "").split("|").map((t) => t.trim()).filter(Boolean);
+  return terms.length
+    ? `<div class="meta"><strong>${escapeHtml(label)}:</strong> ${escapeHtml(terms.join("; "))}</div>`
+    : "";
+}
+
 function showPaperDetail(idx) {
   const r = state.nodesData.nodes[idx];
   const auths = (r.authors || "").split("|").join(", ");
@@ -1902,6 +1913,8 @@ function showPaperDetail(idx) {
     <div class="meta">${escapeHtml(auths)}</div>
     <div class="meta">${r.year ?? ""}${r.journal ? " &middot; " + escapeHtml(r.journal) : ""}</div>
     <div class="meta">${r.indegree || 0} citations &middot; cites ${numOut} &middot; cited by ${numIn}</div>
+    ${termList("Keywords", r.keywords)}
+    ${termList("MeSH terms", r.mesh)}
     <div class="actions">
       ${doiHtml}
       <button id="frame-node">Center on paper</button>
@@ -2510,6 +2523,7 @@ function initGlobalFilters() {
   const elAbstract = document.getElementById("filter-abstract");
   const elJournal = document.getElementById("filter-journal");
   const elKeywords = document.getElementById("filter-keywords");
+  const elMesh = document.getElementById("filter-mesh");
   const btn = document.getElementById("apply-filters");
 
   function readFiltersFromUI() {
@@ -2518,6 +2532,7 @@ function initGlobalFilters() {
     state.filters.abstract = elAbstract?.value || "";
     state.filters.journal = elJournal?.value || "";
     state.filters.keywords = elKeywords?.value || "";
+    state.filters.mesh = elMesh && !elMesh.hidden ? elMesh.value : "";
   }
 
   async function run() {
@@ -2545,7 +2560,7 @@ function initGlobalFilters() {
     });
   }
 
-  const inputs = [elTitle, elAuthor, elAbstract, elJournal, elKeywords].filter(Boolean);
+  const inputs = [elTitle, elAuthor, elAbstract, elJournal, elKeywords, elMesh].filter(Boolean);
   for (const input of inputs) {
     input.addEventListener("keydown", (e) => {
       if (e.key !== "Enter") return;

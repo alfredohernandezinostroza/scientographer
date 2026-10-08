@@ -248,12 +248,13 @@
     <input id="filter-abstract" type="search" placeholder="Filter by abstracts...">
     <input id="filter-journal" type="search" placeholder="Filter by journal...">
     <input id="filter-keywords" type="search" placeholder="Filter by keywords, comma-separated...">
+    <!-- Shown only when the papers carry MeSH terms (e.g. a PubMed corpus). -->
+    <input id="filter-mesh" type="search" placeholder="Filter by MeSH terms, comma-separated..." hidden>
 
     <div class="control-row">
       <label>Text matching</label>
       <select id="match-mode" title="How search and filters match text: whole words (with plurals), word beginnings, anywhere, or a regular expression. Comma-separated queries must all match."></select>
     </div>
-    <!-- <input id="filter-mesh" type="search" placeholder="Filter by MeSH headers, comma-separated..."> -->
 
     <div class="control-row">
       <label>Year <span id="year-readout"></span></label>

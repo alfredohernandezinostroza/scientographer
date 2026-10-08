@@ -226,7 +226,8 @@ colours the citation layout by the first embedding's topics too
 - **Colour by** community at any resolution of the sweep, embedding topic, year,
   citations, or integration; **well-connected papers only** hides the papers the
   Connectivity Modifier left out at that resolution.
-- **Search and filters** on title, author, abstract, journal and keywords, matching
+- **Search and filters** on title, author, abstract, journal, keywords and (for a
+  PubMed corpus) MeSH terms, matching
   whole words by default (so *dance* does not match *guidance*), or prefixes,
   substrings or regular expressions.
 - **Panels** per paper and per community (top papers, authors, keyword bars), a

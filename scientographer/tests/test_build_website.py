@@ -399,3 +399,11 @@ def test_well_connected_masks_sizes_and_bitset():
     bits = np.unpackbits(np.frombuffer(base64.b64decode(payload["resolutions"][str(RES)]), dtype=np.uint8),
                          bitorder="little")[: payload["n"]]
     assert bits.astype(bool).tolist() == masks[str(RES)].tolist()
+
+
+def test_mesh_terms_reach_the_site_only_when_papers_have_them():
+    # A PubMed corpus carries MeSH terms; the site's MeSH filter shows only then.
+    recs = node_records([_mk_node("p", topic=1, community=2, mesh="Cerebellum|Motor Skills"),
+                         _mk_node("q", topic=1, community=2)], resolutions=[], community_resolution=None)
+    assert recs[0]["mesh"] == "Cerebellum|Motor Skills"
+    assert "mesh" not in recs[1]

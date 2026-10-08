@@ -662,11 +662,13 @@ def node_records(raw_nodes: list, resolutions: list[float], community_resolution
                  else _to_int(a.get(TOPIC_ATTR), OUTLIER))
         community = _to_int(a.get(community_attr), OUTLIER) if community_attr else OUTLIER
         named = community >= 0 and community_sizes[community] >= MIN_NAMED_GROUP_SIZE
+        mesh = (a.get("mesh") or "").strip()  # PubMed corpora only; omitted elsewhere to keep nodes.json small
         records.append({
             "id": nid,
             "title": (a.get("title") or "").strip(),
             "authors": (a.get("authors") or "").strip(),
             "keywords": (a.get("keywords") or "").strip(),
+            **({"mesh": mesh} if mesh else {}),
             "year": _to_int(a.get("year")),
             "journal": (a.get("journal") or "").strip(),
             "doi": (a.get("name") or "").strip(),
