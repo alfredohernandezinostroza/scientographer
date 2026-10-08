@@ -306,7 +306,8 @@ def test_extra_view_places_shared_papers_recomputes_communities_and_converts_sna
     for name in ["nodes.json", "edges_out.bin", "edges_in.bin", "clusters.json",
                  "communities_by_resolution.json", "snapshots.json"]:
         assert (tmp_path / "site" / "gemini_data" / name).exists(), name
-    manifest = save_views_manifest(written, [view], "Citation network", tmp_path / "site")
+    manifest = save_views_manifest(written, [view], "Citation network", tmp_path / "site",
+                                   clusters_legend(recs, {}))
     views = json.loads((tmp_path / "site" / "views.json").read_text())
     assert manifest["views"] == ["network", "gemini"]
     assert views["shared_dir"] == "network_data" and views["views"][1]["snapshots"] is True
@@ -317,8 +318,40 @@ def test_no_extra_layouts_means_no_views_manifest(tmp_path):
     from scientographer.build_website import save_views_manifest
 
     (tmp_path / "views.json").write_text("stale")
-    assert save_views_manifest({}, [], "Citation network", tmp_path)["views"] == ["network"]
+    assert save_views_manifest({}, [], "Citation network", tmp_path, {"0": {}})["views"] == ["network"]
     assert not (tmp_path / "views.json").exists()
+
+
+def test_view_without_topics_offers_no_topic_colouring(tmp_path):
+    import json
+
+    from scientographer.build_website import save_views_manifest
+
+    # A lone citation view without topics still writes views.json: the page's
+    # built-in default would offer a Topic colouring that paints every paper grey.
+    save_views_manifest({}, [], "Citation network", tmp_path, {})
+    views = json.loads((tmp_path / "views.json").read_text())["views"]
+    assert [g["key"] for g in views[0]["groupings"]] == ["community"]
+
+
+def test_citation_layout_borrows_embedding_topics_when_the_graph_has_none(tmp_path):
+    from scientographer.build_website import network_topic_source
+
+    raw = [_mk_node(f"n{i}", topic=-1, community=5) for i in range(4)]
+    positions = tmp_path / "gemini.csv"
+    pd.DataFrame({"doi": ["DOIn0", "doin1", "doin2", "elsewhere"], "x": 0, "y": 0, "topic": [0, 0, -1, 1],
+                  "topic_name": ["speech, tongue", "speech, tongue", "", "gait"]}).to_csv(positions, index=False)
+    layouts = [{"key": "gemini", "label": "Gemini embedding", "positions": str(positions)}]
+
+    source = network_topic_source(raw, layouts, "auto")
+    assert source["label"] == "Gemini topic"
+    recs = node_records(raw, resolutions=[RES], community_resolution=RES, network_topic_source=source)
+    assert [r["cluster"] for r in recs] == [0, 0, -1, -1]  # DOIs matched case-insensitively; n3 is absent
+    assert {c["name"] for c in clusters_legend(recs, {}, source).values()} == {"speech, tongue"}
+
+    assert network_topic_source(raw, layouts, "none") is None
+    # A graph with its own topics keeps them.
+    assert network_topic_source([_mk_node("t", topic=2, community=5)], layouts, "auto") is None
 
 
 def test_extra_layout_key_and_columns_are_checked(tmp_path):

@@ -6,7 +6,8 @@ analysis outputs -- the last stage of the pipeline.
 Produces a self-contained sigma.js site (frontend vendored under
 ``website_assets/``) that renders the citation network as a pannable map: each
 dot is a paper, positioned by the graph's own layout (``x``/``y``), colourable
-by semantic **topic** (the ``topic`` attribute) or by Leiden/CPM citation
+by semantic **topic** (the ``topic`` attribute, or else the topics of a
+text-embedding map, ``website.network_topics``) or by Leiden/CPM citation
 **community** at any resolution the graph carries
 (``cpm_communities_at_res=<r>`` attributes), with citation edges, search,
 filters, per-group detail panels, a Metrics tab (partition quality vs.
@@ -121,6 +122,10 @@ DATA_SUBDIR: Final[str] = "network_data"
 # each becomes `<key>_data/` next to network_data/ and an entry in views.json.
 EXTRA_LAYOUTS: Final[list[dict]] = list(_cfg.get("extra_layouts") or [])
 BASE_VIEW_LABEL: Final[str] = str(_cfg.get("view_label") or "Citation network")
+# Topics for the citation layout when the graph has none of its own: the key of
+# an extra layout whose `topic` column to show there ("auto": the first extra
+# layout that has topics; "none": none, the Topic colouring is then left out).
+NETWORK_TOPICS: Final[str] = str(_cfg.get("network_topics") or "auto")
 VIEW_KEY_PATTERN: Final[re.Pattern] = re.compile(r"^[a-z][a-z0-9_]*$")
 FIGURES_SUBDIR: Final[str] = "figures"
 WORDCLOUDS_DIR: Final[Path] = Path(_cfg["wordclouds_dir"])
@@ -148,6 +153,7 @@ DEFAULT_INPUTS: Final[dict] = dict(
     site_title=str(_cfg.get("title") or "Citation map"),
     extra_layouts=EXTRA_LAYOUTS,
     base_view_label=BASE_VIEW_LABEL,
+    network_topics=NETWORK_TOPICS,
 )
 
 
@@ -351,16 +357,20 @@ def _read_table(path: Path) -> pd.DataFrame:
     return pd.read_csv(path, sep="\t" if path.suffix in (".tsv", ".tab") else ",")
 
 
-def _view_groupings(topic_label: str) -> list[dict]:
+def _view_groupings(topic_label: str, has_topics: bool = True) -> list[dict]:
     """The frontend's grouping config for a view: the resolution-indexed citation
-    communities, then the layout's own topics/clusters (if any)."""
-    return [
+    communities, then the layout's topics/clusters when it has any (otherwise
+    colouring by topic would only paint every paper grey)."""
+    groupings = [
         {"key": "community", "label": "Community", "legendLabel": "Communities", "nodeField": "community",
          "colorField": "community_color", "noneLabel": "No community", "citation": True},
-        {"key": "cluster", "label": topic_label, "legendLabel": f"{topic_label}s", "file": "clusters.json",
-         "nodeField": "cluster", "colorField": "color", "noneLabel": f"No {topic_label.lower()}",
-         "semantic": True},
     ]
+    if has_topics:
+        groupings.append(
+            {"key": "cluster", "label": topic_label, "legendLabel": f"{topic_label}s", "file": "clusters.json",
+             "nodeField": "cluster", "colorField": "color", "noneLabel": f"No {topic_label.lower()}",
+             "semantic": True})
+    return groupings
 
 
 def _extra_view(
@@ -604,18 +614,52 @@ def topic_metrics(topic_metrics_path: Optional[Path]) -> dict:
     return {}
 
 
-def node_records(raw_nodes: list, resolutions: list[float], community_resolution: Optional[float]) -> list[dict]:
+def network_topic_source(raw_nodes: list, extra_layouts: list, network_topics: str) -> Optional[dict]:
+    """Topics for the citation layout borrowed from a text-embedding map, when the
+    graph carries no `topic` of its own: {"label", "topic": {doi: id}, "names":
+    {id: name}}, or None (the graph has topics, or no map with topics is chosen)."""
+    if any(_to_int(a.get(TOPIC_ATTR), OUTLIER) >= 0 for _, a in raw_nodes) or network_topics == "none":
+        return None
+    for spec in extra_layouts:
+        if network_topics not in ("auto", str(spec.get("key"))):
+            continue
+        table = _read_table(Path(spec["positions"]))
+        if "topic" not in table.columns:
+            if network_topics != "auto":
+                raise ValueError(f"website.network_topics: extra layout {network_topics!r} has no topic column")
+            continue
+        table = table.dropna(subset=["topic"]).assign(doi=lambda t: t["doi"].astype(str).str.strip().str.lower())
+        names = {}
+        if "topic_name" in table.columns:
+            named = table.dropna(subset=["topic_name"])
+            names = {_to_int(t): str(n).strip() for t, n in
+                     named.groupby("topic")["topic_name"].agg(lambda v: v.mode().iat[0]).items() if str(n).strip()}
+        label = str(spec.get("label") or spec["key"]).removesuffix(" embedding")
+        logger.info("citation layout coloured by the topics of extra layout %s", spec["key"])
+        return {"label": f"{label} {str(spec.get('topic_label') or 'Topic').lower()}",
+                "topic": dict(zip(table["doi"], table["topic"].map(lambda t: _to_int(t, OUTLIER)))),
+                "names": names}
+    if network_topics != "auto":
+        raise ValueError(f"website.network_topics: no extra layout with key {network_topics!r}")
+    return None
+
+
+def node_records(raw_nodes: list, resolutions: list[float], community_resolution: Optional[float],
+                 network_topic_source: Optional[dict] = None) -> list[dict]:
     """Per-paper web records: position (graph x/y), semantic topic (`cluster`
-    + `color`), citation community at the default resolution (`community` +
+    + `color`; the graph's `topic`, else `network_topic_source`'s), citation
+    community at the default resolution (`community` +
     `community_color`, greyed below MIN_NAMED_GROUP_SIZE), the community id at
     every resolution (`communities`), and display metadata."""
     community_attr = f"{COMMUNITY_ATTRIBUTE_PREFIX}{community_resolution}" if community_resolution is not None else None
     community_sizes: Counter = Counter(
         _to_int(a.get(community_attr), OUTLIER) for _, a in raw_nodes) if community_attr else Counter()
 
+    borrowed = network_topic_source["topic"] if network_topic_source else None
     records = []
     for nid, a in raw_nodes:
-        topic = _to_int(a.get(TOPIC_ATTR), OUTLIER)
+        topic = (borrowed.get((a.get("name") or "").strip().lower(), OUTLIER) if borrowed is not None
+                 else _to_int(a.get(TOPIC_ATTR), OUTLIER))
         community = _to_int(a.get(community_attr), OUTLIER) if community_attr else OUTLIER
         named = community >= 0 and community_sizes[community] >= MIN_NAMED_GROUP_SIZE
         records.append({
@@ -668,8 +712,10 @@ def community_labels_from_graph(raw_nodes: list, resolutions: list[float]) -> di
     return labels
 
 
-def clusters_legend(node_records: list[dict], topic_metrics: dict) -> dict:
-    """Legend for the semantic `cluster` (topic) grouping."""
+def clusters_legend(node_records: list[dict], topic_metrics: dict,
+                    network_topic_source: Optional[dict] = None) -> dict:
+    """Legend for the semantic `cluster` (topic) grouping (named by the topic
+    source's names when the topics are borrowed from a text-embedding map)."""
     top_lists = _top_lists_by_group(node_records, "cluster")
     agg: dict[int, dict] = defaultdict(lambda: {"size": 0, "sx": 0.0, "sy": 0.0})
     for r in node_records:
@@ -698,6 +744,8 @@ def clusters_legend(node_records: list[dict], topic_metrics: dict) -> dict:
         m = topic_metrics.get(str(cid))
         if m is not None:
             entry["community_metrics"] = m
+        if network_topic_source and network_topic_source["names"].get(cid):
+            entry["name"] = network_topic_source["names"][cid]
         clusters[str(cid)] = entry
     return clusters
 
@@ -1128,19 +1176,23 @@ def save_extra_views(extra_views: list[dict], community_resolution: Optional[flo
 
 @datasaver()
 def save_views_manifest(
-    save_extra_views: dict, extra_views: list[dict], base_view_label: str, website_dir: Path
+    save_extra_views: dict, extra_views: list[dict], base_view_label: str, website_dir: Path,
+    clusters_legend: dict, network_topic_source: Optional[dict] = None,
 ) -> dict:
-    """views.json, the list of views the site offers, when there is more than the
-    citation layout (otherwise any stale copy is removed)."""
+    """views.json, the list of views the site offers and how each can be
+    coloured. Without it the page assumes one citation view with topics, so it
+    is left out (any stale copy removed) only when that is what the site has."""
+    topic_label = network_topic_source["label"] if network_topic_source else "Topic"
     views = [{"key": "network", "label": base_view_label, "dir": DATA_SUBDIR,
               "subtitle": "Citation-network layout", "snapshots": False,
-              "groupings": _view_groupings("Topic")}]
+              "groupings": _view_groupings(topic_label, bool(clusters_legend))}]
     for view in extra_views:
         views.append({"key": view["key"], "label": view["label"], "dir": save_extra_views[view["key"]]["dir"],
                       "subtitle": view["subtitle"], "snapshots": view["snapshots"] is not None,
-                      "groupings": _view_groupings(view["topic_label"])})
+                      "groupings": _view_groupings(view["topic_label"], bool(view["clusters"]))})
     path = Path(website_dir) / "views.json"
-    _write_optional_json(path, {"default": "network", "shared_dir": DATA_SUBDIR, "views": views}, len(views) > 1)
+    _write_optional_json(path, {"default": "network", "shared_dir": DATA_SUBDIR, "views": views},
+                         len(views) > 1 or not clusters_legend)
     return {"views": [v["key"] for v in views], "extra": save_extra_views}
 
 
