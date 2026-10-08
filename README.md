@@ -16,8 +16,9 @@ stages that read it run again.
 ## What you get
 
 - **Communities at every resolution.** Leiden with the constant Potts model across a
-  resolution sweep (36 values by default; adding one later computes only that one), written onto one graph as
-  `cpm_communities_at_res=<r>` vertex attributes.
+  resolution sweep (36 values by default), written onto one graph as
+  `cpm_communities_at_res=<r>` vertex attributes. Results are stored per resolution,
+  so adding a resolution later computes only that one.
 - **Evidence for choosing a resolution.** Per resolution: modularity, the CPM score,
   surprise, significance, coverage, cross-seed stability and resolution plateaus.
   Per community: size, conductance, internal edge density and internal edge surprise
@@ -27,115 +28,187 @@ stages that read it run again.
 - **Names.** Each community labelled by corrected TF-IDF over its papers' keywords
   (optionally merging synonyms), written onto the graph as `top_keywords_at_res=<r>`.
 - **Word clouds** and TF-IDF histograms per community.
-- **Text embeddings and their maps** (optional). Each paper's cleaned title and
-  abstract embedded with Gemini's API and/or SPECTER2 run locally, kept in a store
-  so only new papers are embedded; BERTopic topics, a 2-D UMAP layout and time
-  snapshots per embedding, shown as extra views of the map.
-- **An interactive map.** Every paper positioned by a ForceAtlas2 layout (or your own
-  Gephi layout), coloured by community at any resolution through a dropdown, with
-  search, filters, citation edges, per-community panels with keyword bars, a Metrics
-  tab for all the measures above, and a Figures tab for the word clouds.
+- **Text-embedding maps** (optional). Each paper's title and abstract embedded with
+  Gemini's API and/or SPECTER2 run locally; BERTopic topics, a 2-D UMAP layout and
+  time snapshots per embedding, shown as extra views of the map.
+- **An interactive map** (see [The map](#the-map)).
 
 The GraphML files the pipeline writes carry the communities, labels and metrics as
 attributes, so you can also open them in Gephi or load them with igraph or networkx.
 
 ## Install
 
-We recommend [pixi](https://pixi.sh). It writes a `pixi.lock` that records the exact
-version of every package, so the same project gives the same communities on any
-machine and in a year's time: Leiden's partitions change between library versions (for
-example `leidenalg` 0.11 and 0.12) even with the same seed. pixi also installs the
-non-Python tools some stages use, such as Graphviz for the DAG figures.
+Scientographer needs Python 3.10 or later. Pick the extras you need:
+
+| Extra | For |
+|---|---|
+| `pipeline` | **everything a new project runs**: DVC, ForceAtlas2, word clouds, DAG drawings |
+| `embeddings` | the text-embedding maps (installs PyTorch, a few GB) |
+| `ui` | the Hamilton UI run tracker |
+| `all` | all of the above |
+
+### With pixi (recommended)
+
+[pixi](https://pixi.sh) writes a `pixi.lock` that records the exact version of every
+package, so your project gives the same communities on any machine and in a year's
+time. This matters: Leiden's partitions change between library versions (for example
+`leidenalg` 0.11 and 0.12) even with the same seed. pixi also installs the non-Python
+tools some stages use, such as Graphviz for the DAG drawings.
 
 ```bash
 pixi init my-field && cd my-field
 pixi add python=3.12 graphviz
+pixi add --pypi "scientographer[pipeline] @ git+https://github.com/alfredohernandezinostroza/scientographer.git"
+pixi shell                    # or prefix every command below with `pixi run`
 ```
 
-then add Scientographer to the new `pixi.toml` and install:
+Commit `pixi.toml` and `pixi.lock` with your project.
 
-```toml
-[pypi-dependencies]
-scientographer = { git = "https://github.com/alfredohernandezinostroza/scientographer.git", branch = "main", extras = ["all"] }
-```
+### With pip
 
 ```bash
-pixi install
+python -m venv .venv && source .venv/bin/activate      # Windows: .venv\Scripts\activate
+pip install "scientographer[pipeline] @ git+https://github.com/alfredohernandezinostroza/scientographer.git"
 ```
 
-Commit `pixi.toml` and `pixi.lock` with your project. Run every command below inside
-the environment, with `pixi run <command>` or after `pixi shell`.
+There is no lock file, so commit a `pip freeze > requirements.txt` to keep the versions
+behind your results on record. The DAG drawings also need Graphviz's `dot` program from
+your system's package manager (`apt install graphviz`, `brew install graphviz`); without
+it the stages still run and only skip the drawings.
 
-**With pip** (no lock file) it works the same:
+To check the install: `scientographer --help`.
+
+## Try the example
+
+The package ships a complete example built only from openly licensed data: 3,925
+open-access articles on motor adaptation and motor skill and sequence learning
+(2001–2026), all published under CC BY, with their authors' own keywords and abstracts
+from Europe PMC, and the 6,860 citations between them from OpenAlex (CC0). The pipeline
+keeps the connected core (about 2,500 papers) and finds dozens of communities; the
+whole run takes a few minutes.
 
 ```bash
-python -m venv .venv && source .venv/bin/activate
-pip install "scientographer[all]"            # when published; until then:
-pip install "scientographer[all] @ git+https://github.com/alfredohernandezinostroza/scientographer"
+scientographer example my-example && cd my-example
+git init && dvc init
+dvc repro                      # the whole pipeline
+scientographer website         # http://localhost:8123
 ```
 
-Commit a `pip freeze > requirements.txt` so the versions behind your results are on
-record. The `figures` extra also needs Graphviz's `dot` program from your system's
-package manager.
+Sources and attribution are in the example's `data/ATTRIBUTION.md`.
 
-Extras: `layout` (ForceAtlas2), `wordclouds`, `dvc` (running the pipeline, and pushing
-data to S3-compatible storage such as DagsHub), `figures` (the DAG drawings), `ui` (the
-Hamilton UI tracker). The core install runs every other stage. For other DVC storage,
-add its plugin (`dvc-gdrive`, …).
-
-## Quick start
+## Your own corpus
 
 ```bash
-scientographer init .              # in my-field: params.yaml, dvc.yaml, data/, .gitignore
+scientographer init my-field && cd my-field    # params.yaml, dvc.yaml, data/, .gitignore
 ```
 
 Put two tables in `data/` (Parquet, CSV or TSV):
 
 | File | Columns |
 |---|---|
-| `data/papers.parquet` | `doi` (required), plus any of `title`, `authors`, `keywords`, `abstract`, `journal`, `year` — `authors` and `keywords` as lists or `\|`-separated strings |
+| `data/papers.parquet` | `doi` (required), plus any of `title`, `authors`, `keywords`, `abstract`, `journal`, `year`; `authors` and `keywords` as lists or `\|`-separated strings |
 | `data/references.parquet` | `citing_doi`, `cited_dois` (a list, or `\|`-separated) |
 
-Only citations between two papers of your corpus become edges. Where the tables come
-from — Scopus, Web of Science, PubMed, OpenAlex, OpenCitations — is up to you.
+Only citations between two papers of your corpus become edges, and only the largest
+connected component is kept. Where the tables come from (Scopus, Web of Science,
+PubMed, OpenAlex, OpenCitations) is up to you.
+
+Before the first run, open `params.yaml`. Every setting is documented there; the ones
+that matter most:
+
+- **Size thresholds** scale with your corpus: `communities.substantive_min_size`,
+  `community_keywords.min_community_size` and `website.min_named_group_size` (30 suits
+  10,000+ papers; a few hundred papers want about 5).
+- **The resolution sweep** (`resolutions.low/mid/high`) and the resolutions the map
+  opens at (`website.default_resolution`) and summarises (`resolutions.canonical`).
+- **Run time.** The Connectivity Modifier grows steeply with community size;
+  `communities.connectivity_modifier_max_community_size` skips resolutions whose
+  largest community is too big. `communities.workers` sets the parallelism.
 
 Then:
 
 ```bash
 git init && dvc init
-dvc repro                      # the whole pipeline
-scientographer website         # http://localhost:8123
-```
-
-Before a real run, open `params.yaml`: the size thresholds (`substantive_min_size`,
-`min_community_size`, `min_named_group_size`) should scale with your corpus, and the
-resolution sweep and `canonical` resolution are the choices that shape the map.
-
-## Try the example
-
-`examples/motor_learning_open_access/` is a complete project built only from openly
-licensed data: 3,925 open-access articles on motor adaptation and motor skill and
-sequence learning (2001–2026), all published under CC BY, with their authors' own
-keywords and abstracts from Europe PMC, and the 6,860 citations between them from
-OpenAlex (CC0). The pipeline keeps the connected core (about 2,500 papers) and finds
-dozens of communities; the whole run takes a few minutes. Sources and attribution are
-in `data/ATTRIBUTION.md`.
-
-```bash
-cd examples/motor_learning_open_access
 dvc repro
 scientographer website
 ```
+
+### Adding resolutions later
+
+Add values to the sweep in `params.yaml` and run `dvc repro`: every stage reuses the
+results it has stored for the other resolutions and computes only the new ones. A
+project whose outputs were made before the stores existed fills them once with
+`scientographer store-existing-results`.
+
+### Text-embedding maps
+
+Install the `embeddings` extra, then list the models and maps in `params.yaml`:
+
+```yaml
+embeddings:
+  models:
+    - name: specter2            # local, no key needed
+      provider: specter2
+    - name: gemini              # Google's API
+      provider: gemini
+      model: gemini-embedding-2
+      dimensions: 3072
+      requests_per_minute: 90
+embedding_maps:
+  maps:
+    - name: specter2
+      min_cluster_size: 50      # HDBSCAN: the smallest topic; scale it with the corpus
+    - name: gemini
+      min_cluster_size: 50
+      snapshots: [1990, 2000, 2010]
+website:
+  extra_layouts:
+    - {key: specter2, label: SPECTER2 embedding, positions: data/layouts/specter2.csv}
+    - {key: gemini, label: Gemini embedding, positions: data/layouts/gemini.csv,
+       snapshots: data/layouts/gemini_snapshots.json}
+```
+
+Gemini needs `GEMINI_API_KEY` in your environment or in the project's `.env` (which
+the generated `.gitignore` keeps out of git). Embeddings are stored per paper, so a
+later run embeds only new papers. The map then offers each embedding as a view, and
+colours the citation layout by the first embedding's topics too
+(`website.network_topics`).
+
+## The map
+
+`scientographer website` serves the site the last stage builds (a static folder,
+`reports/website/`, that you can also publish on any web host). It offers:
+
+- **Views:** the citation layout (ForceAtlas2, or your own Gephi layout through
+  `layout.mode: import`), plus one per text embedding, each with a time menu when it has
+  snapshots.
+- **Colour by** community at any resolution of the sweep, embedding topic, year,
+  citations, or integration; **well-connected papers only** hides the papers the
+  Connectivity Modifier left out at that resolution.
+- **Search and filters** on title, author, abstract, journal and keywords, matching
+  whole words by default (so *dance* does not match *guidance*), or prefixes,
+  substrings or regular expressions.
+- **Panels** per paper and per community (top papers, authors, keyword bars), a
+  **Metrics** tab with every measure above against resolution, a **Figures** tab with
+  the word clouds, and a **Word map** tab: where words occur across the map, as
+  density heatmaps.
+- **Export** of the visible map as a high-resolution PNG: transparent or on a
+  background, styled for white paper or dark slides, with straight or curved citation
+  edges, and labels on the communities or around the map's outline.
+- **Rotate and flip** buttons. The default orientation is reproducible: the main
+  body's long axis horizontal, its long tail down, its most-cited side left.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
 | `scientographer init [dir]` | create a project |
+| `scientographer example [dir]` | create the example project, data included |
 | `scientographer stages` | list the stages (`*` = in this project's dvc.yaml) |
 | `scientographer run <stage>` | run one stage now, without DVC bookkeeping |
 | `scientographer pipeline [stage]` | `dvc repro`, for everything or up to one stage |
-| `scientographer website` | serve the built site |
+| `scientographer website [--port N]` | serve the built site |
+| `scientographer store-existing-results` | fill the per-resolution stores from current outputs |
 | `scientographer ui` | start the Hamilton UI tracker (set `tracker.enabled: true`) |
 | `scientographer params` | show which `params.yaml` is in effect |
 
@@ -156,7 +229,8 @@ build_citation_network -> embed_papers -> embedding_maps -> build_website   (opt
 
 Each arrow is a DVC stage (see the project's `dvc.yaml`); each stage is one module of
 this package, and `scientographer run <stage>` draws its Hamilton DAG to
-`reports/figures/`.
+`reports/figures/`. Stages whose section of `params.yaml` is empty (the embedding
+stages by default) do nothing.
 
 ## Experiments
 
@@ -181,26 +255,48 @@ The resolution sweep itself is not an experiment: stages compare resolutions aga
 each other within one run (stability, plateaus), so the sweep stays inside the
 stages and experiments vary the settings around it.
 
+To share data and results, add a DVC remote (`dvc remote add`); the `dvc` extra
+includes S3-compatible storage such as DagsHub, AWS S3 or MinIO, and other storage
+needs its plugin (`dvc-gdrive`, ...).
+
 ## Tracking runs with the Hamilton UI
 
 Every stage is a Hamilton DAG, and Hamilton's UI can record each run: which
 functions ran, with which inputs, how long they took, and what they produced.
+Install the `ui` extra, then:
 
 ```bash
-pip install "scientographer[ui]"
 scientographer ui            # starts the UI, sets up its project, keeps serving
 ```
 
-Then set `tracker.enabled: true` in `params.yaml`, and every `dvc repro` or
+Set `tracker.enabled: true` in `params.yaml`, and every `dvc repro` or
 `scientographer run` reports to it; each run prints a link to its page. The UI keeps
 its data in `.hamilton/` inside the project.
+
+## Using it with an AI coding agent
+
+[`skills/scientographer/SKILL.md`](skills/scientographer/SKILL.md) teaches an agent
+(Claude Code, Codex, Cursor, …) how to set up, run, configure and troubleshoot a
+Scientographer project. For Claude Code, copy the folder into your project's
+`.claude/skills/` (or `~/.claude/skills/` for all projects):
+
+```bash
+mkdir -p .claude/skills && cd .claude/skills
+curl -L https://github.com/alfredohernandezinostroza/scientographer/archive/refs/heads/main.tar.gz \
+  | tar -xz --strip-components=2 scientographer-main/skills/scientographer
+```
+
+Other agents can be pointed at the same file (for example from `AGENTS.md`).
 
 ## Development
 
 ```bash
+git clone https://github.com/alfredohernandezinostroza/scientographer.git && cd scientographer
 pip install -e ".[all,dev]"
 pytest
 ```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for how a stage is built.
 
 ## License
 

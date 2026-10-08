@@ -21,10 +21,12 @@ jobs:
       - name: Unit tests
         run: pytest -q
       - name: Example project end to end
-        working-directory: examples/motor_learning_open_access
         env:
           DVC_NO_ANALYTICS: "1"
         run: |
+          scientographer example "$RUNNER_TEMP/example"
+          cd "$RUNNER_TEMP/example"
+          git init -q && dvc init -q
           dvc repro
           test -f reports/website/index.html
           test -f reports/website/network_data/communities_by_resolution.json

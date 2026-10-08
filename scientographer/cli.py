@@ -6,6 +6,7 @@ Every stage is a Hamilton DAG module of the package; a project wires them togeth
 in its ``dvc.yaml`` and keeps every setting in its ``params.yaml``::
 
     scientographer init my-project        create a project (params.yaml, dvc.yaml, data/)
+    scientographer example [dir]          create the example project, data included
     scientographer stages                 list the stages (* = declared in ./dvc.yaml)
     scientographer run detect_communities run one stage in the current project
     scientographer pipeline [stage]       `dvc repro`: everything out of date, or up to one stage
@@ -21,7 +22,7 @@ import runpy
 import shutil
 import subprocess
 import sys
-from typing import Optional
+from typing import Final, Optional
 
 import typer
 
@@ -92,6 +93,29 @@ def _dvc_stage_commands() -> set[str]:
     return modules
 
 
+EXAMPLE: Final[str] = "motor_learning_open_access"
+
+
+def _copy_files(directory: Path, targets: dict, force: bool) -> None:
+    """Copy packaged files into the project, keeping existing ones unless `force`."""
+    directory.mkdir(parents=True, exist_ok=True)
+    for name, source in targets.items():
+        target = directory / name
+        if target.exists() and not force:
+            typer.echo(f"kept existing {target} (use --force to overwrite)")
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with resources.as_file(source) as src:
+            shutil.copyfile(src, target)
+        typer.echo(f"wrote {target}")
+    (directory / "data").mkdir(exist_ok=True)
+    _write_gitignore(directory / ".gitignore")
+
+
+def _cd(directory: Path) -> str:
+    return "" if directory == Path(".") else f"cd {directory} && "
+
+
 @app.command()
 def init(
     directory: Path = typer.Argument(Path("."), help="project directory (created if missing)"),
@@ -99,29 +123,41 @@ def init(
 ) -> None:
     """Create a project: params.yaml (every setting, documented), dvc.yaml (the
     pipeline), data/ for your two input tables, and a .gitignore."""
-    directory.mkdir(parents=True, exist_ok=True)
-    templates = resources.files("scientographer")
-    targets = {
-        "params.yaml": templates / "params.yaml",
-        "dvc.yaml": templates / "templates" / "dvc.yaml",
-    }
-    for name, source in targets.items():
-        target = directory / name
-        if target.exists() and not force:
-            typer.echo(f"kept existing {target} (use --force to overwrite)")
-            continue
-        with resources.as_file(source) as src:
-            shutil.copyfile(src, target)
-        typer.echo(f"wrote {target}")
-    (directory / "data").mkdir(exist_ok=True)
-    _write_gitignore(directory / ".gitignore")
+    package = resources.files("scientographer")
+    _copy_files(directory, {
+        "params.yaml": package / "params.yaml",
+        "dvc.yaml": package / "templates" / "dvc.yaml",
+    }, force)
     typer.echo(
         "\nNext:\n"
         f"  1. put your papers table at {directory / 'data/papers.parquet'} (a `doi` column + metadata)\n"
         f"     and your references at {directory / 'data/references.parquet'} (citing_doi, cited_dois)\n"
         "  2. adjust params.yaml (size thresholds scale with the corpus)\n"
-        f"  3. {'' if directory == Path('.') else f'cd {directory} && '}git init && dvc init && dvc repro\n"
+        f"  3. {_cd(directory)}git init && dvc init && dvc repro\n"
         "  4. scientographer website\n"
+        "(in a pixi project, prefix commands with `pixi run`, or start a `pixi shell`)"
+    )
+
+
+@app.command()
+def example(
+    directory: Path = typer.Argument(Path("scientographer-example"), help="project directory (created if missing)"),
+    force: bool = typer.Option(False, "--force", help="overwrite existing files"),
+) -> None:
+    """Create the example project: 3,925 open-access papers on motor learning (CC BY,
+    Europe PMC) and the citations between them (OpenAlex, CC0), ready to run."""
+    package = resources.files("scientographer")
+    source = package / "examples" / EXAMPLE
+    _copy_files(directory, {
+        "params.yaml": source / "params.yaml",
+        "dvc.yaml": package / "templates" / "dvc.yaml",
+        **{f"data/{name}": source / "data" / name
+           for name in ("papers.parquet", "references.parquet", "ATTRIBUTION.md")},
+    }, force)
+    typer.echo(
+        "\nNext (a few minutes; data/ATTRIBUTION.md credits the sources):\n"
+        f"  {_cd(directory)}git init && dvc init && dvc repro\n"
+        "  scientographer website\n"
         "(in a pixi project, prefix commands with `pixi run`, or start a `pixi shell`)"
     )
 

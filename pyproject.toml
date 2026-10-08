@@ -52,6 +52,8 @@ ui = ["sf-hamilton[ui]>=1.89,<2"]
 # Text embeddings and their maps (embed_papers, embedding_maps): Gemini's API and/or
 # SPECTER2 run locally (PyTorch), BERTopic topics and UMAP layouts.
 embeddings = ["google-genai>=1", "torch>=2", "transformers>=4.40", "adapters>=1", "bertopic>=0.16", "umap-learn>=0.5", "hdbscan>=0.8"]
+# Everything a project made by `scientographer init` runs (no PyTorch, no UI server).
+pipeline = ["scientographer[layout,wordclouds,figures,dvc]"]
 all = ["scientographer[layout,wordclouds,figures,dvc,ui,embeddings]"]
 dev = ["pytest>=8", "ruff>=0.4"]
 
@@ -60,9 +62,6 @@ Homepage = "https://github.com/alfredohernandezinostroza/scientographer"
 
 [project.scripts]
 scientographer = "scientographer.cli:app"
-
-[tool.flit.sdist]
-include = ["examples/"]
 
 [tool.ruff]
 line-length = 110

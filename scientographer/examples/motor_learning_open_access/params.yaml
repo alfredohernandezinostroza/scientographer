@@ -7,7 +7,8 @@
 # `scientographer init` creates; the settings that scale with corpus size differ from
 # the defaults and are marked "example:".
 #
-#     cd examples/motor_learning_open_access && dvc repro && scientographer website
+#     scientographer example my-example && cd my-example
+#     git init && dvc init && dvc repro && scientographer website
 #
 citation_network:
   # build_citation_network.py. The papers table needs a `doi` column; title, authors,

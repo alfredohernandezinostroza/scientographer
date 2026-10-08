@@ -87,6 +87,20 @@ def test_init_writes_a_project_whose_dvc_stages_all_exist(tmp_path):
     assert (proj / "params.yaml").read_text() == "edited: true\n"
 
 
+def test_example_writes_a_runnable_project_with_its_data(tmp_path):
+    import pandas as pd
+
+    proj = tmp_path / "example"
+    result = CliRunner().invoke(app, ["example", str(proj)])
+    assert result.exit_code == 0, result.output
+    for name in ["params.yaml", "dvc.yaml", ".gitignore", "data/ATTRIBUTION.md"]:
+        assert (proj / name).exists(), name
+    params = yaml.safe_load((proj / "params.yaml").read_text())
+    papers = pd.read_parquet(proj / params["citation_network"]["papers_table"])
+    references = pd.read_parquet(proj / params["citation_network"]["references_table"])
+    assert len(papers) == 3925 and {"citing_doi", "cited_dois"} <= set(references.columns)
+
+
 def test_init_adds_its_ignores_to_an_existing_gitignore(tmp_path):
     # `pixi init` writes a .gitignore before `scientographer init` runs.
     proj = tmp_path / "proj"

@@ -1,3 +1,0 @@
-# Pipeline outputs under data/ are git-ignored by DVC itself (dvc.yaml `outs`); the
-# small metrics and plot files stay visible to git so `dvc exp` can record them.
-/reports/
