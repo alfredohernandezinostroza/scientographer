@@ -122,8 +122,9 @@ def _build_graph(
         values = rows[column].tolist()
         if column in ("authors", "keywords"):
             values = [separator.join(_as_list(v, separator)) for v in values]
-        elif rows[column].dtype == object:
+        elif pd.api.types.is_object_dtype(rows[column]) or pd.api.types.is_string_dtype(rows[column]):
             # GraphML string columns must not mix str and NaN (igraph drops them).
+            # pandas 3 gives text columns the "str" dtype rather than object.
             values = ["" if v is None or (isinstance(v, float) and pd.isna(v)) else str(v) for v in values]
         graph.vs[column] = values
     return graph
