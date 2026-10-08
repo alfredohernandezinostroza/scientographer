@@ -11,9 +11,11 @@
 - **Paths** are relative to the project directory, the working directory every
   stage runs from. Importing this module never creates anything on disk; each
   stage creates its own output directories when it runs (``ensure_dirs``).
-- **Secrets**: none of the stages in this package call an external service. A
-  ``.env`` next to ``params.yaml`` is still loaded when present, for the Hamilton
-  UI tracker's user name and for any stage a project adds on top.
+- **Secrets**: a ``.env`` next to ``params.yaml`` is loaded when present. The
+  stages that call public services read their optional keys from it by the name
+  params.yaml gives (search_pubmed: NCBI_API_KEY, fetch_references:
+  OPENALEX_API_KEY, embed_papers: GEMINI_API_KEY), as does the Hamilton UI
+  tracker's user name. Keys never go in params.yaml, which is committed.
 """
 
 import os

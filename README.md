@@ -96,6 +96,47 @@ scientographer website         # http://localhost:8123
 
 Sources and attribution are in the example's `data/ATTRIBUTION.md`.
 
+## Start from a PubMed search
+
+No tables to prepare: give a PubMed query, and the pipeline downloads the matching
+records from PubMed and the citations between them from OpenAlex, then maps them.
+
+```bash
+scientographer init my-field --pubmed '("motor learning"[tiab] OR "motor adaptation"[tiab])' \
+    --email you@university.edu
+cd my-field && git init && dvc init
+dvc repro
+scientographer website
+```
+
+Three stages run before the pipeline:
+
+| Stage | What it does |
+|---|---|
+| `search_pubmed` | searches PubMed (NCBI E-utilities) and downloads the matching records in MEDLINE format to `data/raw/pubmed/` |
+| `ingest` | reads them into `data/papers.parquet`: title, abstract, authors, journal, year, MeSH terms, and keywords (the authors' own, else the MeSH major topics); records without a DOI are left out and listed in `data/ingest/` |
+| `fetch_references` | looks the papers up in [OpenAlex](https://openalex.org) by DOI and writes the citations among them to `data/references.parquet` |
+
+Choose a query of a few thousand papers or more: a field's papers cite each other
+enough to form a map only at that scale (two years of one phrase gave a 30-paper
+graph; three phrases over all years, 14,156 records, gave 10,892 connected papers).
+The search and the citations took about 4 minutes for those 14,156 records.
+
+- PubMed returns at most 10,000 records per search; larger results are collected by
+  splitting the search by publication date. A query matching more than `--max-records`
+  (20,000 by default, `pubmed_search.max_records`) stops with an error rather than
+  mapping an arbitrary subset.
+- `init --pubmed` sets the size thresholds for a few thousand papers (15); for
+  10,000 papers or more, raise them to about 30 in `params.yaml`.
+- Neither service needs an account. Optional API keys raise their limits: NCBI's
+  (`NCBI_API_KEY`) allows 10 requests a second instead of 3, and OpenAlex's
+  (`OPENALEX_API_KEY`) a ten times larger daily budget than the roughly 100,000 papers a
+  day it allows without one. Put them in the project's `.env`.
+- Downloaded records and looked-up papers are kept: widening the query later fetches
+  only what is new, and a run stopped by a quota resumes where it stopped.
+- To include papers published since the last search, re-run the search on purpose:
+  `dvc repro -f search_pubmed`, then `dvc repro`.
+
 ## Your own corpus
 
 ```bash
@@ -202,7 +243,7 @@ colours the citation layout by the first embedding's topics too
 
 | Command | What it does |
 |---|---|
-| `scientographer init [dir]` | create a project |
+| `scientographer init [dir]` | create a project (`--pubmed QUERY`: from a PubMed search) |
 | `scientographer example [dir]` | create the example project, data included |
 | `scientographer stages` | list the stages (`*` = in this project's dvc.yaml) |
 | `scientographer run <stage>` | run one stage now, without DVC bookkeeping |
@@ -218,6 +259,7 @@ colours the citation layout by the first embedding's topics too
 ## The pipeline
 
 ```
+(search_pubmed -> ingest -> fetch_references ->)      with `init --pubmed`
 data/papers + data/references
   -> build_citation_network -> detect_communities -> layout_graph
   -> community_quality_metrics

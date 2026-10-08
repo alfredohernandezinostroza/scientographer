@@ -6,6 +6,7 @@ Every stage is a Hamilton DAG module of the package; a project wires them togeth
 in its ``dvc.yaml`` and keeps every setting in its ``params.yaml``::
 
     scientographer init my-project        create a project (params.yaml, dvc.yaml, data/)
+    scientographer init my-project --pubmed QUERY   ... whose corpus is a PubMed search
     scientographer example [dir]          create the example project, data included
     scientographer stages                 list the stages (* = declared in ./dvc.yaml)
     scientographer run detect_communities run one stage in the current project
@@ -116,18 +117,83 @@ def _cd(directory: Path) -> str:
     return "" if directory == Path(".") else f"cd {directory} && "
 
 
+# Size thresholds for a first try on a few thousand papers (the defaults suit 10,000+).
+SMALL_CORPUS_THRESHOLDS: Final[dict[str, int]] = {
+    "substantive_min_size": 15, "min_community_size": 15, "min_named_group_size": 15}
+
+
+def _set_value(text: str, section: str, key: str, value) -> str:
+    """Replace `key: ...` inside one top-level section of a params.yaml text,
+    keeping its comments (the value is written as JSON, which YAML reads)."""
+    import json
+    import re
+
+    start = re.search(rf"^{re.escape(section)}:\s*$", text, flags=re.M)
+    if not start:
+        raise ValueError(f"params.yaml has no section {section!r}")
+    following = re.search(r"^\S", text[start.end():], flags=re.M)
+    end = start.end() + following.start() if following else len(text)
+    body, count = re.subn(rf"^(\s+{re.escape(key)}:)[^\n#]*", lambda m: f"{m.group(1)} {json.dumps(value)}",
+                          text[start.end():end], count=1, flags=re.M)
+    if not count:
+        raise ValueError(f"params.yaml section {section!r} has no key {key!r}")
+    return text[:start.end()] + body + text[end:]
+
+
+def _pubmed_project(directory: Path, query: str, email: str, max_records: int) -> None:
+    """Turn a fresh project into one whose corpus is a PubMed search: the search,
+    ingest and reference stages in front of dvc.yaml, the query in params.yaml."""
+    package = resources.files("scientographer")
+    stages = (package / "templates" / "dvc_pubmed.yaml").read_text(encoding="utf-8")
+    stages = "\n".join(line for line in stages.splitlines() if not line.startswith("#")).strip("\n")
+    dvc_yaml = directory / "dvc.yaml"
+    text = dvc_yaml.read_text(encoding="utf-8")
+    if "search_pubmed:" not in text:
+        text = text.replace("\nstages:\n", "\nstages:\n" + stages + "\n\n", 1)
+        dvc_yaml.write_text(text, encoding="utf-8")
+    params_yaml = directory / "params.yaml"
+    text = params_yaml.read_text(encoding="utf-8")
+    text = _set_value(text, "pubmed_search", "query", query)
+    text = _set_value(text, "pubmed_search", "max_records", max_records)
+    if email:
+        text = _set_value(text, "pubmed_search", "email", email)
+        text = _set_value(text, "fetch_references", "email", email)
+    for key, value in SMALL_CORPUS_THRESHOLDS.items():
+        section = {"substantive_min_size": "communities", "min_community_size": "community_keywords",
+                   "min_named_group_size": "website"}[key]
+        text = _set_value(text, section, key, value)
+    params_yaml.write_text(text, encoding="utf-8")
+
+
 @app.command()
 def init(
     directory: Path = typer.Argument(Path("."), help="project directory (created if missing)"),
     force: bool = typer.Option(False, "--force", help="overwrite an existing params.yaml / dvc.yaml"),
+    pubmed: Optional[str] = typer.Option(None, "--pubmed", metavar="QUERY",
+                                         help="build the corpus from this PubMed search"),
+    email: str = typer.Option("", "--email", help="contact address sent to PubMed and OpenAlex (with --pubmed)"),
+    max_records: int = typer.Option(20000, "--max-records", help="stop if the search matches more (with --pubmed)"),
 ) -> None:
     """Create a project: params.yaml (every setting, documented), dvc.yaml (the
-    pipeline), data/ for your two input tables, and a .gitignore."""
+    pipeline), data/ for your two input tables, and a .gitignore. With --pubmed,
+    the corpus is a PubMed search instead: no tables to prepare."""
     package = resources.files("scientographer")
     _copy_files(directory, {
         "params.yaml": package / "params.yaml",
         "dvc.yaml": package / "templates" / "dvc.yaml",
     }, force)
+    if pubmed is not None:
+        _pubmed_project(directory, pubmed, email, max_records)
+        typer.echo(
+            "\nA PubMed project: `dvc repro` searches PubMed, reads the records, fetches the citations\n"
+            "between them from OpenAlex, then runs the pipeline. Size thresholds are set for a few\n"
+            "thousand papers (15); raise them in params.yaml for a larger search.\n"
+            "Next:\n"
+            f"  {_cd(directory)}git init && dvc init && dvc repro\n"
+            "  scientographer website\n"
+            "(in a pixi project, prefix commands with `pixi run`, or start a `pixi shell`)"
+        )
+        return
     typer.echo(
         "\nNext:\n"
         f"  1. put your papers table at {directory / 'data/papers.parquet'} (a `doi` column + metadata)\n"

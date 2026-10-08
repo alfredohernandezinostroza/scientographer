@@ -82,6 +82,11 @@ def _as_list(value, separator: str) -> list[str]:
     return [str(item).strip() for item in items if item is not None and str(item).strip()]
 
 
+def _is_list_like(value) -> bool:
+    """A list cell (Python list or tuple, or the NumPy array Parquet gives back)."""
+    return isinstance(value, (list, tuple)) or (hasattr(value, "ndim") and getattr(value, "ndim", 0) == 1)
+
+
 def _normalize_doi(doi) -> str:
     return str(doi).strip().lower() if doi is not None and not (isinstance(doi, float) and pd.isna(doi)) else ""
 
@@ -120,7 +125,7 @@ def _build_graph(
     rows = papers.loc[graph.vs["name"]]
     for column in rows.columns:
         values = rows[column].tolist()
-        if column in ("authors", "keywords"):
+        if column in ("authors", "keywords") or any(_is_list_like(v) for v in values):
             values = [separator.join(_as_list(v, separator)) for v in values]
         elif pd.api.types.is_object_dtype(rows[column]) or pd.api.types.is_string_dtype(rows[column]):
             # GraphML string columns must not mix str and NaN (igraph drops them).

@@ -10,11 +10,50 @@
 #
 # The default chain, as `scientographer init` sets it up:
 #
+#   (with `scientographer init --pubmed QUERY`: search_pubmed -> ingest -> fetch_references ->)
 #   data/papers.parquet + data/references.parquet
 #     -> citation_network  -> detect_communities -> layout_graph
 #     -> community_quality_metrics, community_connectivity_metrics,
 #        community_connectivity_modifier, community_quality_metrics_after_connectivity_modifier
 #     -> community_keywords -> wordclouds -> build_website
+
+pubmed_search:
+  # search_pubmed.py: search PubMed and download the matching MEDLINE records (only in
+  # projects made with `scientographer init --pubmed`). PubMed query syntax, e.g.
+  # '"motor learning"[tiab] AND 2015:2025[dp]'. A query matching more than
+  # max_records stops with an error rather than keeping an arbitrary subset.
+  query: ""
+  max_records: 20000
+  # NCBI asks for a contact address. An API key (free, NCBI account) allows 10
+  # requests a second instead of 3: put it in .env under this name.
+  email: ""
+  api_key_env: NCBI_API_KEY
+  output_dir: data/raw/pubmed
+  batch_size: 500
+
+ingest:
+  # ingest.py: read database exports into citation_network.papers_table, merged by
+  # DOI. Each source: a format and a path (file, directory or glob). Formats: medline
+  # (PubMed). Records without a DOI are left out and listed in report_dir.
+  sources:
+    - format: medline
+      path: data/raw/pubmed
+  # medline keywords: author (the authors' own), mesh (MeSH major topics), or
+  # author_then_mesh (the authors' own, else MeSH major topics).
+  keywords_from: author_then_mesh
+  report_dir: data/ingest
+
+fetch_references:
+  # fetch_references.py: the citations between the papers, looked up by DOI in
+  # OpenAlex (CC0) and written to citation_network.references_table. Fetched papers
+  # are stored, so re-runs ask only for new ones. Without a key OpenAlex allows
+  # roughly 100,000 papers a day; a free API key (openalex.org) ten times more:
+  # put it in .env under this name. An email is sent along when given.
+  source: openalex
+  email: ""
+  api_key_env: OPENALEX_API_KEY
+  store_dir: data/references_store
+  dois_per_request: 100
 
 citation_network:
   # build_citation_network.py. The papers table needs a `doi` column; title, authors,
