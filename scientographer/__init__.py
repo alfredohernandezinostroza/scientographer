@@ -10,4 +10,6 @@ wires the stages together and one params.yaml holds every setting.
 Start a project with ``scientographer init``; see the README for the full walk-through.
 """
 
-__version__ = "0.1.0"
+# The one place the version is written (pyproject.toml reads it). Between releases
+# main carries the next version with a .dev0 suffix; see RELEASING.md.
+__version__ = "0.1.0.dev0"
