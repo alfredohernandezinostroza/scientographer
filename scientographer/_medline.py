@@ -75,14 +75,24 @@ def year(record: dict[str, list[str]]):
     return None
 
 
+def natural_order(heading: str) -> str:
+    """A MeSH heading in reading order: MeSH inverts many ("Adaptation,
+    Physiological", "Lymphoma, Large B-Cell, Diffuse"); read back to front they
+    are "Physiological Adaptation", "Diffuse Large B-Cell Lymphoma". As keywords
+    they must not contain ", ", which the keyword stage reads as a separator.
+    Commas inside chemical names ("1,2-Dihydroxybenzene") have no space and stay."""
+    return " ".join(reversed([part.strip() for part in heading.split(", ") if part.strip()]))
+
+
 def mesh_major_topics(record: dict[str, list[str]]) -> list[str]:
     """MeSH headings marked as a major topic of the article (``*``), without
-    their subheadings: "Motor Skills/*physiology" -> "Motor Skills"."""
+    their subheadings and in reading order: "Adaptation, Physiological/*physiology"
+    -> "Physiological Adaptation"."""
     out = []
     for value in record.get("MH", []):
         if "*" not in value:
             continue
-        heading = value.split("/")[0].lstrip("*").strip()
+        heading = natural_order(value.split("/")[0].lstrip("*").strip())
         if heading and heading not in out:
             out.append(heading)
     return out

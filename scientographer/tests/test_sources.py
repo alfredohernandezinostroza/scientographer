@@ -60,6 +60,9 @@ def test_medline_records_parse_tags_lists_and_continuations():
     second = _medline.to_paper(recs[1])
     assert second["doi"] == "10.1000/xyz.2" and second["year"] == 2019
     assert second["keywords"] == ["Learning"]  # no author keywords: MeSH major topics
+    assert _medline.mesh_major_topics(recs[0]) == ["Motor Skills", "Physiological Adaptation"]
+    assert _medline.natural_order("Lymphoma, Large B-Cell, Diffuse") == "Diffuse Large B-Cell Lymphoma"
+    assert _medline.natural_order("1,2-Dihydroxybenzene") == "1,2-Dihydroxybenzene"
     assert _medline.to_paper(recs[1], "author")["keywords"] == []
     assert _medline.to_paper(recs[2])["doi"] == ""
 
