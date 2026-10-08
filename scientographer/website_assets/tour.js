@@ -86,7 +86,7 @@ const STEPS = [
     row: true,
     title: "Colour by",
     body:
-      "Recolour the dots by <strong>semantic topic/cluster</strong>, Leiden " +
+      "Recolour the dots by <strong>semantic topic</strong>, Leiden " +
       "<strong>citation community</strong>, <strong>year</strong>, or " +
       "<strong>citation count</strong>.",
   },
