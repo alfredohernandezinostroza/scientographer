@@ -16,7 +16,7 @@ stages that read it run again.
 ## What you get
 
 - **Communities at every resolution.** Leiden with the constant Potts model across a
-  resolution sweep (36 values by default), written onto one graph as
+  resolution sweep (36 values by default; adding one later computes only that one), written onto one graph as
   `cpm_communities_at_res=<r>` vertex attributes.
 - **Evidence for choosing a resolution.** Per resolution: modularity, the CPM score,
   surprise, significance, coverage, cross-seed stability and resolution plateaus.
@@ -27,6 +27,10 @@ stages that read it run again.
 - **Names.** Each community labelled by corrected TF-IDF over its papers' keywords
   (optionally merging synonyms), written onto the graph as `top_keywords_at_res=<r>`.
 - **Word clouds** and TF-IDF histograms per community.
+- **Text embeddings and their maps** (optional). Each paper's cleaned title and
+  abstract embedded with Gemini's API and/or SPECTER2 run locally, kept in a store
+  so only new papers are embedded; BERTopic topics, a 2-D UMAP layout and time
+  snapshots per embedding, shown as extra views of the map.
 - **An interactive map.** Every paper positioned by a ForceAtlas2 layout (or your own
   Gephi layout), coloured by community at any resolution through a dropdown, with
   search, filters, citation edges, per-community panels with keyword bars, a Metrics
@@ -147,6 +151,7 @@ data/papers + data/references
   -> community_connectivity_metrics -> community_connectivity_modifier
   -> community_quality_metrics_after_connectivity_modifier
   -> community_keywords -> wordclouds -> build_website
+build_citation_network -> embed_papers -> embedding_maps -> build_website   (optional)
 ```
 
 Each arrow is a DVC stage (see the project's `dvc.yaml`); each stage is one module of

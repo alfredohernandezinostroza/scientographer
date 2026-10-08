@@ -142,6 +142,35 @@ wordclouds:
   top_n_words: 20
   forceatlas2_iterations: 500
 
+embeddings:
+  # embed_papers.py: a text embedding per paper (its cleaned title + abstract), one
+  # store per model under output_dir; only new papers or changed texts are
+  # embedded, so runs are resumable and incremental. Providers: gemini (Google's
+  # API; needs GEMINI_API_KEY in the environment or .env) and specter2 (local,
+  # allenai/specter2_base with its proximity adapter). Needs the `embeddings` extra.
+  input_graphml: data/citation_network.graphml
+  output_dir: data/embeddings
+  models: []
+  # - name: gemini
+  #   provider: gemini
+  #   model: gemini-embedding-2
+  #   dimensions: 3072
+  #   requests_per_minute: 90     # the free tier allows 100
+  #   workers: 8
+  # - name: specter2
+  #   provider: specter2
+  #   batch_size: 32
+
+embedding_maps:
+  # embedding_maps.py: per store, BERTopic topics (UMAP to 5-d, HDBSCAN, c-TF-IDF
+  # names), a 2-D UMAP layout and optional time snapshots, written as the tables
+  # website.extra_layouts reads (<name>.csv, <name>_snapshots.json).
+  output_dir: data/layouts
+  maps: []
+  # - name: gemini              # an embeddings.models name
+  #   min_cluster_size: 50      # HDBSCAN: the smallest topic
+  #   snapshots: [1980, 1990, 2000, 2010]
+
 website:
   # build_website.py: only `graphml` is required; every other input is optional and
   # its panel is left out when the file is absent.

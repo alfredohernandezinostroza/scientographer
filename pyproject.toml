@@ -49,7 +49,10 @@ dvc = ["dvc>=3.50", "dvc-s3>=3"]
 figures = ["graphviz>=0.20"]
 # The Hamilton UI tracker (`scientographer ui`).
 ui = ["sf-hamilton[ui]>=1.89,<2"]
-all = ["scientographer[layout,wordclouds,figures,dvc,ui]"]
+# Text embeddings and their maps (embed_papers, embedding_maps): Gemini's API and/or
+# SPECTER2 run locally (PyTorch), BERTopic topics and UMAP layouts.
+embeddings = ["google-genai>=1", "torch>=2", "transformers>=4.40", "adapters>=1", "bertopic>=0.16", "umap-learn>=0.5", "hdbscan>=0.8"]
+all = ["scientographer[layout,wordclouds,figures,dvc,ui,embeddings]"]
 dev = ["pytest>=8", "ruff>=0.4"]
 
 [project.urls]

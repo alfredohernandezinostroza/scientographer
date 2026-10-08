@@ -146,6 +146,26 @@ stages:
     outs:
       - ${wordclouds.output_dir}
 
+  embed_papers:
+    cmd: scientographer run embed_papers
+    deps:
+      - ${embeddings.input_graphml}
+    params:
+      - embeddings
+    outs:
+      # The embedding stores: kept between runs, so only new papers are embedded.
+      - ${embeddings.output_dir}:
+          persist: true
+
+  embedding_maps:
+    cmd: scientographer run embedding_maps
+    deps:
+      - ${embeddings.output_dir}
+    params:
+      - embedding_maps
+    outs:
+      - ${embedding_maps.output_dir}
+
   build_website:
     cmd: scientographer run build_website
     deps:
@@ -158,6 +178,7 @@ stages:
       - ${website.connectivity_modifier_membership}
       - ${website.community_keyword_scores}
       - ${wordclouds.output_dir}
+      - ${embedding_maps.output_dir}  # extra layouts made from the embeddings, if any
     params:
       - website
     outs:
