@@ -582,8 +582,9 @@ function applyOrientation() {
 // hidden communities and time snapshot, in their current colours) onto an
 // offscreen canvas at the chosen size, with optional citation edges (straight,
 // or curved like Gephi's) and the labels of the communities that have visible
-// papers. "Current view" exports the visible window; "Whole map" every visible
-// node, framed to fit.
+// papers, either on each community or around the map's outline beside it (the
+// image then grows to fit them). "Current view" exports the visible window;
+// "Whole map" every visible node, framed to fit.
 const EXPORT_FONT = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
 const EXPORT_EDGE_ALPHA = 0.16;
 // On white paper the map's light community colours wash out, so the light style
@@ -627,6 +628,96 @@ function colorForWhite(color, maxLightness) {
   return `rgb(${out.map((v) => Math.round(v * 255)).join(",")})`;
 }
 const EXPORT_CURVATURE = 0.25; // control-point offset as a fraction of edge length
+// Labels around the map: the outline is the radius, in each of EXPORT_RIM_BINS
+// directions from the map's centre, within which EXPORT_RIM_QUANTILE of that
+// direction's papers lie. Only the main body counts (papers within
+// EXPORT_RIM_BODY times the radius holding 90% of them), so small groups flung
+// far out do not push the labels away. Only communities holding at least
+// EXPORT_RIM_MIN_SHARE of the visible papers are labelled there, as on a
+// printed map (about 18 at resolution 0.0015).
+const EXPORT_RIM_BINS = 90;
+const EXPORT_RIM_QUANTILE = 0.98;
+const EXPORT_RIM_BODY = 1.5;
+const EXPORT_RIM_MIN_SHARE = 0.01;
+
+// Where each community's label goes, in image pixels: one box per label,
+// largest community first, never overlapping (a label with no free place is
+// left out). `points` are the visible papers ([x, y, group id]); "centre" puts a
+// label on its community's centre, "border" just outside the map's outline in
+// the direction of the community's centre (seen from the map's median point),
+// sliding along the outline or further out when that place is taken.
+function exportLabelBoxes(mode, points, names, sizes, fontSize, measure) {
+  const sums = new Map();
+  for (const [x, y, gid] of points) {
+    const a = sums.get(gid) || { x: 0, y: 0, n: 0 };
+    a.x += x; a.y += y; a.n += 1;
+    sums.set(gid, a);
+  }
+  const median = (values) => values.sort((a, b) => a - b)[Math.floor(values.length / 2)];
+  const cx = median(points.map((p) => p[0])), cy = median(points.map((p) => p[1]));
+  const gap = 3 * fontSize / 13;
+  const height = fontSize;
+  const ids = [...sums.keys()].sort((a, b) => sizes[b] - sizes[a]);
+  const placed = [];
+  const overlaps = (box) => placed.some((o) => box.l < o.r + gap && box.r > o.l - gap && box.t < o.b + gap && box.b > o.t - gap);
+  const boxAt = (x, y, w, text, gid) => ({ l: x - w / 2, r: x + w / 2, t: y - height / 2, b: y + height / 2, x, y, text, gid });
+
+  if (mode !== "border") {
+    for (const gid of ids) {
+      const { x, y, n } = sums.get(gid);
+      const text = names[gid];
+      const box = boxAt(x / n, y / n, measure(text), text, gid);
+      if (!overlaps(box)) placed.push(box);
+    }
+    return placed;
+  }
+
+  // The outline: per direction, the radius holding most of that direction's
+  // papers, widened to its neighbours' so a label clears a nearby bulge too.
+  const bins = Array.from({ length: EXPORT_RIM_BINS }, () => []);
+  const binOf = (angle) => ((Math.floor((angle + Math.PI) / (2 * Math.PI) * EXPORT_RIM_BINS) % EXPORT_RIM_BINS) + EXPORT_RIM_BINS) % EXPORT_RIM_BINS;
+  const radii = points.map(([x, y]) => Math.hypot(x - cx, y - cy));
+  const sortedRadii = [...radii].sort((a, b) => a - b);
+  const body = EXPORT_RIM_BODY * sortedRadii[Math.floor(0.9 * (sortedRadii.length - 1))];
+  points.forEach(([x, y], i) => {
+    if (radii[i] <= body) bins[binOf(Math.atan2(y - cy, x - cx))].push(radii[i]);
+  });
+  const quantile = bins.map((r) => {
+    if (!r.length) return 0;
+    r.sort((a, b) => a - b);
+    return r[Math.min(r.length - 1, Math.floor(EXPORT_RIM_QUANTILE * r.length))];
+  });
+  const rim = quantile.map((_, b) => Math.max(...[-1, 0, 1].map((d) => quantile[(b + d + EXPORT_RIM_BINS) % EXPORT_RIM_BINS])));
+  const radiusAt = (angle) => rim[binOf(angle)];
+
+  // Candidate places, nearest first: slide along the outline (up to ±40°), then
+  // step outwards.
+  const candidates = [];
+  for (let step = 0; step <= 8; step++) {
+    for (let k = 0; k <= 16; k++) {
+      for (const sign of k ? [1, -1] : [1]) candidates.push({ turn: sign * k * 2.5 * Math.PI / 180, step, cost: step * 2 + k });
+    }
+  }
+  candidates.sort((a, b) => a.cost - b.cost);
+
+  for (const gid of ids) {
+    const { x, y, n } = sums.get(gid);
+    if (n < EXPORT_RIM_MIN_SHARE * points.length) continue;
+    const text = names[gid];
+    const w = measure(text);
+    const home = Math.atan2(y / n - cy, x / n - cx);
+    for (const { turn, step } of candidates) {
+      const angle = home + turn;
+      const ux = Math.cos(angle), uy = Math.sin(angle);
+      const r = radiusAt(angle) + 2 * gap + step * 1.2 * height;
+      // The box sits outside the point on the outline, on the side facing away
+      // from the map (left of it on the left, below it at the bottom, ...).
+      const box = boxAt(cx + ux * r + ux * w / 2, cy + uy * r + uy * height / 2, w, text, gid);
+      if (!overlaps(box)) { placed.push(box); break; }
+    }
+  }
+  return placed;
+}
 
 function initExportControls() {
   const button = document.getElementById("export-png");
@@ -644,7 +735,7 @@ function initExportControls() {
         edges: document.getElementById("export-edges").value,
         nodeScale: parseFloat(document.getElementById("export-nodes").value),
         background: document.getElementById("export-background")?.value || "transparent-light",
-        labels: document.getElementById("export-labels").checked,
+        labels: document.getElementById("export-labels").value,
       });
     } catch (err) {
       console.error(err);
@@ -700,12 +791,57 @@ async function exportMapPng({ area, longSide, edges, nodeScale, labels, backgrou
   // never shrink below what reads at the exported size.
   const sizeScale = area === "all" ? Math.max(scale, longSide / Math.max(viewWidth, viewHeight)) : scale;
 
+  const px = (n) => [(n.x - x0) * scale, (n.y - y0) * scale];
+  let width = Math.round((x1 - x0) * scale);
+  let height = Math.round((y1 - y0) * scale);
+
+  // Nodes in the region, raised ones (selected / highlighted) last.
+  const order = [];
+  for (let i = 0; i < nodes.length; i++) if (inRegion(nodes[i])) order.push(i);
+  order.sort((a, b) => nodes[a].z - nodes[b].z);
+
+  // Labels of the active grouping's communities with visible papers in the
+  // region. They are placed first because labels around the map can reach past
+  // the frame, which then grows to hold them.
+  const g = labels !== "none" ? grouping(state.colorBy) : null;
+  const fontSize = 13 * sizeScale;
+  const font = `600 ${fontSize}px ${EXPORT_FONT}`;
+  let labelBoxes = [];
+  if (g) {
+    const points = [];
+    for (const i of order) {
+      const gid = String(state.nodesData.nodes[i][g.nodeField]);
+      if (g.data[gid]) points.push([...px(nodes[i]), gid]);
+    }
+    const names = {}, sizes = {};
+    for (const [gid, d] of Object.entries(g.data)) { names[gid] = d.name; sizes[gid] = d.size; }
+    const measurer = document.createElement("canvas").getContext("2d");
+    measurer.font = font;
+    if (points.length) labelBoxes = exportLabelBoxes(labels, points, names, sizes, fontSize, (t) => measurer.measureText(t).width);
+  }
+  // Keep every label inside the image: on-map labels are nudged in, labels
+  // around the map widen the frame.
+  const margin = 6 * sizeScale;
+  let padLeft = 0, padTop = 0, padRight = 0, padBottom = 0;
+  if (labels === "border") {
+    for (const b of labelBoxes) {
+      padLeft = Math.max(padLeft, margin - b.l); padTop = Math.max(padTop, margin - b.t);
+      padRight = Math.max(padRight, b.r + margin - width); padBottom = Math.max(padBottom, b.b + margin - height);
+    }
+    [padLeft, padTop, padRight, padBottom] = [padLeft, padTop, padRight, padBottom].map(Math.ceil);
+  } else {
+    for (const b of labelBoxes) {
+      const w = b.r - b.l;
+      b.x = Math.min(Math.max(b.x, w / 2 + margin), width - w / 2 - margin);
+      b.y = Math.min(Math.max(b.y, fontSize / 2 + margin), height - fontSize / 2 - margin);
+    }
+  }
+
   const canvas = document.createElement("canvas");
-  canvas.width = Math.round((x1 - x0) * scale);
-  canvas.height = Math.round((y1 - y0) * scale);
+  canvas.width = width + padLeft + padRight;
+  canvas.height = height + padTop + padBottom;
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error(`the browser could not allocate a ${canvas.width}×${canvas.height} canvas`);
-  const px = (n) => [(n.x - x0) * scale, (n.y - y0) * scale];
 
   // Background: transparent or filled, styled for a white page (darker colours,
   // white label outlines) or for a dark one (the map's own colours).
@@ -717,6 +853,7 @@ async function exportMapPng({ area, longSide, edges, nodeScale, labels, backgrou
     ctx.fillStyle = "#ffffff";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
   }
+  ctx.translate(padLeft, padTop);
   const paint = forWhite ? (c) => colorForWhite(c, EXPORT_LIGHT.maxLightness) : (c) => c;
 
   // Edges: citations between two visible papers with at least one end in the
@@ -755,10 +892,7 @@ async function exportMapPng({ area, longSide, edges, nodeScale, labels, backgrou
     ctx.globalAlpha = 1;
   }
 
-  // Nodes (nodeScale 0 = edges only), raised ones (selected / highlighted) last.
-  const order = [];
-  for (let i = 0; i < nodes.length; i++) if (inRegion(nodes[i])) order.push(i);
-  order.sort((a, b) => nodes[a].z - nodes[b].z);
+  // Nodes (nodeScale 0 = edges only).
   if (nodeScale > 0) {
     for (const i of order) {
       const n = nodes[i];
@@ -770,46 +904,20 @@ async function exportMapPng({ area, longSide, edges, nodeScale, labels, backgrou
     }
   }
 
-  // Labels of the active grouping's communities with visible papers in the
-  // region, at the centre of those papers, largest first, never overlapping.
-  const g = labels ? grouping(state.colorBy) : null;
-  if (g) {
-    const sums = new Map();
-    for (const i of order) {
-      const gid = String(state.nodesData.nodes[i][g.nodeField]);
-      if (!g.data[gid]) continue;
-      const [x, y] = px(nodes[i]);
-      const a = sums.get(gid) || { x: 0, y: 0, n: 0 };
-      a.x += x; a.y += y; a.n += 1;
-      sums.set(gid, a);
-    }
-    const fontSize = 13 * sizeScale;
-    ctx.font = `600 ${fontSize}px ${EXPORT_FONT}`;
+  if (labelBoxes.length) {
+    ctx.font = font;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.lineJoin = "round"; // a mitred halo spikes on letters such as M
     ctx.miterLimit = 2;
-    const placed = [];
-    const gap = 3 * sizeScale;
-    const groupIds = [...sums.keys()].sort((a, b) => g.data[b].size - g.data[a].size);
-    for (const gid of groupIds) {
-      const { x, y, n } = sums.get(gid);
-      const text = g.data[gid].name;
-      const w = ctx.measureText(text).width;
-      // Keep the whole label inside the image.
-      const margin = gap + 3 * sizeScale;
-      const cx = Math.min(Math.max(x / n, w / 2 + margin), canvas.width - w / 2 - margin);
-      const cy = Math.min(Math.max(y / n, fontSize / 2 + margin), canvas.height - fontSize / 2 - margin);
-      const box = { l: cx - w / 2 - gap, r: cx + w / 2 + gap, t: cy - fontSize / 2 - gap, b: cy + fontSize / 2 + gap };
-      if (placed.some((o) => box.l < o.r && box.r > o.l && box.t < o.b && box.b > o.t)) continue;
-      placed.push(box);
+    for (const { x, y, text, gid } of labelBoxes) {
       // An outline in the background's colour keeps text readable over edges.
       ctx.lineWidth = (forWhite ? 4 : 3) * sizeScale;
       ctx.strokeStyle = forWhite ? "rgba(255,255,255,0.9)" : "rgba(0,0,0,0.75)";
-      ctx.strokeText(text, cx, cy);
+      ctx.strokeText(text, x, y);
       const labelColor = g.data[gid].color || "#e6e9ef";
       ctx.fillStyle = forWhite ? colorForWhite(labelColor, EXPORT_LIGHT.textMaxLightness) : labelColor;
-      ctx.fillText(text, cx, cy);
+      ctx.fillText(text, x, y);
     }
   }
 
