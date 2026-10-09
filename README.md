@@ -3,6 +3,7 @@
 [![PyPI](https://img.shields.io/pypi/v/scientographer)](https://pypi.org/project/scientographer/)
 [![Python](https://img.shields.io/pypi/pyversions/scientographer)](https://pypi.org/project/scientographer/)
 [![Tests](https://github.com/alfredohernandezinostroza/scientographer/actions/workflows/tests.yml/badge.svg)](https://github.com/alfredohernandezinostroza/scientographer/actions/workflows/tests.yml)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23266361.svg)](https://doi.org/10.5281/zenodo.23266361)
 [![License: AGPL v3+](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)](https://github.com/alfredohernandezinostroza/scientographer/blob/main/LICENSE)
 
 Map a scientific literature from its citation network.
@@ -363,8 +364,20 @@ See [CONTRIBUTING.md](https://github.com/alfredohernandezinostroza/scientographe
 - **Your data and results** are yours: the graphs, metrics, JSON and figures the pipeline
   computes are its output, not part of the software.
 
-Each file states its license in an `SPDX-License-Identifier` header. If you use
-Scientographer in research, please cite it (see [CITATION.cff](https://github.com/alfredohernandezinostroza/scientographer/blob/main/CITATION.cff)).
+Each file states its license in an `SPDX-License-Identifier` header.
+
+## How to cite
+
+If you use Scientographer in research, please cite it:
+
+> Hernández Inostroza, A. *Scientographer: mapping a scientific literature from its
+> citation network* [software]. Zenodo. https://doi.org/10.5281/zenodo.23266361
+
+That DOI always resolves to the latest version. To cite the exact version behind
+your results, use that version's own DOI, listed on the
+[Zenodo record](https://doi.org/10.5281/zenodo.23266361).
+GitHub's "Cite this repository" button gives the same reference as APA or BibTeX,
+from [CITATION.cff](https://github.com/alfredohernandezinostroza/scientographer/blob/main/CITATION.cff).
 
 ## Origin
 
