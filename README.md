@@ -43,14 +43,14 @@ attributes, so you can also open them in Gephi or load them with igraph or netwo
 
 ## Install
 
-Scientographer needs Python 3.10 or later. Pick the extras you need:
+Scientographer needs Python 3.10 or later. The plain install runs every stage of a
+project (DVC, ForceAtlas2, word clouds, the map); two extras add the heavy parts:
 
 | Extra | For |
 |---|---|
-| `pipeline` | **everything a new project runs**: DVC, ForceAtlas2, word clouds, DAG drawings |
 | `embeddings` | the text-embedding maps (installs PyTorch, a few GB) |
 | `ui` | the Hamilton UI run tracker |
-| `all` | all of the above |
+| `all` | both |
 
 ### With pixi (recommended)
 
@@ -63,7 +63,7 @@ tools some stages use, such as Graphviz for the DAG drawings.
 ```bash
 pixi init my-field && cd my-field
 pixi add python=3.12 graphviz
-pixi add --pypi "scientographer[pipeline]"
+pixi add --pypi scientographer
 pixi shell                    # or prefix every command below with `pixi run`
 ```
 
@@ -73,7 +73,7 @@ Commit `pixi.toml` and `pixi.lock` with your project.
 
 ```bash
 python -m venv .venv && source .venv/bin/activate      # Windows: .venv\Scripts\activate
-pip install "scientographer[pipeline]"
+pip install scientographer
 ```
 
 There is no lock file, so commit a `pip freeze > requirements.txt` to keep the versions
@@ -82,8 +82,9 @@ your system's package manager (`apt install graphviz`, `brew install graphviz`);
 it the stages still run and only skip the drawings.
 
 To check the install: `scientographer --help`. The development version installs
-from GitHub: replace `scientographer[pipeline]` by
-`scientographer[pipeline] @ git+https://github.com/alfredohernandezinostroza/scientographer.git`.
+from GitHub: replace `scientographer` by
+`"scientographer @ git+https://github.com/alfredohernandezinostroza/scientographer.git"`.
+Extras go in square brackets, quoted: `pip install "scientographer[embeddings]"`.
 
 ## Try the example
 
@@ -305,7 +306,7 @@ The resolution sweep itself is not an experiment: stages compare resolutions aga
 each other within one run (stability, plateaus), so the sweep stays inside the
 stages and experiments vary the settings around it.
 
-To share data and results, add a DVC remote (`dvc remote add`); the `dvc` extra
+To share data and results, add a DVC remote (`dvc remote add`); the install
 includes S3-compatible storage such as DagsHub, AWS S3 or MinIO, and other storage
 needs its plugin (`dvc-gdrive`, ...).
 

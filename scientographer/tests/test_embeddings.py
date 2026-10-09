@@ -86,6 +86,7 @@ def test_embed_only_what_is_missing(tmp_path, monkeypatch):
 
 # ── maps ───────────────────────────────────────────────────────────────────────
 def test_embedding_maps_topics_layout_and_snapshots(tmp_path, monkeypatch):
+    pytest.importorskip("bertopic", reason="needs the `embeddings` extra")
     from scientographer import embedding_maps
 
     rng = np.random.default_rng(0)

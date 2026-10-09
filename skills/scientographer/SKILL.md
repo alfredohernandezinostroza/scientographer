@@ -37,16 +37,17 @@ project's `params.yaml`**, which documents itself. Read it before changing anyth
 # pixi (recommended: a lock file pins every version)
 pixi init my-field && cd my-field
 pixi add python=3.12 graphviz
-pixi add --pypi "scientographer[pipeline]"
+pixi add --pypi scientographer
 
 # or pip
 python -m venv .venv && source .venv/bin/activate
-pip install "scientographer[pipeline]"
+pip install scientographer
 ```
 
-Extras: `pipeline` (DVC, ForceAtlas2, word clouds, DAG drawings: what a new project
-runs), `embeddings` (Gemini client, SPECTER2 via PyTorch, BERTopic, UMAP; large),
-`ui` (Hamilton UI tracker), `all`, `dev` (pytest, ruff).
+The plain install runs every stage of a project (DVC, ForceAtlas2, word clouds, the
+map). Extras, installed as `"scientographer[embeddings]"`: `embeddings` (Gemini client,
+SPECTER2 via PyTorch, BERTopic, UMAP; large), `ui` (Hamilton UI tracker), `all`,
+`dev` (pytest, ruff).
 
 Then either the bundled example (3,925 open-access papers; a few minutes):
 

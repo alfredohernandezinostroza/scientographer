@@ -79,7 +79,7 @@ def _has_complete_layout(graph: ig.Graph) -> bool:
 
 
 def _forceatlas2_positions(graph: ig.Graph, iterations: int) -> tuple[list[float], list[float]]:
-    from fa2 import ForceAtlas2  # optional dependency (`[layout]` extra)
+    from fa2 import ForceAtlas2
 
     layout = ForceAtlas2(verbose=False).forceatlas2_igraph_layout(
         graph.as_undirected(), iterations=iterations

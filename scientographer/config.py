@@ -115,7 +115,7 @@ def tracker_adapters(dag_name: str, tags: dict | None = None) -> list:
 def draw_dag(dr, dag_name: str, outputs: list | None = None, inputs: dict | None = None) -> None:
     """Draw a stage's Hamilton DAG to reports/figures/ (all nodes, and the executed
     path when ``outputs`` are given). Needs the `graphviz` Python package and the
-    Graphviz `dot` program (``pip install "scientographer[figures]"``); without them
+    Graphviz `dot` program (from the system, or `pixi add graphviz`); without them
     the stage runs as usual and just skips the drawing."""
     import importlib.util
     import logging

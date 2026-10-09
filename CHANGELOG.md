@@ -27,6 +27,8 @@ The first release.
 - **Tooling:** `scientographer init`, `example`, `run`, `pipeline`, `website`,
   `store-existing-results`, `ui`; DVC stages and experiments; Hamilton UI tracking;
   a bundled open-access example; an agent skill.
+- **Install:** `pip install scientographer` runs every stage of a project; the
+  `embeddings` and `ui` extras add the text-embedding maps and the Hamilton UI.
 
 [Unreleased]: https://github.com/alfredohernandezinostroza/scientographer/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/alfredohernandezinostroza/scientographer/releases/tag/v0.1.0
