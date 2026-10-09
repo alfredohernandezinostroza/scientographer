@@ -17,8 +17,9 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
+      # The plain install must run a whole project; the extras are tested below.
       - name: Install
-        run: pip install -e ".[all,dev]"
+        run: pip install -e ".[dev]"
       - name: Unit tests
         run: pytest -q
       - name: Example project end to end
@@ -31,3 +32,15 @@ jobs:
           dvc repro
           test -f reports/website/index.html
           test -f reports/website/network_data/communities_by_resolution.json
+
+  extras:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install with every extra
+        run: pip install -e ".[all,dev]"
+      - name: Unit tests
+        run: pytest -q

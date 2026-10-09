@@ -45,27 +45,29 @@ dependencies = [
     "python-dotenv>=1",
     "typer>=0.12",
     "matplotlib>=3.8",
+    # ForceAtlas2 layout (compiles a C speed-up when it can, else runs as pure Python),
+    # the word-cloud stage, and DVC with S3-compatible remotes (DagsHub, AWS S3, MinIO;
+    # other storage needs its plugin, e.g. `pip install dvc-gdrive`).
+    "fa2>=1.1",
+    "wordcloud>=1.9",
+    "shapely>=2",
+    "pillow>=10",
+    "dvc>=3.50",
+    "dvc-s3>=3",
+    # Drawing each stage's DAG to reports/figures/ (also needs the Graphviz `dot`
+    # program; without it the drawings are skipped).
+    "graphviz>=0.20",
 ]
 
 [project.optional-dependencies]
-# layout_graph's in-pipeline ForceAtlas2 (not needed when importing a Gephi layout).
-layout = ["fa2>=1.1"]
-# The word-cloud / TF-IDF histogram stage.
-wordclouds = ["fa2>=1.1", "wordcloud>=1.9", "shapely>=2", "pillow>=10"]
-# Running the pipeline with DVC (stages, caching, experiments), and pushing data to
-# S3-compatible storage such as DagsHub, AWS S3 or MinIO. Other storage (Google Drive,
-# Azure, SSH, ...) needs its own DVC plugin, e.g. `pip install dvc-gdrive`.
-dvc = ["dvc>=3.50", "dvc-s3>=3"]
-# Drawing each stage's DAG to reports/figures/ (also needs the Graphviz `dot` program).
-figures = ["graphviz>=0.20"]
-# The Hamilton UI tracker (`scientographer ui`).
-ui = ["sf-hamilton[ui]>=1.89,<2"]
+# The base install runs every stage of a project made by `scientographer init`; the
+# extras add the heavy parts few projects need.
 # Text embeddings and their maps (embed_papers, embedding_maps): Gemini's API and/or
 # SPECTER2 run locally (PyTorch), BERTopic topics and UMAP layouts.
 embeddings = ["google-genai>=1", "torch>=2", "transformers>=4.40", "adapters>=1", "bertopic>=0.16", "umap-learn>=0.5", "hdbscan>=0.8"]
-# Everything a project made by `scientographer init` runs (no PyTorch, no UI server).
-pipeline = ["scientographer[layout,wordclouds,figures,dvc]"]
-all = ["scientographer[layout,wordclouds,figures,dvc,ui,embeddings]"]
+# The Hamilton UI tracker (`scientographer ui`).
+ui = ["sf-hamilton[ui]>=1.89,<2"]
+all = ["scientographer[embeddings,ui]"]
 dev = ["pytest>=8", "ruff>=0.4"]
 
 [project.urls]
