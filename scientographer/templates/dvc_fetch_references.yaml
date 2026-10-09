@@ -1,0 +1,17 @@
+# SPDX-FileCopyrightText: 2026 Alfredo Hernández Inostroza and the Scientographer contributors
+# SPDX-License-Identifier: MIT
+# The stage `scientographer init` puts in front of the pipeline unless the corpus
+# comes with its own references (--own-references): the citations between the papers
+# of data/papers.parquet, from OpenAlex, become data/references.parquet.
+  fetch_references:
+    cmd: scientographer run fetch_references
+    deps:
+      - ${citation_network.papers_table}
+    params:
+      - fetch_references
+    outs:
+      - ${citation_network.references_table}
+      # Looked-up papers are kept between runs: re-runs ask OpenAlex only for new ones.
+      - ${fetch_references.store_dir}:
+          persist: true
+

@@ -2,9 +2,9 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Scientographer: map a scientific literature from its citation network.
 
-From two tables -- the papers and their references -- to Leiden/CPM communities at
-every resolution of a sweep, their quality and well-connectedness, keyword labels,
-word clouds, and an interactive map. Every stage is an Apache Hamilton DAG; DVC
+From a PubMed search or a table of papers -- their citations fetched from OpenAlex --
+to Leiden/CPM communities at every resolution of a sweep, their quality and
+well-connectedness, keyword labels, word clouds, and an interactive map. Every stage is an Apache Hamilton DAG; DVC
 wires the stages together and one params.yaml holds every setting.
 
 Start a project with ``scientographer init``; see the README for the full walk-through.

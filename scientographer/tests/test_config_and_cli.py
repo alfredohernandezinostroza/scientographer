@@ -81,10 +81,19 @@ def test_init_writes_a_project_whose_dvc_stages_all_exist(tmp_path):
     for stage in dvc["stages"].values():
         module = stage["cmd"].split()[-1]
         assert module in _stage_modules(), module
+    # The citations between the user's papers are fetched unless they bring their own.
+    assert list(dvc["stages"])[:2] == ["fetch_references", "citation_network"]
+    own = tmp_path / "own"
+    result = CliRunner().invoke(app, ["init", str(own), "--own-references", "--email", "a@b.org"])
+    assert result.exit_code == 0, result.output
+    assert "fetch_references" not in yaml.safe_load((own / "dvc.yaml").read_text())["stages"]
+    assert "references.parquet" in result.output
     # A second init keeps the user's edits unless forced.
     (proj / "params.yaml").write_text("edited: true\n")
-    CliRunner().invoke(app, ["init", str(proj)])
+    dvc_before = (proj / "dvc.yaml").read_text()
+    CliRunner().invoke(app, ["init", str(proj), "--pubmed", "x"])
     assert (proj / "params.yaml").read_text() == "edited: true\n"
+    assert (proj / "dvc.yaml").read_text() == dvc_before
 
 
 def test_example_writes_a_runnable_project_with_its_data(tmp_path):

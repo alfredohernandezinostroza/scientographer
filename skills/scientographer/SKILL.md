@@ -1,11 +1,12 @@
 ---
 name: scientographer
-description: How to install, run, configure, extend and troubleshoot Scientographer, the Python package that maps a scientific literature from its citation network (from two tables, or straight from a PubMed search) (Leiden/CPM communities over a resolution sweep, quality and well-connectedness metrics, keyword labels, text-embedding maps, an interactive website) as a Hamilton + DVC pipeline. Use whenever a project has a params.yaml/dvc.yaml made by `scientographer init`, the user mentions Scientographer, or asks to build a citation map, run the pipeline, pick a resolution, add resolutions, add Gemini/SPECTER2 embedding maps, read the pipeline's results, or publish the map.
+description: How to install, run, configure, extend and troubleshoot Scientographer, the Python package that maps a scientific literature from its citation network (from a PubMed search, or from a table of papers whose citations it fetches from OpenAlex) (Leiden/CPM communities over a resolution sweep, quality and well-connectedness metrics, keyword labels, text-embedding maps, an interactive website) as a Hamilton + DVC pipeline. Use whenever a project has a params.yaml/dvc.yaml made by `scientographer init`, the user mentions Scientographer, or asks to build a citation map, run the pipeline, pick a resolution, add resolutions, add Gemini/SPECTER2 embedding maps, read the pipeline's results, or publish the map.
 ---
 
 # Scientographer
 
-Scientographer turns two tables (papers, references) into a citation graph,
+Scientographer turns a PubMed search or a table of papers (with DOIs) into a
+citation graph (citations fetched from OpenAlex, or from the user's own table),
 Leiden/CPM communities at many resolutions, metrics that say how real those
 communities are, keyword names, and a static interactive website. Each stage is
 a module of the `scientographer` package run by DVC; **every setting lives in the
@@ -63,8 +64,10 @@ scientographer init my-field --pubmed '"motor learning"[tiab]' --email you@uni.e
 cd my-field && git init && dvc init && dvc repro && scientographer website
 ```
 
-or a project from the user's own tables: `scientographer init my-field`, put the two
-tables in `data/`, adjust `params.yaml`, then `git init && dvc init && dvc repro`.
+or a project from the user's own papers: `scientographer init my-field`, put the papers
+table in `data/`, adjust `params.yaml`, then `git init && dvc init && dvc repro`. The
+first stage, `fetch_references`, fetches the citations between them from OpenAlex. A
+user who already has a references table runs `init --own-references` instead.
 
 ### The PubMed path
 
@@ -85,15 +88,15 @@ and `fetch_references` (citations among the papers from OpenAlex by DOI, to
 - The search does not re-run by itself: `dvc repro -f search_pubmed` fetches papers
   published since. Report the funnel from the two report files (records, without DOI,
   found in OpenAlex, citations, papers in the graph).
-- `ingest` reads only the `medline` format so far; other exports go through the
-  two-table route.
+- `ingest` reads only the `medline` format so far; other exports become a papers table
+  (with DOIs) and take the own-corpus route.
 
 ### Input tables (Parquet, CSV or TSV)
 
 | File | Columns |
 |---|---|
 | `data/papers.parquet` | `doi` (required); optional `title`, `authors`, `keywords`, `abstract`, `journal`, `year`. `authors`/`keywords` as lists or `\|`-separated strings |
-| `data/references.parquet` | `citing_doi`, `cited_dois` (list or `\|`-separated) |
+| `data/references.parquet` | only with `init --own-references` (otherwise `fetch_references` writes it): `citing_doi`, `cited_dois` (list or `\|`-separated) |
 
 DOIs are matched case-insensitively. Only citations between two corpus papers become
 edges; isolated papers are dropped and, by default, only the largest weakly connected
@@ -158,7 +161,8 @@ the Gephi graphml (or a CSV with `name`/`id`, `x`, `y`), and add the file to the
 
 | Path | Contents |
 |---|---|
-| `data/raw/pubmed/`, `data/ingest/report.json`, `data/references_store/report.json` | PubMed path only: the records, and what was read, dropped and found |
+| `data/raw/pubmed/`, `data/ingest/report.json` | PubMed path only: the records, and what was read and dropped |
+| `data/references_store/report.json` | unless `--own-references`: papers found in OpenAlex, with references, citations within the corpus |
 | `data/citation_network.graphml` | the citation graph (vertex `name` = DOI, paper metadata) |
 | `data/citation_network_with_layout.graphml` | + `cpm_communities_at_res=<r>` per resolution, `x`/`y` |
 | `data/detect_communities/partition_summary.parquet` | communities, singletons, largest community per resolution |
