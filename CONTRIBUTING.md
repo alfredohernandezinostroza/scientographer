@@ -2,6 +2,13 @@
 
 Thank you for helping. Bug reports, questions and pull requests are all welcome.
 
+## How changes reach `main`
+
+Work on a branch (`feature/...`, `fix/...`) and open a pull request into `main`; it is
+merged once CI passes. `main` is always in a working state, and releases are tags on
+it (see [RELEASING.md](RELEASING.md)). A change users would notice adds a line under
+`## [Unreleased]` in [CHANGELOG.md](CHANGELOG.md).
+
 ## Before you open a pull request
 
 1. Install the development environment: `pip install -e ".[all,dev]"`.

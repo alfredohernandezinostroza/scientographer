@@ -5,7 +5,7 @@ All notable changes to Scientographer. The format follows
 [Semantic Versioning](https://semver.org/) (before 1.0, a minor version may change
 settings or outputs).
 
-## [0.1.0] - unreleased
+## [Unreleased]
 
 The first release.
 
@@ -26,4 +26,4 @@ The first release.
   `store-existing-results`, `ui`; DVC stages and experiments; Hamilton UI tracking;
   a bundled open-access example; an agent skill.
 
-[0.1.0]: https://github.com/alfredohernandezinostroza/scientographer/releases/tag/v0.1.0
+[Unreleased]: https://github.com/alfredohernandezinostroza/scientographer/commits/main

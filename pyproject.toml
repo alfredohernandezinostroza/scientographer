@@ -4,7 +4,8 @@ build-backend = "flit_core.buildapi"
 
 [project]
 name = "scientographer"
-version = "0.1.0"
+# The version lives in one place, scientographer/__init__.py (see RELEASING.md).
+dynamic = ["version"]
 description = "Map a scientific literature from its citation network: Leiden/CPM communities across a resolution sweep, quality and well-connectedness metrics, keyword labels and an interactive map, as a reproducible Hamilton + DVC pipeline."
 readme = "README.md"
 authors = [{ name = "Alfredo Hernández Inostroza" }]
@@ -79,7 +80,7 @@ scientographer = "scientographer.cli:app"
 
 [tool.flit.sdist]
 # The source archive also carries what a contributor or packager needs.
-include = ["CHANGELOG.md", "CITATION.cff", "CONTRIBUTING.md", "CLA.md", "REUSE.toml", "LICENSES/", "skills/"]
+include = ["CHANGELOG.md", "RELEASING.md", "CITATION.cff", "CONTRIBUTING.md", "CLA.md", "REUSE.toml", "LICENSES/", "skills/"]
 
 [tool.ruff]
 line-length = 110
