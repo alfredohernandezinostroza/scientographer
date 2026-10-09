@@ -7,6 +7,8 @@ settings or outputs).
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-09
+
 The first release.
 
 - **Pipeline:** citation graph from two tables; Leiden/CPM communities over a
@@ -26,4 +28,5 @@ The first release.
   `store-existing-results`, `ui`; DVC stages and experiments; Hamilton UI tracking;
   a bundled open-access example; an agent skill.
 
-[Unreleased]: https://github.com/alfredohernandezinostroza/scientographer/commits/main
+[Unreleased]: https://github.com/alfredohernandezinostroza/scientographer/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/alfredohernandezinostroza/scientographer/releases/tag/v0.1.0
