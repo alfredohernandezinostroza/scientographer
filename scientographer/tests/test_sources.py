@@ -168,6 +168,12 @@ def test_init_pubmed_puts_the_search_stages_in_front(tmp_path):
     assert params["pubmed_search"]["max_records"] == 500
     assert params["pubmed_search"]["email"] == params["fetch_references"]["email"] == "someone@example.org"
     assert params["communities"]["substantive_min_size"] == 15
-    # Running it again does not add the stages twice.
+    # Running it again does not add the stages twice; --force starts the project again.
     CliRunner().invoke(app, ["init", str(proj), "--pubmed", "x"])
     assert (proj / "dvc.yaml").read_text().count("search_pubmed:") == 1
+    CliRunner().invoke(app, ["init", str(proj), "--pubmed", "y", "--force"])
+    text = (proj / "dvc.yaml").read_text()
+    assert text.count("search_pubmed:") == 1 and text.count("fetch_references:") == 1
+    assert yaml.safe_load((proj / "params.yaml").read_text())["pubmed_search"]["query"] == "y"
+    bad = CliRunner().invoke(app, ["init", str(tmp_path / "bad"), "--pubmed", "x", "--own-references"])
+    assert bad.exit_code == 2

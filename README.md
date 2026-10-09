@@ -8,11 +8,19 @@
 
 Map a scientific literature from its citation network.
 
-Give Scientographer two tables — the papers of a field and the references between
-them — and it builds the citation graph, detects Leiden/CPM communities at every
+Give Scientographer a few keywords, or the papers you exported from any database.
+It searches PubMed for the keywords, fetches the citations between the papers from
+OpenAlex, builds the citation graph, detects Leiden/CPM communities at every
 resolution of a sweep, measures how real those communities are, names each one by
 its most distinguishing keywords, and renders everything as an interactive map you
 can open in a browser.
+
+```bash
+pip install scientographer
+scientographer init my-field --pubmed '"motor learning" OR "motor adaptation"'
+cd my-field && git init && dvc init && dvc repro    # search, citations, communities, map
+scientographer website                              # open the map
+```
 
 Every stage is an [Apache Hamilton](https://hamilton.apache.org/) DAG, the stages are
 wired together by [DVC](https://dvc.org/), and one `params.yaml` holds every setting.
@@ -21,6 +29,9 @@ stages that read it run again.
 
 ## What you get
 
+- **A corpus from a search or from your exports.** A PubMed query, or a table of
+  papers with DOIs from Scopus, Web of Science or anywhere else; the citations between
+  them come from [OpenAlex](https://openalex.org), or from your own references table.
 - **Communities at every resolution.** Leiden with the constant Potts model across a
   resolution sweep (36 values by default), written onto one graph as
   `cpm_communities_at_res=<r>` vertex attributes. Results are stored per resolution,
@@ -152,16 +163,22 @@ The search and the citations took about 4 minutes for those 14,156 records.
 scientographer init my-field && cd my-field    # params.yaml, dvc.yaml, data/, .gitignore
 ```
 
-Put two tables in `data/` (Parquet, CSV or TSV):
+Put your papers in `data/papers.parquet` (or a CSV or TSV file, set in
+`citation_network.papers_table`): a `doi` column, plus any of `title`, `authors`,
+`keywords`, `abstract`, `journal`, `year`; `authors` and `keywords` as lists or
+`\|`-separated strings. The first stage, `fetch_references`, looks the papers up in
+OpenAlex by DOI and writes the citations between them to `data/references.parquet`,
+as on the PubMed path; papers without a DOI cannot be looked up.
+
+Already have the references (from Web of Science or Scopus exports, say)? Start with
+`scientographer init my-field --own-references` and put them next to the papers:
 
 | File | Columns |
 |---|---|
-| `data/papers.parquet` | `doi` (required), plus any of `title`, `authors`, `keywords`, `abstract`, `journal`, `year`; `authors` and `keywords` as lists or `\|`-separated strings |
 | `data/references.parquet` | `citing_doi`, `cited_dois` (a list, or `\|`-separated) |
 
-Only citations between two papers of your corpus become edges, and only the largest
-connected component is kept. Where the tables come from (Scopus, Web of Science,
-PubMed, OpenAlex, OpenCitations) is up to you.
+Either way, only citations between two papers of your corpus become edges, and only
+the largest connected component is kept.
 
 Before the first run, open `params.yaml`. Every setting is documented there; the ones
 that matter most:

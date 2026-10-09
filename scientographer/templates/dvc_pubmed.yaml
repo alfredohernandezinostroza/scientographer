@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Alfredo Hernández Inostroza and the Scientographer contributors
 # SPDX-License-Identifier: MIT
-# The stages `scientographer init --pubmed` puts in front of the pipeline: a PubMed
-# search becomes data/papers.parquet and data/references.parquet.
+# The stages `scientographer init --pubmed` puts in front of the pipeline (and of
+# fetch_references): a PubMed search becomes data/papers.parquet.
   search_pubmed:
     cmd: scientographer run search_pubmed
     params:
@@ -20,16 +20,3 @@
     outs:
       - ${citation_network.papers_table}
       - ${ingest.report_dir}
-
-  fetch_references:
-    cmd: scientographer run fetch_references
-    deps:
-      - ${citation_network.papers_table}
-    params:
-      - fetch_references
-    outs:
-      - ${citation_network.references_table}
-      # Looked-up papers are kept between runs: re-runs ask OpenAlex only for new ones.
-      - ${fetch_references.store_dir}:
-          persist: true
-

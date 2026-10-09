@@ -5,7 +5,7 @@
 Every stage is a Hamilton DAG module of the package; a project wires them together
 in its ``dvc.yaml`` and keeps every setting in its ``params.yaml``::
 
-    scientographer init my-project        create a project (params.yaml, dvc.yaml, data/)
+    scientographer init my-project        create a project for your papers (citations fetched)
     scientographer init my-project --pubmed QUERY   ... whose corpus is a PubMed search
     scientographer example [dir]          create the example project, data included
     scientographer stages                 list the stages (* = declared in ./dvc.yaml)
@@ -140,29 +140,35 @@ def _set_value(text: str, section: str, key: str, value) -> str:
     return text[:start.end()] + body + text[end:]
 
 
-def _pubmed_project(directory: Path, query: str, email: str, max_records: int) -> None:
-    """Turn a fresh project into one whose corpus is a PubMed search: the search,
-    ingest and reference stages in front of dvc.yaml, the query in params.yaml."""
-    package = resources.files("scientographer")
-    stages = (package / "templates" / "dvc_pubmed.yaml").read_text(encoding="utf-8")
+def _insert_stages(directory: Path, template: str, first_stage: str) -> None:
+    """Put a packaged template's stages at the front of the project's dvc.yaml (once)."""
+    stages = (resources.files("scientographer") / "templates" / template).read_text(encoding="utf-8")
     stages = "\n".join(line for line in stages.splitlines() if not line.startswith("#")).strip("\n")
     dvc_yaml = directory / "dvc.yaml"
     text = dvc_yaml.read_text(encoding="utf-8")
-    if "search_pubmed:" not in text:
-        text = text.replace("\nstages:\n", "\nstages:\n" + stages + "\n\n", 1)
-        dvc_yaml.write_text(text, encoding="utf-8")
+    if f"\n  {first_stage}:" not in text:
+        dvc_yaml.write_text(text.replace("\nstages:\n", "\nstages:\n" + stages + "\n\n", 1), encoding="utf-8")
+
+
+def _set_params(directory: Path, values: list[tuple[str, str, object]]) -> None:
     params_yaml = directory / "params.yaml"
     text = params_yaml.read_text(encoding="utf-8")
-    text = _set_value(text, "pubmed_search", "query", query)
-    text = _set_value(text, "pubmed_search", "max_records", max_records)
-    if email:
-        text = _set_value(text, "pubmed_search", "email", email)
-        text = _set_value(text, "fetch_references", "email", email)
-    for key, value in SMALL_CORPUS_THRESHOLDS.items():
-        section = {"substantive_min_size": "communities", "min_community_size": "community_keywords",
-                   "min_named_group_size": "website"}[key]
+    for section, key, value in values:
         text = _set_value(text, section, key, value)
     params_yaml.write_text(text, encoding="utf-8")
+
+
+def _pubmed_project(directory: Path, query: str, email: str, max_records: int) -> None:
+    """Turn a project into one whose corpus is a PubMed search: the search and ingest
+    stages in front of fetch_references, the query in params.yaml."""
+    _insert_stages(directory, "dvc_pubmed.yaml", "search_pubmed")
+    values = [("pubmed_search", "query", query), ("pubmed_search", "max_records", max_records)]
+    if email:
+        values.append(("pubmed_search", "email", email))
+    sections = {"substantive_min_size": "communities", "min_community_size": "community_keywords",
+                "min_named_group_size": "website"}
+    values += [(sections[key], key, value) for key, value in SMALL_CORPUS_THRESHOLDS.items()]
+    _set_params(directory, values)
 
 
 @app.command()
@@ -171,17 +177,33 @@ def init(
     force: bool = typer.Option(False, "--force", help="overwrite an existing params.yaml / dvc.yaml"),
     pubmed: Optional[str] = typer.Option(None, "--pubmed", metavar="QUERY",
                                          help="build the corpus from this PubMed search"),
-    email: str = typer.Option("", "--email", help="contact address sent to PubMed and OpenAlex (with --pubmed)"),
+    own_references: bool = typer.Option(False, "--own-references",
+                                        help="your corpus comes with its references table: do not fetch citations"),
+    email: str = typer.Option("", "--email", help="contact address sent to OpenAlex (and PubMed)"),
     max_records: int = typer.Option(20000, "--max-records", help="stop if the search matches more (with --pubmed)"),
 ) -> None:
     """Create a project: params.yaml (every setting, documented), dvc.yaml (the
-    pipeline), data/ for your two input tables, and a .gitignore. With --pubmed,
-    the corpus is a PubMed search instead: no tables to prepare."""
+    pipeline), data/ for your papers table, and a .gitignore. The citations between
+    the papers are fetched from OpenAlex unless --own-references. With --pubmed, the
+    corpus is a PubMed search instead: no table to prepare."""
+    if pubmed is not None and own_references:
+        typer.echo("--own-references does not apply to --pubmed (PubMed records carry no references)", err=True)
+        raise typer.Exit(code=2)
+    # An existing project's dvc.yaml and params.yaml are the user's: only a new one
+    # (or --force) gets the source stages and their settings.
+    fresh = force or not (directory / "dvc.yaml").exists()
     package = resources.files("scientographer")
     _copy_files(directory, {
         "params.yaml": package / "params.yaml",
         "dvc.yaml": package / "templates" / "dvc.yaml",
     }, force)
+    if not fresh:
+        typer.echo("kept the existing project as it is; use --force to start it again")
+        return
+    if not own_references:
+        _insert_stages(directory, "dvc_fetch_references.yaml", "fetch_references")
+        if email:
+            _set_params(directory, [("fetch_references", "email", email)])
     if pubmed is not None:
         _pubmed_project(directory, pubmed, email, max_records)
         typer.echo(
@@ -194,10 +216,14 @@ def init(
             "(in a pixi project, prefix commands with `pixi run`, or start a `pixi shell`)"
         )
         return
+    references = (
+        f"     and your references at {directory / 'data/references.parquet'} (citing_doi, cited_dois)\n"
+        if own_references else
+        "     (the citations between them are fetched from OpenAlex by DOI)\n")
     typer.echo(
         "\nNext:\n"
         f"  1. put your papers table at {directory / 'data/papers.parquet'} (a `doi` column + metadata)\n"
-        f"     and your references at {directory / 'data/references.parquet'} (citing_doi, cited_dois)\n"
+        + references +
         "  2. adjust params.yaml (size thresholds scale with the corpus)\n"
         f"  3. {_cd(directory)}git init && dvc init && dvc repro\n"
         "  4. scientographer website\n"

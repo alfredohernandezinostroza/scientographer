@@ -7,6 +7,13 @@ settings or outputs).
 
 ## [Unreleased]
 
+- **Citations fetched for any corpus:** `scientographer init` now puts the
+  `fetch_references` stage in front of the pipeline, so a papers table with DOIs is
+  enough; the citations between the papers come from OpenAlex. Projects that bring
+  their own references table use `init --own-references`.
+- `init` on an existing project keeps its `dvc.yaml` and `params.yaml` as they are
+  (`--force` starts it again).
+
 ## [0.1.0] - 2026-10-09
 
 The first release.
