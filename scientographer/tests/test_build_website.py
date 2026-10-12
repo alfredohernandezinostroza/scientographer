@@ -439,3 +439,19 @@ def test_mesh_terms_reach_the_site_only_when_papers_have_them():
                          _mk_node("q", topic=1, community=2)], resolutions=[], community_resolution=None)
     assert recs[0]["mesh"] == "Cerebellum|Motor Skills"
     assert "mesh" not in recs[1]
+
+
+def test_citation_counts_and_sizes_come_from_the_edges_when_gephi_columns_are_missing():
+    from scientographer.build_website import _fill_citation_counts_and_sizes
+
+    raw = [("n0", {}), ("n1", {}), ("n2", {}), ("g", {"Eingangsgrad": "7", "Grad": "9", "size": "4.5"})]
+    edges = [(1, 0), (2, 0), (2, 1)]  # n0 cited twice, n1 once, n2 never
+    _fill_citation_counts_and_sizes(raw, edges)
+    attrs = [a for _, a in raw]
+    assert [a["Eingangsgrad"] for a in attrs[:3]] == ["2", "1", "0"]
+    assert [a["Grad"] for a in attrs[:3]] == ["2", "2", "2"]
+    # Size grows linearly with citations received, 2 to 20, as Gephi's default ranking.
+    # (scaled by the most-cited paper counted from the edges: n0, with 2)
+    assert [float(a["size"]) for a in attrs[:3]] == [20.0, 11.0, 2.0]
+    # A graph laid out in Gephi keeps its own columns.
+    assert attrs[3] == {"Eingangsgrad": "7", "Grad": "9", "size": "4.5"}

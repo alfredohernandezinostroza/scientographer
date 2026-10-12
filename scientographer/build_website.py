@@ -224,6 +224,32 @@ def _parse_graphml(graphml_file: Path):
     return nodes, edges, graph_attributes, node_attribute_names
 
 
+def _fill_citation_counts_and_sizes(raw_nodes: list, edges: list) -> None:
+    """Citation counts and dot sizes for a graph that lacks Gephi's columns.
+
+    A graph laid out in Gephi carries in-degree, degree and node size
+    (``Eingangsgrad``, ``Grad`` and ``size`` in its German locale); one laid out
+    by the pipeline does not, which left every paper at 0 citations and the
+    same tiny dot. Fill them from the graph's own edges (in place, only where
+    missing): in-degree = citations received within the corpus, degree = all
+    citation links, and size growing linearly with in-degree from 2 to 20, as
+    Gephi's default ranking."""
+    indegree = [0] * len(raw_nodes)
+    degree = [0] * len(raw_nodes)
+    for s, t in edges:
+        indegree[t] += 1
+        degree[s] += 1
+        degree[t] += 1
+    most = max(indegree, default=0) or 1
+    for i, (_, attrs) in enumerate(raw_nodes):
+        if attrs.get("Eingangsgrad") is None:
+            attrs["Eingangsgrad"] = str(indegree[i])
+        if attrs.get("Grad") is None:
+            attrs["Grad"] = str(degree[i])
+        if attrs.get("size") is None:
+            attrs["size"] = str(round(2.0 + 18.0 * _to_int(attrs["Eingangsgrad"], 0) / most, 3))
+
+
 def _resolutions_from_attribute_names(names) -> list[float]:
     found = set()
     for name in names:
@@ -590,6 +616,7 @@ def _main() -> int:
 @unpack_fields("raw_nodes", "edges", "graph_attributes", "node_attribute_names")
 def parsed_graphml(graphml_path: Path) -> tuple[list, list, dict, list]:
     raw_nodes, edges, graph_attributes, node_attribute_names = _parse_graphml(graphml_path)
+    _fill_citation_counts_and_sizes(raw_nodes, edges)
     logger.info("parsed graphml: %d nodes, %d edges, %d graph-level attributes",
                 len(raw_nodes), len(edges), len(graph_attributes))
     return raw_nodes, edges, graph_attributes, node_attribute_names
