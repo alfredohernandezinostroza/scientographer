@@ -74,6 +74,9 @@ citation_layouts:
   input_graphml: data/citation_network_with_communities.graphml
   output_dir: data/citation_layouts
   layouts:  # example
+    - key: forceatlas2_3d
+      dimensions: 3
+      iterations: 1000
     - key: linlog
       lin_log: true
       dimensions: 2
@@ -223,6 +226,10 @@ website:
   # out of that view only. A table with a `z` column (citation_layouts with
   # `dimensions: 3`) opens in the site's 3D view.
   extra_layouts:  # example
+    - key: forceatlas2_3d
+      label: Citation network (3D)
+      subtitle: ForceAtlas2, as the main map, in three dimensions
+      positions: data/citation_layouts/forceatlas2_3d.csv
     - key: linlog
       label: Citation network (LinLog)
       subtitle: ForceAtlas2 in LinLog mode

@@ -167,6 +167,7 @@ const state = {
   // Map orientation (the rotate / flip buttons): applied to every coordinate put
   // into the graph and every centroid read from the data, see orient().
   orientation: { angle: 0, flipX: false, flipY: false }, // angle in degrees
+  dotScale: 1, // the Dot size slider
 
   // The Connectivity Modifier's verdict per resolution (well_connected.json):
   // { n, resolutions: { "<r>": base64 bitset } }, decoded lazily into masks.
@@ -948,11 +949,12 @@ function initOrientationControls() {
       applyOrientation();
     });
   }
-  // Dot size (3D views): scales every paper's dot.
+  // Dot size: scales every paper's dot, in every view.
   const dotSize = document.getElementById("dot-size");
   dotSize?.addEventListener("input", () => {
     document.getElementById("dot-size-value").textContent = `${dotSize.value}×`;
-    if (is3D()) state.renderer.setDotScale(parseFloat(dotSize.value));
+    state.dotScale = parseFloat(dotSize.value);
+    state.renderer?.refresh();
   });
   // Turn and tilt exist only in 3D views.
   for (const id of ["turn-left", "turn-right", "tilt-up", "tilt-down"]) {
@@ -1284,9 +1286,8 @@ async function useRenderer(threeD) {
   const threeContainer = document.getElementById("three-container");
   if (threeD) {
     if (!state.renderer3d) {
-      const { Renderer3D } = await import("./renderer3d.js?v=2");
+      const { Renderer3D } = await import("./renderer3d.js?v=3");
       state.renderer3d = new Renderer3D(state.graph, threeContainer, { nodeReducer, edgeReducer });
-      state.renderer3d.setDotScale(parseFloat(document.getElementById("dot-size")?.value || "1"));
       attachRenderer(state.renderer3d, threeContainer);
     }
     state.renderer3d.invalidateLayout(); // the graph was rebuilt for this view
@@ -1425,6 +1426,7 @@ function nodeReducer(node, attrs) {
     a.size = a._baseSize * 1.4;
     a.zIndex = 5;
   }
+  a.size *= state.dotScale; // the Dot size slider
   return a;
 }
 
