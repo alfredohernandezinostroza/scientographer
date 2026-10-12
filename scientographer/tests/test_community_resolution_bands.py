@@ -16,13 +16,14 @@ from scientographer.community_resolution_bands import (
 )
 
 
-def test_full_sweep_is_three_bands_36_ascending_unique():
-    assert LOW_BAND == [round(i * 0.001, 3) for i in range(1, 10)]
+def test_full_sweep_is_three_bands_37_ascending_unique():
+    # 0.0015 between 0.001 and 0.002: the motor-learning study's map resolution.
+    assert LOW_BAND == [0.001, 0.0015] + [round(i * 0.001, 3) for i in range(2, 10)]
     assert MID_BAND == [round(i * 0.01, 2) for i in range(1, 20)]
     assert HIGH_BAND == [round(i * 0.1, 1) for i in range(2, 10)]
     assert RESOLUTIONS == LOW_BAND + MID_BAND + HIGH_BAND
-    assert len(RESOLUTIONS) == 36
-    assert len(set(RESOLUTIONS)) == 36
+    assert len(RESOLUTIONS) == 37
+    assert len(set(RESOLUTIONS)) == 37
     assert RESOLUTIONS == sorted(RESOLUTIONS)
     assert RESOLUTIONS[0] == 0.001 and RESOLUTIONS[-1] == 0.9
 
@@ -31,6 +32,7 @@ def test_attribute_name_matches_stored_column_strings():
     # These are the exact strings present as vertex attributes / parquet columns;
     # float repr must not gain trailing zeros (0.1 not 0.10, 0.2 not 0.20).
     assert community_attribute_name(0.001) == "cpm_communities_at_res=0.001"
+    assert community_attribute_name(0.0015) == "cpm_communities_at_res=0.0015"
     assert community_attribute_name(0.01) == "cpm_communities_at_res=0.01"
     assert community_attribute_name(0.1) == "cpm_communities_at_res=0.1"
     assert community_attribute_name(0.2) == "cpm_communities_at_res=0.2"

@@ -116,6 +116,7 @@ noticeably smaller than the papers table; report both numbers.
 | `layout.mode` | `forceatlas2` (computed) or `import` (x/y from a Gephi graphml or a CSV via `import_path`) |
 | `layout.orientation` | `principal` (reproducible: long axis horizontal) or `none` |
 | `embeddings.models`, `embedding_maps.maps`, `website.extra_layouts` | the optional text-embedding maps (below) |
+| `citation_layouts.layouts` | optional extra ForceAtlas2 layouts: LinLog and/or 3D (below) |
 
 Note on resolution values: Gephi's undirected CPM penalises γ·n(n−1)/2 and this
 package's directed CPM γ·n(n−1), so a Gephi resolution γ corresponds to γ/2 here.
@@ -146,6 +147,14 @@ positions: data/layouts/<name>.csv, snapshots: data/layouts/<name>_snapshots.jso
 Embeddings are stored per paper and text, so later runs embed only what is new. The
 citation view is coloured by the first map's topics (`website.network_topics`).
 
+**LinLog and 3D layouts.** Under `citation_layouts.layouts` list `{key, lin_log: true,
+dimensions: 2 or 3, iterations}`; each becomes `data/citation_layouts/<key>.csv` (`doi`,
+`x`, `y`, and `z` in 3D). Under `website.extra_layouts` list `{key, label, positions:
+data/citation_layouts/<key>.csv}`; a table with `z` opens in the site's 3D viewer.
+LinLog separates communities into islands (much higher share of a paper's nearest
+papers in its own community and among its citations). Only positions change, never
+the communities. For 3D on large corpora install the `fast-layout` extra (numba).
+
 **Import a hand-tuned Gephi layout.** `layout.mode: import`, `layout.import_path:`
 the Gephi graphml (or a CSV with `name`/`id`, `x`, `y`), and add the file to the
 `layout_graph` stage's `deps` in `dvc.yaml`.
@@ -174,6 +183,7 @@ the Gephi graphml (or a CSV with `name`/`id`, `x`, `y`), and add the file to the
 | `data/analysis/community_keywords/` | `top_keywords` per community and resolution, keyword scores, and the final graphml carrying every attribute |
 | `data/analysis/metrics/*.json` | summaries at `resolutions.canonical` (what `dvc exp show` compares) |
 | `data/embeddings/<name>/`, `data/layouts/<name>.csv` | embedding stores; per-paper 2-D position, `topic`, `topic_name` |
+| `data/citation_layouts/<key>.csv`, `citation_layouts.json` | extra layouts of the citation graph (`doi`, `x`, `y`, `z` in 3D) and what was run |
 | `data/wordclouds/` | word clouds and TF-IDF histograms |
 | `reports/website/` | the site; `reports/figures/` the stages' Hamilton DAG drawings |
 

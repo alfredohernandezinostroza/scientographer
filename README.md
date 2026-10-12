@@ -33,7 +33,7 @@ stages that read it run again.
   papers with DOIs from Scopus, Web of Science or anywhere else; the citations between
   them come from [OpenAlex](https://openalex.org), or from your own references table.
 - **Communities at every resolution.** Leiden with the constant Potts model across a
-  resolution sweep (36 values by default), written onto one graph as
+  resolution sweep (37 values by default), written onto one graph as
   `cpm_communities_at_res=<r>` vertex attributes. Results are stored per resolution,
   so adding a resolution later computes only that one.
 - **Evidence for choosing a resolution.** Per resolution: modularity, the CPM score,
@@ -48,6 +48,9 @@ stages that read it run again.
 - **Text-embedding maps** (optional). Each paper's title and abstract embedded with
   Gemini's API and/or SPECTER2 run locally; BERTopic topics, a 2-D UMAP layout and
   time snapshots per embedding, shown as extra views of the map.
+- **More layouts** (optional). ForceAtlas2 again in LinLog mode, which pulls each
+  community together into its own island, and in 3D; each shown as another view of
+  the map, the 3D ones in a 3D viewer.
 - **An interactive map** (see [The map](#the-map)).
 
 The GraphML files the pipeline writes carry the communities, labels and metrics as
@@ -56,13 +59,14 @@ attributes, so you can also open them in Gephi or load them with igraph or netwo
 ## Install
 
 Scientographer needs Python 3.10 or later. The plain install runs every stage of a
-project (DVC, ForceAtlas2, word clouds, the map); two extras add the heavy parts:
+project (DVC, ForceAtlas2, word clouds, the map); the extras add the heavy parts:
 
 | Extra | For |
 |---|---|
 | `embeddings` | the text-embedding maps (installs PyTorch, a few GB) |
 | `ui` | the Hamilton UI run tracker |
-| `all` | both |
+| `fast-layout` | exact, multi-core ForceAtlas2 for the extra layouts (numba); needed in practice for 3D layouts of large corpora |
+| `all` | all three |
 
 ### With pixi (recommended)
 
@@ -241,6 +245,40 @@ later run embeds only new papers. The map then offers each embedding as a view, 
 colours the citation layout by the first embedding's topics too
 (`website.network_topics`).
 
+### More layouts: LinLog and 3D
+
+`citation_layouts` runs ForceAtlas2 again on the citation graph, as many times as you
+list, and writes each result as a table the map shows as another view:
+
+```yaml
+citation_layouts:
+  layouts:
+    - {key: linlog, lin_log: true}                    # 2D
+    - {key: linlog_3d, lin_log: true, dimensions: 3}  # 3D
+website:
+  extra_layouts:
+    - {key: linlog, label: Citation network (LinLog), positions: data/citation_layouts/linlog.csv}
+    - {key: linlog_3d, label: Citation network (LinLog 3D), positions: data/citation_layouts/linlog_3d.csv}
+```
+
+In LinLog mode the pull along a citation grows with log(1 + distance) instead of the
+distance, so communities drift apart into separate islands. On the motor-learning
+corpus (22,982 papers), the share of each paper's 15 nearest papers on the map that
+belong to its own community (γ = 0.0015) rises from 30% on the standard 2D map to 50%
+with LinLog in 2D and 56% in 3D; the share of its citation neighbours among its
+nearest papers rises from 4.5% to 28% and 31%. Only positions change: the communities
+are the same in every view.
+
+A 3D view opens in a 3D viewer (three.js, loaded only then): drag to turn, scroll to
+zoom, and the orientation buttons turn, tilt, rotate and mirror the map about its
+centre. Legend, search, filters and paper panels work as in 2D; time snapshots and
+the PNG export are 2D only. The `fast-layout` extra makes 3D layouts of large corpora
+practical (about 0.1 s per iteration for 23,000 papers on 128 cores, against 7 s
+without it); 2D layouts are fast either way. Projects made before this stage existed
+get it with `scientographer init --force` (which rewrites `dvc.yaml` and
+`params.yaml`) or by copying the `citation_layouts` stage from the packaged
+`dvc.yaml`.
+
 ## The map
 
 `scientographer website` serves the site the last stage builds (a static folder,
@@ -248,7 +286,7 @@ colours the citation layout by the first embedding's topics too
 
 - **Views:** the citation layout (ForceAtlas2, or your own Gephi layout through
   `layout.mode: import`), plus one per text embedding, each with a time menu when it has
-  snapshots.
+  snapshots, and one per extra layout (LinLog, 3D).
 - **Colour by** community at any resolution of the sweep, embedding topic, year,
   citations, or integration; **well-connected papers only** hides the papers the
   Connectivity Modifier left out at that resolution.
@@ -289,6 +327,7 @@ colours the citation layout by the first embedding's topics too
 (search_pubmed -> ingest -> fetch_references ->)      with `init --pubmed`
 data/papers + data/references
   -> build_citation_network -> detect_communities -> layout_graph
+  -> citation_layouts                                               (optional views)
   -> community_quality_metrics
   -> community_connectivity_metrics -> community_connectivity_modifier
   -> community_quality_metrics_after_connectivity_modifier
