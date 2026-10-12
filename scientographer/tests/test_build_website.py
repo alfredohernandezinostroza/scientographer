@@ -354,6 +354,38 @@ def test_citation_layout_borrows_embedding_topics_when_the_graph_has_none(tmp_pa
     assert network_topic_source([_mk_node("t", topic=2, community=5)], layouts, "auto") is None
 
 
+def test_extra_layout_with_z_is_a_3d_view(tmp_path):
+    import json
+
+    import pytest
+
+    from scientographer.build_website import _extra_view, save_extra_views, save_views_manifest
+
+    raw = [_mk_node(f"b{i}", topic=-1, community=5) for i in range(MIN_NAMED_GROUP_SIZE)]
+    recs = node_records(raw, resolutions=[RES], community_resolution=RES)
+    positions = tmp_path / "linlog_3d.csv"
+    pd.DataFrame({"doi": [f"doib{i}" for i in range(MIN_NAMED_GROUP_SIZE)], "x": 1.0, "y": 2.0,
+                  "z": [float(i) for i in range(MIN_NAMED_GROUP_SIZE)]}).to_csv(positions, index=False)
+    view = _extra_view({"key": "linlog_3d", "positions": str(positions)}, recs, [], {}, {}, [RES], RES)
+
+    assert view["dims"] == 3
+    assert [r["z"] for r in view["records"]][:3] == [0.0, 1.0, 2.0]
+    centroid = view["communities"][str(RES)]["5"]["centroid"]
+    assert centroid == [1.0, 2.0, round(sum(range(MIN_NAMED_GROUP_SIZE)) / MIN_NAMED_GROUP_SIZE, 3)]
+
+    written = save_extra_views([view], RES, tmp_path / "site")
+    save_views_manifest(written, [view], "Citation network", tmp_path / "site", {})
+    views = json.loads((tmp_path / "site" / "views.json").read_text())["views"]
+    assert [(v["key"], v["dims"]) for v in views] == [("network", 2), ("linlog_3d", 3)]
+
+    # Time snapshots are 2-D only.
+    snapshots = tmp_path / "s.json"
+    snapshots.write_text(json.dumps({"cutoffs": [], "snapshots": {}}))
+    with pytest.raises(ValueError, match="3-D"):
+        _extra_view({"key": "linlog_3d", "positions": str(positions), "snapshots": str(snapshots)},
+                    recs, [], {}, {}, [RES], RES)
+
+
 def test_extra_layout_key_and_columns_are_checked(tmp_path):
     import pytest
 

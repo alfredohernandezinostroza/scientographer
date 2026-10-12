@@ -70,6 +70,7 @@ async function loadViewsManifest() {
       dir: v.dir,
       subtitle: v.subtitle || "",
       snapshots: !!v.snapshots,
+      dims: v.dims === 3 ? 3 : 2,
       sharedDir: manifest.shared_dir || v.dir,
       groupings: v.groupings,
     };
@@ -95,7 +96,9 @@ const state = {
   abstractsPromise: null,
 
   graph: null,
-  renderer: null,
+  renderer: null, // the active one: sigma (2D views) or the three.js renderer (3D views)
+  sigma: null,
+  renderer3d: null, // created the first time a 3D view opens (renderer3d.js)
 
   selectedNode: null,
   neighborSet: new Set(),
@@ -336,12 +339,7 @@ async function loadDataset(name) {
   await setupFigures(cfg);
 
   buildGraph(); // clears + repopulates the graph (and any edge layers)
-  if (!state.renderer) {
-    initSigma();
-    initGroupLabels();
-    initHover();
-    initSelection();
-  }
+  await useRenderer(cfg.dims === 3);
 
   buildColorByOptions();
   buildLegends();
@@ -537,6 +535,7 @@ function restoreBaseSizes() {
 }
 
 function resetCamera() {
+  if (state.renderer.resetView) return state.renderer.resetView();
   const cam = state.renderer.getCamera();
   if (typeof cam.animatedReset === "function") cam.animatedReset({ duration: 500 });
   else cam.animate({ x: 0.5, y: 0.5, ratio: 1 }, { duration: 500 });
@@ -944,9 +943,14 @@ function initOrientationControls() {
   };
   for (const [id, change] of Object.entries(act)) {
     document.getElementById(id)?.addEventListener("click", () => {
+      if (is3D()) return state.renderer.orient(id);
       change(state.orientation);
       applyOrientation();
     });
+  }
+  // Turn and tilt exist only in 3D views.
+  for (const id of ["turn-left", "turn-right", "tilt-up", "tilt-down"]) {
+    document.getElementById(id)?.addEventListener("click", () => { if (is3D()) state.renderer.orient(id); });
   }
 }
 
@@ -1241,10 +1245,11 @@ function buildGraph() {
   for (let i = 0; i < nodes.length; i++) {
     const r = nodes[i];
     const size = nodeRenderSize(r);
-    const [x, y] = orient(r.x, r.y);
+    const [x, y] = is3D() ? [r.x, r.y] : orient(r.x, r.y);
     state.graph.addNode(String(i), {
       x,
       y,
+      ...(is3D() ? { z: r.z || 0 } : {}),
       size,
       color: nodeColor(r), // default color = first grouping
       label: "",
@@ -1254,10 +1259,52 @@ function buildGraph() {
   }
 }
 
+// ── Renderers ─────────────────────────────────────────────────────────────
+// 2D views draw with sigma; 3D views (views.json `dims: 3`) with renderer3d.js,
+// which three.js comes with and which is only loaded when a 3D view opens. Both
+// read the same graph through the same reducers, so the controls work on either.
+function is3D() {
+  return DATASETS[state.dataset]?.dims === 3;
+}
+
+function attachRenderer(renderer, container) {
+  initGroupLabels(renderer);
+  initHover(renderer, container);
+  initSelection(renderer);
+}
+
+async function useRenderer(threeD) {
+  const sigmaContainer = document.getElementById("sigma-container");
+  const threeContainer = document.getElementById("three-container");
+  if (threeD) {
+    if (!state.renderer3d) {
+      const { Renderer3D } = await import("./renderer3d.js?v=1");
+      state.renderer3d = new Renderer3D(state.graph, threeContainer, { nodeReducer, edgeReducer });
+      attachRenderer(state.renderer3d, threeContainer);
+    }
+    state.renderer3d.invalidateLayout(); // the graph was rebuilt for this view
+    state.renderer3d.setVisible(true);
+    sigmaContainer.hidden = true;
+    state.renderer = state.renderer3d;
+  } else {
+    if (!state.sigma) {
+      initSigma();
+      attachRenderer(state.sigma, sigmaContainer);
+    }
+    if (state.renderer3d) state.renderer3d.setVisible(false);
+    sigmaContainer.hidden = false;
+    state.renderer = state.sigma;
+    state.sigma.resize();
+  }
+  // Controls only one kind of view has.
+  for (const el of document.querySelectorAll("[data-view-3d]")) el.hidden = !threeD;
+  for (const el of document.querySelectorAll("[data-view-2d]")) el.hidden = threeD;
+}
+
 // ── Sigma setup ───────────────────────────────────────────────────────────
 function initSigma() {
   const container = document.getElementById("sigma-container");
-  state.renderer = new Sigma(state.graph, container, {
+  state.sigma = state.renderer = new Sigma(state.graph, container, {
     allowInvalidContainer: true,
     renderEdgeLabels: false,
     enableEdgeEvents: false,
@@ -1440,9 +1487,9 @@ function snapshotRenderSize(gephiSize) {
   return Math.max(0.6, Math.min(9, (gephiSize || 1) * SNAPSHOT_SIZE_SCALE));
 }
 
-function initGroupLabels() {
+function initGroupLabels(renderer) {
   // Reposition + decide visibility for the active labels, every frame.
-  state.renderer.on("afterRender", positionLabels);
+  renderer.on("afterRender", () => { if (renderer === state.renderer) positionLabels(); });
 }
 
 function positionLabels() {
@@ -1491,8 +1538,13 @@ function positionLabels() {
       el.style.display = "none";
       continue;
     }
-    const [cx, cy] = orient(raw[0], raw[1]);
-    const pt = state.renderer.graphToViewport({ x: cx, y: cy });
+    let pt;
+    if (is3D()) {
+      pt = state.renderer.graphToViewport({ x: raw[0], y: raw[1], z: raw[2] || 0 });
+    } else {
+      const [cx, cy] = orient(raw[0], raw[1]);
+      pt = state.renderer.graphToViewport({ x: cx, y: cy });
+    }
     // Cull labels whose centroid is well outside the viewport.
     if (pt.x < -margin || pt.y < -margin || pt.x > width + margin || pt.y > height + margin) {
       el.style.display = "none";
@@ -1605,10 +1657,8 @@ function positionTooltipAt(e) {
   tt.style.top = y + "px";
 }
 
-function initHover() {
-  const container = document.getElementById("sigma-container");
-
-  state.renderer.on("enterNode", ({ node }) => {
+function initHover(renderer, container) {
+  renderer.on("enterNode", ({ node }) => {
     state.hoveredNode = node;
     const r = state.graph.getNodeAttribute(node, "_data");
     const auths = (r.authors || "").split("|");
@@ -1621,7 +1671,7 @@ function initHover() {
     state.renderer.refresh();
   });
 
-  state.renderer.on("leaveNode", () => {
+  renderer.on("leaveNode", () => {
     state.hoveredNode = null;
     hideTooltipEl();
     state.renderer.refresh();
@@ -1631,9 +1681,9 @@ function initHover() {
 }
 
 // ── Selection (click → draw incident edges + open detail) ────────────────
-function initSelection() {
-  state.renderer.on("clickNode", ({ node }) => selectNode(parseInt(node, 10)));
-  state.renderer.on("clickStage", () => {
+function initSelection(renderer) {
+  renderer.on("clickNode", ({ node }) => selectNode(parseInt(node, 10)));
+  renderer.on("clickStage", () => {
     clearSelection();
     hideDetail();
   });
@@ -2131,6 +2181,7 @@ function hideDetail() {
 
 // ── Camera helpers ────────────────────────────────────────────────────────
 function frameNode(idx) {
+  if (state.renderer.frameNode) return state.renderer.frameNode(idx);
   const display = state.renderer.getNodeDisplayData(String(idx));
   if (!display) return;
   state.renderer.getCamera().animate({ x: display.x, y: display.y, ratio: 0.15 }, { duration: 600 });
@@ -2139,9 +2190,10 @@ function frameNode(idx) {
 function frameGroup(key, gid) {
   const g = grouping(key);
   const c = g.data[gid];
-  const cen = groupCentroid(key, gid) || orient(c.centroid[0], c.centroid[1]);
+  const cen = is3D() ? c.centroid : groupCentroid(key, gid) || orient(c.centroid[0], c.centroid[1]);
   const cx = cen[0],
-    cy = cen[1];
+    cy = cen[1],
+    cz = cen[2] || 0;
   let bestIdx = -1;
   let bestDist = Infinity;
   const nodes = state.nodesData.nodes;
@@ -2151,8 +2203,9 @@ function frameGroup(key, gid) {
     if (state.snapshot && !state.snapshot.visible.has(String(i))) continue;
     // Use live graph coordinates so this works under any active layout/snapshot.
     const dx = state.graph.getNodeAttribute(String(i), "x") - cx,
-      dy = state.graph.getNodeAttribute(String(i), "y") - cy;
-    const d = dx * dx + dy * dy;
+      dy = state.graph.getNodeAttribute(String(i), "y") - cy,
+      dz = (state.graph.getNodeAttribute(String(i), "z") || 0) - cz;
+    const d = dx * dx + dy * dy + dz * dz;
     if (d < bestDist) {
       bestDist = d;
       bestIdx = i;

@@ -15,6 +15,8 @@
   <!-- Graph tab pane -->
   <div id="view-graph" class="view active">
     <div id="sigma-container"></div>
+    <!-- 3D views (views.json dims: 3) draw here, with three.js loaded on first use -->
+    <div id="three-container" hidden></div>
 
     <!-- Floating cluster name labels -->
     <div id="cluster-labels"></div>
@@ -300,9 +302,16 @@
         <button id="flip-vertical" type="button" title="Mirror the map top–bottom" aria-label="Flip vertically">&#x21C5;</button>
         <button id="orientation-reset" type="button" title="Back to the original orientation" aria-label="Reset orientation">Reset</button>
       </div>
+      <div class="orientation-buttons" data-view-3d hidden>
+        <button id="turn-left" type="button" title="Turn the map 15° to the left" aria-label="Turn left">&#x25C0;</button>
+        <button id="turn-right" type="button" title="Turn the map 15° to the right" aria-label="Turn right">&#x25B6;</button>
+        <button id="tilt-up" type="button" title="Tilt the map 15° up" aria-label="Tilt up">&#x25B2;</button>
+        <button id="tilt-down" type="button" title="Tilt the map 15° down" aria-label="Tilt down">&#x25BC;</button>
+      </div>
     </div>
 
-    <div class="control-row export-row">
+    <!-- The PNG export draws the 2D map; 3D views leave it out. -->
+    <div class="control-row export-row" data-view-2d>
       <label>Export image</label>
       <div class="export-options">
         <select id="export-area" aria-label="Area to export">
@@ -416,7 +425,7 @@
   <script src="https://unpkg.com/tabulator-tables@6.3.1/dist/js/tabulator.min.js"></script>
 
   <!-- App -->
-  <script type="module" src="main.js?v=30"></script>
+  <script type="module" src="main.js?v=31"></script>
   <!-- Guided tour (independent of main.js; only reads the DOM) -->
   <script type="module" src="tour.js?v=2"></script>
   <!-- Word map tab (lazy: loads its data the first time the tab is opened) -->
