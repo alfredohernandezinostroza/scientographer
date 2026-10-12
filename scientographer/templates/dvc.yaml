@@ -53,6 +53,15 @@ stages:
     outs:
       - ${layout.output_graphml}
 
+  citation_layouts:
+    cmd: scientographer run citation_layouts
+    deps:
+      - ${citation_layouts.input_graphml}
+    params:
+      - citation_layouts
+    outs:
+      - ${citation_layouts.output_dir}
+
   community_quality_metrics:
     cmd: scientographer run community_quality_metrics
     deps:
@@ -179,6 +188,7 @@ stages:
       - ${website.community_keyword_scores}
       - ${wordclouds.output_dir}
       - ${embedding_maps.output_dir}  # extra layouts made from the embeddings, if any
+      - ${citation_layouts.output_dir}  # extra layouts of the citation graph, if any
     params:
       - website
     outs:

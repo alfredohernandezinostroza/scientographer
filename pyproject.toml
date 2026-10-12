@@ -67,7 +67,10 @@ dependencies = [
 embeddings = ["google-genai>=1", "torch>=2", "transformers>=4.40", "adapters>=1", "bertopic>=0.16", "umap-learn>=0.5", "hdbscan>=0.8"]
 # The Hamilton UI tracker (`scientographer ui`).
 ui = ["sf-hamilton[ui]>=1.89,<2"]
-all = ["scientographer[embeddings,ui]"]
+# Exact, multi-core ForceAtlas2 for citation_layouts (needed in practice for 3D layouts
+# of large corpora; without it the fa2 package runs them).
+fast-layout = ["numba>=0.59"]
+all = ["scientographer[embeddings,ui,fast-layout]"]
 dev = ["pytest>=8", "ruff>=0.4"]
 
 [project.urls]
