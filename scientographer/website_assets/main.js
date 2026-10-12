@@ -1284,7 +1284,7 @@ async function useRenderer(threeD) {
   const threeContainer = document.getElementById("three-container");
   if (threeD) {
     if (!state.renderer3d) {
-      const { Renderer3D } = await import("./renderer3d.js?v=1");
+      const { Renderer3D } = await import("./renderer3d.js?v=2");
       state.renderer3d = new Renderer3D(state.graph, threeContainer, { nodeReducer, edgeReducer });
       state.renderer3d.setDotScale(parseFloat(document.getElementById("dot-size")?.value || "1"));
       attachRenderer(state.renderer3d, threeContainer);
