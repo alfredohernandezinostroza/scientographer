@@ -948,6 +948,12 @@ function initOrientationControls() {
       applyOrientation();
     });
   }
+  // Dot size (3D views): scales every paper's dot.
+  const dotSize = document.getElementById("dot-size");
+  dotSize?.addEventListener("input", () => {
+    document.getElementById("dot-size-value").textContent = `${dotSize.value}×`;
+    if (is3D()) state.renderer.setDotScale(parseFloat(dotSize.value));
+  });
   // Turn and tilt exist only in 3D views.
   for (const id of ["turn-left", "turn-right", "tilt-up", "tilt-down"]) {
     document.getElementById(id)?.addEventListener("click", () => { if (is3D()) state.renderer.orient(id); });
@@ -1280,6 +1286,7 @@ async function useRenderer(threeD) {
     if (!state.renderer3d) {
       const { Renderer3D } = await import("./renderer3d.js?v=1");
       state.renderer3d = new Renderer3D(state.graph, threeContainer, { nodeReducer, edgeReducer });
+      state.renderer3d.setDotScale(parseFloat(document.getElementById("dot-size")?.value || "1"));
       attachRenderer(state.renderer3d, threeContainer);
     }
     state.renderer3d.invalidateLayout(); // the graph was rebuilt for this view

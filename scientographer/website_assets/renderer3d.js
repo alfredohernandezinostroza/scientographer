@@ -21,7 +21,7 @@ const BACKGROUND = 0x0e1116; // styles.css --bg
 const STEP = Math.PI / 12; // 15° per orientation click
 const CLICK_PIXELS = 5; // a press that moves less than this...
 const CLICK_MS = 500; // ...and is released this fast is a click, not a drag
-const SIZE_SCALE = 0.5; // sigma node sizes -> point sizes
+const SIZE_SCALE = 1; // sigma node sizes -> point sizes (the Dot size slider multiplies it)
 
 const colorCache = new Map();
 
@@ -148,6 +148,13 @@ export class Renderer3D {
 
   scaleSize(size) {
     return size;
+  }
+
+  // The Dot size slider: a factor on every paper's size.
+  setDotScale(factor) {
+    this.dotScale = factor;
+    this.pointsMaterial.uniforms.scale.value = (this.radius / 120) * factor;
+    this._requestFrame();
   }
 
   setVisible(visible) {
@@ -289,7 +296,7 @@ export class Renderer3D {
     }
     distances.sort((a, b) => a - b);
     this.radius = distances.length ? distances[Math.floor(0.99 * (distances.length - 1))] || 1 : 1;
-    this.pointsMaterial.uniforms.scale.value = this.radius / 120;
+    this.pointsMaterial.uniforms.scale.value = (this.radius / 120) * (this.dotScale ?? 1);
     this.camera.near = this.radius / 1000;
     this.camera.far = this.radius * 50;
     this.camera.updateProjectionMatrix();
