@@ -219,6 +219,9 @@ function citationGrouping() {
 }
 
 // ── Boot ──────────────────────────────────────────────────────────────────
+// The shortest time the "Made with" loading screen shows when the page opens.
+const MIN_LOADING_MS = 750;
+
 main().catch((err) => {
   console.error(err);
   const el = document.getElementById("loading-status");
@@ -265,6 +268,10 @@ async function main() {
   // hit it in the temporal dead zone and throw ReferenceError.
   initHealthControls();
 
+  // The "Made with" screen stays at least MIN_LOADING_MS after the page opened
+  // (performance.now() counts from then), even when the map is ready sooner.
+  const wait = MIN_LOADING_MS - performance.now();
+  if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
   document.getElementById("loading")?.classList.add("hidden");
   const badge = document.getElementById("scientographer-badge");
   if (badge) badge.hidden = false;
