@@ -16,7 +16,7 @@
 
 import Graph from "https://cdn.jsdelivr.net/npm/graphology@0.25.4/+esm";
 import { Sigma } from "https://cdn.jsdelivr.net/npm/sigma@2.4.0/+esm";
-import { MATCH_MODES, makeFilter } from "./textmatch.js";
+import { MATCH_MODES, makeFilter } from "./textmatch.js?v=2";
 
 // ── Dataset definitions ─────────────────────────────────────────────────────
 // Each grouping: key (also the "Color by" value), label (detail panel + color
