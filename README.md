@@ -59,14 +59,13 @@ attributes, so you can also open them in Gephi or load them with igraph or netwo
 ## Install
 
 Scientographer needs Python 3.10 or later. The plain install runs every stage of a
-project (DVC, ForceAtlas2, word clouds, the map); the extras add the heavy parts:
+project (DVC, ForceAtlas2 in 2D and 3D, word clouds, the map); two extras add the heavy parts:
 
 | Extra | For |
 |---|---|
 | `embeddings` | the text-embedding maps (installs PyTorch, a few GB) |
 | `ui` | the Hamilton UI run tracker |
-| `fast-layout` | exact, multi-core ForceAtlas2 for the extra layouts (numba); needed in practice for 3D layouts of large corpora |
-| `all` | all three |
+| `all` | both |
 
 ### With pixi (recommended)
 
@@ -272,9 +271,12 @@ are the same in every view.
 A 3D view opens in a 3D viewer (three.js, loaded only then): drag to turn, scroll to
 zoom, and the orientation buttons turn, tilt, rotate and mirror the map about its
 centre. Legend, search, filters and paper panels work as in 2D; time snapshots and
-the PNG export are 2D only. The `fast-layout` extra makes 3D layouts of large corpora
-practical (about 0.1 s per iteration for 23,000 papers on 128 cores, against 7 s
-without it); 2D layouts are fast either way. Projects made before this stage existed
+the PNG export are 2D only. Layouts run exact and multi-core (numba): about 4 minutes
+for 2,000 iterations on 23,000 papers with 128 cores, longer on a laptop. Every layout
+is lined up with the main 2D map (turned, mirrored and scaled to fit it best), so
+switching views keeps the communities where they were, and a 3D view seen from the
+front looks like the map. New projects compute the standard layout in 3D and open the
+site on it (`website.default_view`). Projects made before this stage existed
 get it with `scientographer init --force` (which rewrites `dvc.yaml` and
 `params.yaml`) or by copying the `citation_layouts` stage from the packaged
 `dvc.yaml`.

@@ -153,7 +153,8 @@ dimensions: 2 or 3, iterations}`; each becomes `data/citation_layouts/<key>.csv`
 data/citation_layouts/<key>.csv}`; a table with `z` opens in the site's 3D viewer.
 LinLog separates communities into islands (much higher share of a paper's nearest
 papers in its own community and among its citations). Only positions change, never
-the communities. For 3D on large corpora install the `fast-layout` extra (numba).
+the communities. Layouts are lined up with the main 2D map. New projects compute
+`forceatlas2_3d` and open the site on it (`website.default_view`).
 
 **Import a hand-tuned Gephi layout.** `layout.mode: import`, `layout.import_path:`
 the Gephi graphml (or a CSV with `name`/`id`, `x`, `y`), and add the file to the

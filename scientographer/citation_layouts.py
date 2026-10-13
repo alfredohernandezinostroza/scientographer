@@ -16,12 +16,16 @@ citation graph (read undirected):
 - ``dimensions``: 2, or 3 for a 3D view (the site opens it in its 3D renderer).
 - ``iterations`` (default 2000) and ``seed`` (default 1).
 
-The run uses _forceatlas2.py: exact and multi-core when numba is installed
-(``pip install "scientographer[fast-layout]"``), otherwise the fa2 package
-(``engine`` forces one). Each layout is then turned to a default orientation like
-the main map (layout_graph.py ``principal``): its main body's long axis along x,
-long tail down, most-cited side left; in 3D the remaining axis is the body's
-third principal axis. Coordinates are centred on the main body.
+The run uses _forceatlas2.py: exact and multi-core with numba (installed with
+Scientographer), or the fa2 package when numba cannot be imported (``engine``
+forces one).
+
+When the input graph carries the main 2D map (layout_graph.py's x/y), each
+layout is turned, mirrored, scaled and moved to line up with it, so switching
+views keeps the communities where they were (a 3D view seen from the front looks
+like the map). Without one, a layout is turned like layout_graph.py's
+``principal`` orientation: long axis along x, long tail down, most-cited side
+left.
 
 Only positions are written; the graph and its communities are not touched.
 
@@ -60,7 +64,7 @@ logger = logging.getLogger(__name__)
 EXECUTE = True
 
 _cfg = PARAMS.get("citation_layouts", {})
-INPUT_GRAPHML: Final[Path] = Path(_cfg.get("input_graphml", "data/citation_network_with_communities.graphml"))
+INPUT_GRAPHML: Final[Path] = Path(_cfg.get("input_graphml", "data/citation_network_with_layout.graphml"))
 OUTPUT_DIR: Final[Path] = Path(_cfg.get("output_dir", "data/citation_layouts"))
 LAYOUTS: Final[list[dict]] = list(_cfg.get("layouts") or [])
 MANIFEST_NAME: Final[str] = "citation_layouts.json"
@@ -85,6 +89,28 @@ def _spec(entry: dict) -> dict:
         raise ValueError(f"citation_layouts {key}: engine must be one of {ENGINES}")
     return {**spec, "key": key, "dimensions": int(spec["dimensions"]), "iterations": int(spec["iterations"]),
             "seed": int(spec["seed"]), "lin_log": bool(spec["lin_log"])}
+
+
+def aligned_to_map(positions: np.ndarray, map_xy: np.ndarray) -> np.ndarray:
+    """Turn, mirror, scale and move a layout so it lines up with the main 2D map.
+
+    The rotation (or mirror image), scale and shift that bring the layout's
+    first two axes closest to the map's x/y (orthogonal Procrustes, fitted on
+    the map's main body so a few far-off papers do not steer it); in 3D the
+    third axis completes a right-handed frame. Seen from the front (looking
+    down z), a 3D view then shows the communities where the 2D map has them."""
+    distance = np.linalg.norm(map_xy - np.median(map_xy, axis=0), axis=1)
+    core = distance <= np.quantile(distance, ORIENTATION_CORE_SHARE)
+    layout_centre = positions[core].mean(axis=0)
+    map_centre = map_xy[core].mean(axis=0)
+    a, b = positions[core] - layout_centre, map_xy[core] - map_centre
+    u, singular, vt = np.linalg.svd(a.T @ b, full_matrices=False)
+    turn = u @ vt  # (dimensions x 2), orthonormal columns
+    if positions.shape[1] == 3:
+        turn = np.column_stack([turn, np.cross(turn[:, 0], turn[:, 1])])
+    scale = singular.sum() / ((a @ turn[:, :2]) ** 2).sum()
+    shift = np.r_[map_centre, np.zeros(positions.shape[1] - 2)]
+    return (positions - layout_centre) @ turn * scale + shift
 
 
 def oriented(positions: np.ndarray, citations: np.ndarray) -> np.ndarray:
@@ -147,10 +173,24 @@ def layout_specs(layouts: list) -> list[dict]:
     return specs
 
 
+def _map_positions(graph: ig.Graph):
+    """The main 2D map's x/y, when the graph carries a complete layout."""
+    names = graph.vs.attributes()
+    if "x" not in names or "y" not in names:
+        return None
+    xs, ys = graph.vs["x"], graph.vs["y"]
+    if any(v is None for v in xs) or any(v is None for v in ys):
+        return None
+    return np.column_stack([xs, ys]).astype(float)
+
+
 def citation_layouts(citation_network: ig.Graph, layout_specs: list[dict]) -> dict[str, tuple[pd.DataFrame, dict]]:
     """key -> (doi/x/y[/z] table, what was run)."""
     dois = [str(name) for name in citation_network.vs["name"]]
     cited = np.array(citation_network.degree(mode="in"))
+    map_xy = _map_positions(citation_network)
+    if map_xy is None and layout_specs:
+        logger.info("the graph has no 2D map (x/y): layouts turned to their principal axes instead of aligned")
     results = {}
     for spec in layout_specs:
         logger.info("%s: ForceAtlas2%s, %dD, %d iterations, %d papers", spec["key"],
@@ -161,13 +201,14 @@ def citation_layouts(citation_network: ig.Graph, layout_specs: list[dict]) -> di
                                         iterations=spec["iterations"], lin_log=spec["lin_log"],
                                         seed=spec["seed"], engine=spec["engine"])
         seconds = time.time() - start
-        positions = oriented(positions, cited)
+        positions = aligned_to_map(positions, map_xy) if map_xy is not None else oriented(positions, cited)
         table = pd.DataFrame({"doi": dois, "x": positions[:, 0], "y": positions[:, 1]})
         if spec["dimensions"] == 3:
             table["z"] = positions[:, 2]
         logger.info("%s: done in %.0f s (engine %s)", spec["key"], seconds, engine)
         results[spec["key"]] = (table.round({"x": 4, "y": 4, "z": 4}),
-                                {**spec, "engine": engine, "seconds": round(seconds, 1), "papers": len(dois)})
+                                {**spec, "engine": engine, "seconds": round(seconds, 1), "papers": len(dois),
+                                 "aligned_to_map": map_xy is not None})
     return results
 
 

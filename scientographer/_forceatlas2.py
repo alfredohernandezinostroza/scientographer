@@ -6,7 +6,7 @@ Two engines run the same algorithm (fa2 1.1's forces and speed control, default
 settings: scaling ratio 2, gravity 1, no size adjustment, attraction not
 distributed by degree):
 
-- ``numba`` (when numba is installed, the ``fast-layout`` extra): exact
+- ``numba`` (installed with Scientographer): exact
   repulsion between every pair of papers, compiled and spread over all cores.
   About 0.1 s per iteration for 23,000 papers in 3D on 128 cores.
 - ``fa2``: the fa2 package with its Barnes-Hut approximation. Fast in 2D; its
@@ -78,7 +78,7 @@ _repulsion_kernel: object | None = None
 
 
 def _repulsion():
-    """The compiled pairwise repulsion (built on first use, so numba stays optional)."""
+    """The compiled pairwise repulsion (built on first use)."""
     global _repulsion_kernel
     if _repulsion_kernel is None:
         import warnings

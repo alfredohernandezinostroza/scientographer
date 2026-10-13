@@ -9,6 +9,7 @@ import pytest
 
 from scientographer._forceatlas2 import forceatlas2, numba_available
 from scientographer.citation_layouts import (
+    aligned_to_map,
     citation_layouts,
     layout_specs,
     oriented,
@@ -39,7 +40,7 @@ def test_fa2_engine_separates_the_two_groups(dimensions, lin_log):
     assert np.linalg.norm(a - b) > spread
 
 
-@pytest.mark.skipif(not numba_available(), reason="numba (the fast-layout extra) is not installed")
+@pytest.mark.skipif(not numba_available(), reason="numba is not installed")
 @pytest.mark.parametrize("lin_log", [False, True])
 def test_numba_engine_matches_exact_fa2_before_the_layouts_drift_apart(lin_log):
     # fa2 without its Barnes-Hut approximation, from the same start: equal to
@@ -66,6 +67,34 @@ def test_orientation_centres_and_turns_to_principal_axes():
     spread = turned.std(axis=0)
     assert spread[0] > spread[1] > spread[2]
     assert np.abs(np.median(turned, axis=0)).max() < 0.5
+
+
+@pytest.mark.parametrize("dimensions", [2, 3])
+def test_alignment_recovers_the_map_from_a_turned_mirrored_rescaled_copy(dimensions):
+    rng = np.random.default_rng(1)
+    the_map = rng.normal(size=(400, 2)) * [6.0, 2.0] + [50.0, -20.0]
+    # The same picture, mirrored, turned, scaled by 0.01 and moved; in 3D with depth.
+    layout = np.column_stack([the_map[:, 1], the_map[:, 0]])  # a mirror image
+    if dimensions == 3:
+        layout = np.column_stack([layout, rng.normal(size=400)])
+    turn = np.linalg.qr(rng.normal(size=(dimensions, dimensions)))[0]
+    layout = layout @ turn * 0.01 + 7.0
+    aligned = aligned_to_map(layout, the_map)
+    assert aligned.shape == (400, dimensions)
+    assert np.abs(aligned[:, :2] - the_map).max() < 0.1 * np.abs(the_map - the_map.mean(0)).max() + (
+        0.05 if dimensions == 2 else 2.0)
+    if dimensions == 2:
+        assert np.allclose(aligned, the_map, atol=1e-6)
+
+
+def test_layouts_follow_the_main_map_when_the_graph_has_one():
+    g = _two_groups()
+    g.vs["x"] = [-10.0] * 12 + [10.0] * 12  # the two groups left and right on the 2D map
+    g.vs["y"] = [0.0] * 24
+    result = citation_layouts(g, layout_specs([{"key": "f3", "dimensions": 3, "iterations": 100, "engine": "fa2"}]))
+    table, run = result["f3"]
+    assert run["aligned_to_map"] is True
+    assert table["x"][:12].mean() < 0 < table["x"][12:].mean()
 
 
 def test_layouts_write_tables_and_leave_the_graph_alone(tmp_path):

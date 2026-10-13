@@ -16,8 +16,10 @@ settings or outputs).
 - **LinLog and 3D layouts:** a new `citation_layouts` stage runs ForceAtlas2 again,
   in LinLog mode and/or in 3D, and the map shows each result as another view; 3D
   views open in a 3D viewer (three.js, loaded only for them) with the same legend,
-  search, filters and paper panels. New `fast-layout` extra (numba) for exact,
-  multi-core layouts. The example shows the standard layout in 3D and LinLog in 2D and 3D.
+  search, filters and paper panels. Every layout is lined up with the main 2D map.
+  New projects compute the standard layout in 3D and the site opens on it
+  (`website.default_view`); numba joins the base install for exact, multi-core
+  layouts. The example also shows LinLog in 2D and 3D.
 - The default resolution sweep gains 0.0015 (37 values).
 - **Fixed:** on a map whose graph was not laid out in Gephi, every paper showed 0
   citations, the same tiny dot, and community top-paper lists in arbitrary order:

@@ -377,6 +377,11 @@ def test_extra_layout_with_z_is_a_3d_view(tmp_path):
     save_views_manifest(written, [view], "Citation network", tmp_path / "site", {})
     views = json.loads((tmp_path / "site" / "views.json").read_text())["views"]
     assert [(v["key"], v["dims"]) for v in views] == [("network", 2), ("linlog_3d", 3)]
+    # website.default_view picks the view the site opens on; an unknown key falls back.
+    save_views_manifest(written, [view], "Citation network", tmp_path / "site", {}, default_view="linlog_3d")
+    assert json.loads((tmp_path / "site" / "views.json").read_text())["default"] == "linlog_3d"
+    save_views_manifest(written, [view], "Citation network", tmp_path / "site", {}, default_view="nope")
+    assert json.loads((tmp_path / "site" / "views.json").read_text())["default"] == "network"
 
     # Time snapshots are 2-D only.
     snapshots = tmp_path / "s.json"

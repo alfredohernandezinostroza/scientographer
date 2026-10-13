@@ -210,8 +210,10 @@ export class Renderer3D {
   }
 
   // ── 3D-only ───────────────────────────────────────────────────────────────
+  // Straight at the front, x to the right and y up: the extra layouts are lined up
+  // with the 2D map, so this first view shows the communities where the map has them.
   resetView() {
-    this.camera.position.set(0, this.radius * 0.35, this._homeDistance());
+    this.camera.position.set(0, 0, this._homeDistance());
     this.controls.target.set(0, 0, 0);
     this.controls.update();
     this._requestFrame();

@@ -122,6 +122,8 @@ DATA_SUBDIR: Final[str] = "network_data"
 # each becomes `<key>_data/` next to network_data/ and an entry in views.json.
 EXTRA_LAYOUTS: Final[list[dict]] = list(_cfg.get("extra_layouts") or [])
 BASE_VIEW_LABEL: Final[str] = str(_cfg.get("view_label") or "Citation network")
+# The view the site opens on: "network" (the main 2D map) or an extra layout's key.
+DEFAULT_VIEW: Final[str] = str(_cfg.get("default_view") or "network")
 # Topics for the citation layout when the graph has none of its own: the key of
 # an extra layout whose `topic` column to show there ("auto": the first extra
 # layout that has topics; "none": none, the Topic colouring is then left out).
@@ -153,6 +155,7 @@ DEFAULT_INPUTS: Final[dict] = dict(
     site_title=str(_cfg.get("title") or "Citation map"),
     extra_layouts=EXTRA_LAYOUTS,
     base_view_label=BASE_VIEW_LABEL,
+    default_view=DEFAULT_VIEW,
     network_topics=NETWORK_TOPICS,
 )
 
@@ -1221,7 +1224,7 @@ def save_extra_views(extra_views: list[dict], community_resolution: Optional[flo
 @datasaver()
 def save_views_manifest(
     save_extra_views: dict, extra_views: list[dict], base_view_label: str, website_dir: Path,
-    clusters_legend: dict, network_topic_source: Optional[dict] = None,
+    clusters_legend: dict, network_topic_source: Optional[dict] = None, default_view: str = "network",
 ) -> dict:
     """views.json, the list of views the site offers and how each can be
     coloured. Without it the page assumes one citation view with topics, so it
@@ -1235,8 +1238,13 @@ def save_views_manifest(
                       "subtitle": view["subtitle"], "snapshots": view["snapshots"] is not None,
                       "dims": view["dims"],
                       "groupings": _view_groupings(view["topic_label"], bool(view["clusters"]))})
+    keys = [v["key"] for v in views]
+    if default_view not in keys:
+        logger.warning("website.default_view %r is not one of the views %s; opening on the main map",
+                       default_view, keys)
+        default_view = "network"
     path = Path(website_dir) / "views.json"
-    _write_optional_json(path, {"default": "network", "shared_dir": DATA_SUBDIR, "views": views},
+    _write_optional_json(path, {"default": default_view, "shared_dir": DATA_SUBDIR, "views": views},
                          len(views) > 1 or not clusters_legend)
     return {"views": [v["key"] for v in views], "extra": save_extra_views}
 

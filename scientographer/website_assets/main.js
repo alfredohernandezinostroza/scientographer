@@ -1293,7 +1293,7 @@ async function useRenderer(threeD) {
   const threeContainer = document.getElementById("three-container");
   if (threeD) {
     if (!state.renderer3d) {
-      const { Renderer3D } = await import("./renderer3d.js?v=4");
+      const { Renderer3D } = await import("./renderer3d.js?v=5");
       state.renderer3d = new Renderer3D(state.graph, threeContainer, { nodeReducer, edgeReducer });
       attachRenderer(state.renderer3d, threeContainer);
     }
