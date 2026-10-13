@@ -47,6 +47,8 @@ html, body {
 #sigma-container[hidden], #three-container[hidden],
 [data-view-2d][hidden], [data-view-3d][hidden] { display: none !important; }
 .orientation-buttons + .orientation-buttons { margin-top: 6px; }
+.orientation-buttons button#auto-rotate { flex: 2.4; font-size: 11px; }
+.orientation-buttons button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
 /* ── Quick jump search results ────────────────────────────────────────── */
 #search-results {
   list-style: none;

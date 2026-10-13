@@ -956,6 +956,13 @@ function initOrientationControls() {
     state.dotScale = parseFloat(dotSize.value);
     state.renderer?.refresh();
   });
+  // Auto-rotate (3D views): on by default, this button stops and restarts it.
+  const autoRotate = document.getElementById("auto-rotate");
+  autoRotate?.addEventListener("click", () => {
+    if (!is3D()) return;
+    state.renderer.setAutoRotate(!state.renderer.autoRotate);
+    autoRotate.setAttribute("aria-pressed", String(state.renderer.autoRotate));
+  });
   // Turn and tilt exist only in 3D views.
   for (const id of ["turn-left", "turn-right", "tilt-up", "tilt-down"]) {
     document.getElementById(id)?.addEventListener("click", () => { if (is3D()) state.renderer.orient(id); });
@@ -1286,11 +1293,12 @@ async function useRenderer(threeD) {
   const threeContainer = document.getElementById("three-container");
   if (threeD) {
     if (!state.renderer3d) {
-      const { Renderer3D } = await import("./renderer3d.js?v=3");
+      const { Renderer3D } = await import("./renderer3d.js?v=4");
       state.renderer3d = new Renderer3D(state.graph, threeContainer, { nodeReducer, edgeReducer });
       attachRenderer(state.renderer3d, threeContainer);
     }
     state.renderer3d.invalidateLayout(); // the graph was rebuilt for this view
+    document.getElementById("auto-rotate")?.setAttribute("aria-pressed", String(state.renderer3d.autoRotate));
     state.renderer3d.setVisible(true);
     sigmaContainer.hidden = true;
     state.renderer = state.renderer3d;

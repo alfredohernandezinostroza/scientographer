@@ -65,6 +65,10 @@ export class Renderer3D {
     this.camera = new THREE.PerspectiveCamera(50, 1, 0.1, 1e6);
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = true;
+    // The camera circles the map slowly until the viewer stops it (the Auto-rotate
+    // button); people who ask their system for reduced motion start without it.
+    this.controls.autoRotateSpeed = 0.6;
+    this.controls.autoRotate = !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
     this.controls.addEventListener("change", () => this._requestFrame());
 
     // Everything that moves with the orientation lives in `map`, whose matrix is
@@ -148,6 +152,15 @@ export class Renderer3D {
 
   scaleSize(size) {
     return size;
+  }
+
+  setAutoRotate(on) {
+    this.controls.autoRotate = on;
+    this._requestFrame();
+  }
+
+  get autoRotate() {
+    return this.controls.autoRotate;
   }
 
   setVisible(visible) {

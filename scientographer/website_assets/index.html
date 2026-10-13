@@ -6,7 +6,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{SITE_TITLE}}</title>
-  <link rel="stylesheet" href="styles.css?v=9">
+  <link rel="stylesheet" href="styles.css?v=10">
 
   <!-- Tabulator -->
   <link href="https://unpkg.com/tabulator-tables@6.3.1/dist/css/tabulator.min.css" rel="stylesheet">
@@ -312,6 +312,7 @@
         <button id="turn-right" type="button" title="Turn the map 15° to the right" aria-label="Turn right">&#x25B6;</button>
         <button id="tilt-up" type="button" title="Tilt the map 15° up" aria-label="Tilt up">&#x25B2;</button>
         <button id="tilt-down" type="button" title="Tilt the map 15° down" aria-label="Tilt down">&#x25BC;</button>
+        <button id="auto-rotate" type="button" title="Start or stop the slow rotation" aria-pressed="true">Auto-rotate</button>
       </div>
     </div>
 
@@ -430,7 +431,7 @@
   <script src="https://unpkg.com/tabulator-tables@6.3.1/dist/js/tabulator.min.js"></script>
 
   <!-- App -->
-  <script type="module" src="main.js?v=33"></script>
+  <script type="module" src="main.js?v=34"></script>
   <!-- Guided tour (independent of main.js; only reads the DOM) -->
   <script type="module" src="tour.js?v=2"></script>
   <!-- Word map tab (lazy: loads its data the first time the tab is opened) -->
