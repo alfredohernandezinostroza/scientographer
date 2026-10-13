@@ -6,7 +6,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{SITE_TITLE}}</title>
-  <link rel="stylesheet" href="styles.css?v=8">
+  <link rel="icon" type="image/svg+xml" href="scientographer-icon.svg">
+  <link rel="stylesheet" href="styles.css?v=9">
 
   <!-- Tabulator -->
   <link href="https://unpkg.com/tabulator-tables@6.3.1/dist/css/tabulator.min.css" rel="stylesheet">
@@ -407,16 +408,28 @@
   </aside>
 
   <!-- Loading overlay -->
-  <div id="loading">Loading map...</div>
+  <div id="loading">
+    <div class="loading-brand">
+      <span class="made-with">Made with</span>
+      <img src="scientographer-logo-dark.svg" alt="Scientographer" width="360" height="30">
+      <span id="loading-status">Loading map...</span>
+    </div>
+  </div>
 
   <!-- Guided tour launcher -->
   <button id="start-tour" type="button"><span class="tour-icon">?</span> Guided tour</button>
+
+  <!-- Made with Scientographer: shown once the map has loaded -->
+  <a id="scientographer-badge" href="https://github.com/alfredohernandezinostroza/scientographer" target="_blank" rel="noopener"
+     title="Made with Scientographer" aria-label="Made with Scientographer (opens its GitHub page)" hidden>
+    <img src="scientographer-icon.svg" alt="" width="30" height="30">
+  </a>
 
   <!-- Tabulator JS -->
   <script src="https://unpkg.com/tabulator-tables@6.3.1/dist/js/tabulator.min.js"></script>
 
   <!-- App -->
-  <script type="module" src="main.js?v=30"></script>
+  <script type="module" src="main.js?v=31"></script>
   <!-- Guided tour (independent of main.js; only reads the DOM) -->
   <script type="module" src="tour.js?v=2"></script>
   <!-- Word map tab (lazy: loads its data the first time the tab is opened) -->

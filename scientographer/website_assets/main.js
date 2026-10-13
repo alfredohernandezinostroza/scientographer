@@ -221,7 +221,7 @@ function citationGrouping() {
 // ── Boot ──────────────────────────────────────────────────────────────────
 main().catch((err) => {
   console.error(err);
-  const el = document.getElementById("loading");
+  const el = document.getElementById("loading-status");
   if (el) el.textContent = "Failed to load: " + err.message;
 });
 
@@ -266,6 +266,8 @@ async function main() {
   initHealthControls();
 
   document.getElementById("loading")?.classList.add("hidden");
+  const badge = document.getElementById("scientographer-badge");
+  if (badge) badge.hidden = false;
 }
 
 // Load (or switch to) a dataset: fetch its files, (re)build the graph, and

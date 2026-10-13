@@ -13,6 +13,10 @@ settings or outputs).
   their own references table use `init --own-references`.
 - `init` on an existing project keeps its `dvc.yaml` and `params.yaml` as they are
   (`--force` starts it again).
+- **Logo:** the Scientographer logo (`docs/logo/`, CC BY-ND 4.0) heads the README, and
+  every map shows "Made with" and the logo while it loads, then a round compass badge
+  linking to the project; the compass is also the map's browser-tab icon. The
+  Guided tour button moves to the top right.
 
 ## [0.1.0] - 2026-10-09
 

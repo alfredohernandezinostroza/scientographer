@@ -407,3 +407,19 @@ def test_mesh_terms_reach_the_site_only_when_papers_have_them():
                          _mk_node("q", topic=1, community=2)], resolutions=[], community_resolution=None)
     assert recs[0]["mesh"] == "Cerebellum|Motor Skills"
     assert "mesh" not in recs[1]
+
+
+def test_every_site_ships_the_logo_and_the_badge():
+    from pathlib import Path
+
+    from scientographer.build_website import ASSETS_DIR, FRONTEND_FILES
+
+    for name in ("scientographer-logo-dark.svg", "scientographer-icon.svg"):
+        assert name in FRONTEND_FILES
+        # The package's copies are the files in docs/logo, unchanged (CC BY-ND).
+        source = Path(__file__).resolve().parents[2] / "docs" / "logo" / name
+        if source.exists():  # docs/ is in the repository, not in the installed package
+            assert (ASSETS_DIR / name).read_bytes() == source.read_bytes()
+    page = (ASSETS_DIR / "index.html").read_text(encoding="utf-8")
+    assert "Made with" in page and 'id="scientographer-badge"' in page
+    assert 'href="https://github.com/alfredohernandezinostroza/scientographer"' in page
