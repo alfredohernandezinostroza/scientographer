@@ -220,7 +220,7 @@ function citationGrouping() {
 
 // ── Boot ──────────────────────────────────────────────────────────────────
 // The shortest time the "Made with" loading screen shows when the page opens.
-const MIN_LOADING_MS = 750;
+const MIN_LOADING_MS = 1000;
 
 main().catch((err) => {
   console.error(err);
