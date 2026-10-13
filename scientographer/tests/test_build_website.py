@@ -354,6 +354,43 @@ def test_citation_layout_borrows_embedding_topics_when_the_graph_has_none(tmp_pa
     assert network_topic_source([_mk_node("t", topic=2, community=5)], layouts, "auto") is None
 
 
+def test_extra_layout_with_z_is_a_3d_view(tmp_path):
+    import json
+
+    import pytest
+
+    from scientographer.build_website import _extra_view, save_extra_views, save_views_manifest
+
+    raw = [_mk_node(f"b{i}", topic=-1, community=5) for i in range(MIN_NAMED_GROUP_SIZE)]
+    recs = node_records(raw, resolutions=[RES], community_resolution=RES)
+    positions = tmp_path / "linlog_3d.csv"
+    pd.DataFrame({"doi": [f"doib{i}" for i in range(MIN_NAMED_GROUP_SIZE)], "x": 1.0, "y": 2.0,
+                  "z": [float(i) for i in range(MIN_NAMED_GROUP_SIZE)]}).to_csv(positions, index=False)
+    view = _extra_view({"key": "linlog_3d", "positions": str(positions)}, recs, [], {}, {}, [RES], RES)
+
+    assert view["dims"] == 3
+    assert [r["z"] for r in view["records"]][:3] == [0.0, 1.0, 2.0]
+    centroid = view["communities"][str(RES)]["5"]["centroid"]
+    assert centroid == [1.0, 2.0, round(sum(range(MIN_NAMED_GROUP_SIZE)) / MIN_NAMED_GROUP_SIZE, 3)]
+
+    written = save_extra_views([view], RES, tmp_path / "site")
+    save_views_manifest(written, [view], "Citation network", tmp_path / "site", {})
+    views = json.loads((tmp_path / "site" / "views.json").read_text())["views"]
+    assert [(v["key"], v["dims"]) for v in views] == [("network", 2), ("linlog_3d", 3)]
+    # website.default_view picks the view the site opens on; an unknown key falls back.
+    save_views_manifest(written, [view], "Citation network", tmp_path / "site", {}, default_view="linlog_3d")
+    assert json.loads((tmp_path / "site" / "views.json").read_text())["default"] == "linlog_3d"
+    save_views_manifest(written, [view], "Citation network", tmp_path / "site", {}, default_view="nope")
+    assert json.loads((tmp_path / "site" / "views.json").read_text())["default"] == "network"
+
+    # Time snapshots are 2-D only.
+    snapshots = tmp_path / "s.json"
+    snapshots.write_text(json.dumps({"cutoffs": [], "snapshots": {}}))
+    with pytest.raises(ValueError, match="3-D"):
+        _extra_view({"key": "linlog_3d", "positions": str(positions), "snapshots": str(snapshots)},
+                    recs, [], {}, {}, [RES], RES)
+
+
 def test_extra_layout_key_and_columns_are_checked(tmp_path):
     import pytest
 
@@ -407,6 +444,22 @@ def test_mesh_terms_reach_the_site_only_when_papers_have_them():
                          _mk_node("q", topic=1, community=2)], resolutions=[], community_resolution=None)
     assert recs[0]["mesh"] == "Cerebellum|Motor Skills"
     assert "mesh" not in recs[1]
+
+
+def test_citation_counts_and_sizes_come_from_the_edges_when_gephi_columns_are_missing():
+    from scientographer.build_website import _fill_citation_counts_and_sizes
+
+    raw = [("n0", {}), ("n1", {}), ("n2", {}), ("g", {"Eingangsgrad": "7", "Grad": "9", "size": "4.5"})]
+    edges = [(1, 0), (2, 0), (2, 1)]  # n0 cited twice, n1 once, n2 never
+    _fill_citation_counts_and_sizes(raw, edges)
+    attrs = [a for _, a in raw]
+    assert [a["Eingangsgrad"] for a in attrs[:3]] == ["2", "1", "0"]
+    assert [a["Grad"] for a in attrs[:3]] == ["2", "2", "2"]
+    # Size grows linearly with citations received, 2 to 20, as Gephi's default ranking.
+    # (scaled by the most-cited paper counted from the edges: n0, with 2)
+    assert [float(a["size"]) for a in attrs[:3]] == [20.0, 11.0, 2.0]
+    # A graph laid out in Gephi keeps its own columns.
+    assert attrs[3] == {"Eingangsgrad": "7", "Grad": "9", "size": "4.5"}
 
 
 def test_every_site_ships_the_logo_and_the_badge():

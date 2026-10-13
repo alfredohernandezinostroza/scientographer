@@ -27,7 +27,7 @@ resolutions:
   # `cpm_communities_at_res=<r>`; every analysis stage sweeps exactly this list.
   # Higher resolution = more, smaller communities. Citation networks usually need
   # small values; the metrics stages help you pick one.
-  low: [0.001, 0.002, 0.003, 0.004, 0.005, 0.006, 0.007, 0.008, 0.009]
+  low: [0.001, 0.0015, 0.002, 0.003, 0.004, 0.005, 0.006, 0.007, 0.008, 0.009]
   mid: [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1, 0.11, 0.12, 0.13, 0.14, 0.15, 0.16, 0.17, 0.18, 0.19]
   high: [0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
   # The resolution single-resolution summaries report (metrics.json for dvc exp).
@@ -63,6 +63,27 @@ layout:
   # long axis is horizontal, its long tail points down and its most-cited side is on
   # the left (reproducible, unlike ForceAtlas2's arbitrary one); "none" keeps it.
   orientation: principal
+
+citation_layouts:
+  # citation_layouts.py: more ForceAtlas2 layouts of the citation graph, each written
+  # as data/citation_layouts/<key>.csv for `website.extra_layouts` (the View menu).
+  # `dimensions: 3` makes a 3D view; `lin_log: true` lets communities drift apart into
+  # separate islands. Each layout is lined up with the main 2D map, so switching views
+  # keeps the communities in place. Only positions are written: communities never change.
+  input_graphml: data/citation_network_with_layout.graphml
+  output_dir: data/citation_layouts
+  layouts:  # example
+    - key: forceatlas2_3d
+      dimensions: 3
+      iterations: 1000
+    - key: linlog
+      lin_log: true
+      dimensions: 2
+      iterations: 1000
+    - key: linlog_3d
+      lin_log: true
+      dimensions: 3
+      iterations: 1000
 
 graph:
   # The graph the community-analysis stages read. When the partitions come from
@@ -201,8 +222,23 @@ website:
   # ("Topic", "Cluster", ...) and `snapshots` (JSON: {"cutoffs": [1990, ...],
   # "snapshots": {"1990": {"<doi>": [x, y], ...}}} for the Time menu). Every view
   # is coloured by the same communities; papers absent from a layout are left
-  # out of that view only.
-  extra_layouts: []
+  # out of that view only. A table with a `z` column (citation_layouts with
+  # `dimensions: 3`) opens in the site's 3D view.
+  extra_layouts:  # example
+    - key: forceatlas2_3d
+      label: Citation network (3D)
+      subtitle: ForceAtlas2, as the main map, in three dimensions
+      positions: data/citation_layouts/forceatlas2_3d.csv
+    - key: linlog
+      label: Citation network (LinLog)
+      subtitle: ForceAtlas2 in LinLog mode
+      positions: data/citation_layouts/linlog.csv
+    - key: linlog_3d
+      label: Citation network (LinLog, 3D)
+      subtitle: ForceAtlas2 in LinLog mode, in three dimensions
+      positions: data/citation_layouts/linlog_3d.csv
+  # The view the site opens on: `network` (the main 2D map) or an extra layout's key.
+  default_view: forceatlas2_3d
   # Topics for the citation layout when its graph has none of its own: the `key`
   # of an extra layout whose topics to show there ("auto": the first one with
   # topics; "none": no Topic colouring on the citation layout).

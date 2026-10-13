@@ -13,6 +13,22 @@ settings or outputs).
   their own references table use `init --own-references`.
 - `init` on an existing project keeps its `dvc.yaml` and `params.yaml` as they are
   (`--force` starts it again).
+- **LinLog and 3D layouts:** a new `citation_layouts` stage runs ForceAtlas2 again,
+  in LinLog mode and/or in 3D, and the map shows each result as another view; 3D
+  views open in a 3D viewer (three.js, loaded only for them) with the same legend,
+  search, filters and paper panels. Every layout is lined up with the main 2D map.
+  New projects compute the standard layout in 3D and the site opens on it
+  (`website.default_view`); numba joins the base install for exact, multi-core
+  layouts. The example also shows LinLog in 2D and 3D.
+- The default resolution sweep gains 0.0015 (37 values).
+- **Fixed:** on a map whose graph was not laid out in Gephi, every paper showed 0
+  citations, the same tiny dot, and community top-paper lists in arbitrary order:
+  the site read only Gephi's own in-degree, degree and size columns. It now counts
+  them from the graph's citations when those columns are missing.
+- A **Dot size** slider in every view.
+- **Search and filters:** `|` means OR and quoted text is matched literally (commas,
+  brackets and all), so `"First title" | "Second title"` finds exactly those papers;
+  a comma still means AND.
 - **Logo:** the Scientographer logo (`docs/logo/`, CC BY-ND 4.0) heads the README, and
   every map shows "Made with" and the logo while it loads (for at least 1 s), then
   a round compass badge linking to the project; the compass is also the map's
