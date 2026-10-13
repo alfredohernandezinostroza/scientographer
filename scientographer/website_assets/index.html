@@ -245,7 +245,7 @@
     <button id="apply-filters" class="primary" type="button">Filter</button>
 
     <!-- Global filters (v1-like) -->
-    <input id="filter-title" type="search" placeholder="Filter by publication...">
+    <input id="filter-title" type="search" placeholder="Filter by publication... (&quot;title one&quot; | &quot;title two&quot;)">
     <input id="filter-author" type="search" placeholder="Filter by author(s), comma-separated...">
     <input id="filter-abstract" type="search" placeholder="Filter by abstracts...">
     <input id="filter-journal" type="search" placeholder="Filter by journal...">
@@ -255,7 +255,7 @@
 
     <div class="control-row">
       <label>Text matching</label>
-      <select id="match-mode" title="How search and filters match text: whole words (with plurals), word beginnings, anywhere, or a regular expression. Comma-separated queries must all match."></select>
+      <select id="match-mode" title="How search and filters match text: whole words (with plurals), word beginnings, anywhere, or a regular expression. A comma means AND, | means OR, and quoted text is matched literally: &quot;first title&quot; | &quot;second title&quot; finds either paper."></select>
     </div>
 
     <div class="control-row">
@@ -431,10 +431,10 @@
   <script src="https://unpkg.com/tabulator-tables@6.3.1/dist/js/tabulator.min.js"></script>
 
   <!-- App -->
-  <script type="module" src="main.js?v=35"></script>
+  <script type="module" src="main.js?v=36"></script>
   <!-- Guided tour (independent of main.js; only reads the DOM) -->
   <script type="module" src="tour.js?v=2"></script>
   <!-- Word map tab (lazy: loads its data the first time the tab is opened) -->
-  <script type="module" src="wordmap.js?v=2"></script>
+  <script type="module" src="wordmap.js?v=3"></script>
 </body>
 </html>

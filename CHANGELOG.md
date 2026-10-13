@@ -26,6 +26,9 @@ settings or outputs).
   the site read only Gephi's own in-degree, degree and size columns. It now counts
   them from the graph's citations when those columns are missing.
 - A **Dot size** slider in every view.
+- **Search and filters:** `|` means OR and quoted text is matched literally (commas,
+  brackets and all), so `"First title" | "Second title"` finds exactly those papers;
+  a comma still means AND.
 
 ## [0.1.0] - 2026-10-09
 
