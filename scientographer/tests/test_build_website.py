@@ -460,3 +460,19 @@ def test_citation_counts_and_sizes_come_from_the_edges_when_gephi_columns_are_mi
     assert [float(a["size"]) for a in attrs[:3]] == [20.0, 11.0, 2.0]
     # A graph laid out in Gephi keeps its own columns.
     assert attrs[3] == {"Eingangsgrad": "7", "Grad": "9", "size": "4.5"}
+
+
+def test_every_site_ships_the_logo_and_the_badge():
+    from pathlib import Path
+
+    from scientographer.build_website import ASSETS_DIR, FRONTEND_FILES
+
+    for name in ("scientographer-logo-dark.svg", "scientographer-icon.svg"):
+        assert name in FRONTEND_FILES
+        # The package's copies are the files in docs/logo, unchanged (CC BY-ND).
+        source = Path(__file__).resolve().parents[2] / "docs" / "logo" / name
+        if source.exists():  # docs/ is in the repository, not in the installed package
+            assert (ASSETS_DIR / name).read_bytes() == source.read_bytes()
+    page = (ASSETS_DIR / "index.html").read_text(encoding="utf-8")
+    assert "Made with" in page and 'id="scientographer-badge"' in page
+    assert 'href="https://github.com/alfredohernandezinostroza/scientographer"' in page

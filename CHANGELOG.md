@@ -29,6 +29,10 @@ settings or outputs).
 - **Search and filters:** `|` means OR and quoted text is matched literally (commas,
   brackets and all), so `"First title" | "Second title"` finds exactly those papers;
   a comma still means AND.
+- **Logo:** the Scientographer logo (`docs/logo/`, CC BY-ND 4.0) heads the README, and
+  every map shows "Made with" and the logo while it loads (for at least 1 s), then
+  a round compass badge linking to the project; the compass is also the map's
+  browser-tab icon. The Guided tour button moves to the top right.
 
 ## [0.1.0] - 2026-10-09
 

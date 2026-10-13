@@ -370,10 +370,10 @@ details.about p {
 
 /* ── Detail panel ────────────────────────────────────────────────────── */
 #detail {
-  top: 16px;
+  top: 60px; /* below the Guided tour button */
   right: 16px;
   width: 360px;
-  max-height: calc(100vh - 32px);
+  max-height: calc(100vh - 76px);
   overflow-y: auto;
 }
 #detail-close {
@@ -956,6 +956,22 @@ table.health-table tr.active td { color: var(--text); background: rgba(78, 161, 
   opacity: 0;
   pointer-events: none;
 }
+/* "Made with" + the Scientographer logo, above the loading status */
+.loading-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 0 16px;
+}
+.loading-brand .made-with {
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+.loading-brand img { width: min(360px, 80vw); height: auto; }
+.loading-brand #loading-status { font-size: 13px; color: var(--text-dim); }
 
 /* ── Legend buttons ──────────────────────────────────────────────────── */
 .legend-btn-row {
@@ -986,7 +1002,7 @@ table.health-table tr.active td { color: var(--text); background: rgba(78, 161, 
 #start-tour {
   position: fixed;
   right: 16px;
-  bottom: 16px;
+  top: 16px;
   z-index: 900;
   display: flex;
   align-items: center;
@@ -1005,6 +1021,29 @@ table.health-table tr.active td { color: var(--text); background: rgba(78, 161, 
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
 }
 #start-tour:hover { border-color: var(--accent); color: var(--accent); }
+
+/* Made with Scientographer: a round link to the project, bottom right */
+#scientographer-badge {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 900;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 1px solid var(--panel-border);
+  background: var(--panel-bg);
+  transition: border-color 120ms, transform 120ms;
+  animation: badge-in 400ms ease-out;
+}
+#scientographer-badge[hidden] { display: none; }
+#scientographer-badge:hover,
+#scientographer-badge:focus-visible { border-color: var(--accent); transform: scale(1.06); outline: none; }
+#scientographer-badge img { width: 30px; height: 30px; display: block; }
+@keyframes badge-in { from { opacity: 0; transform: scale(0.8); } to { opacity: 1; transform: scale(1); } }
+@media (prefers-reduced-motion: reduce) { #scientographer-badge { animation: none; transition: none; } }
 #start-tour .tour-icon {
   display: inline-grid;
   place-items: center;

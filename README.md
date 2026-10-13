@@ -1,4 +1,9 @@
-# Scientographer
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/alfredohernandezinostroza/scientographer/main/docs/logo/scientographer-logo-dark.svg">
+    <img src="https://raw.githubusercontent.com/alfredohernandezinostroza/scientographer/main/docs/logo/scientographer-logo-light.svg" alt="Scientographer" width="520">
+  </picture>
+</h1>
 
 [![PyPI](https://img.shields.io/pypi/v/scientographer)](https://pypi.org/project/scientographer/)
 [![Python](https://img.shields.io/pypi/pyversions/scientographer)](https://pypi.org/project/scientographer/)
@@ -420,9 +425,19 @@ See [CONTRIBUTING.md](https://github.com/alfredohernandezinostroza/scientographe
 - **The map frontend** (`scientographer/website_assets/`) and **the project templates**
   (`params.yaml`, `templates/dvc.yaml`) are [MIT-licensed](https://github.com/alfredohernandezinostroza/scientographer/blob/main/LICENSE-MIT). These are the
   files Scientographer copies into your maps and projects, so maps and projects you
-  publish carry no license obligations.
+  publish carry no license obligations, apart from the logo below.
 - **Your data and results** are yours: the graphs, metrics, JSON and figures the pipeline
   computes are its output, not part of the software.
+
+- **The Scientographer logo and icon** (`docs/logo/`, and the copies every map
+  shows) are © 2026 Alfredo Hernández Inostroza, licensed
+  [CC BY-ND 4.0](https://creativecommons.org/licenses/by-nd/4.0/): share them
+  unchanged and keep the credit (it is inside each file). The compass is based on an
+  icon by [zhuangxiuling123](https://www.svgrepo.com/svg/514347/compass)
+  ([CC BY 4.0](https://creativecommons.org/licenses/by/4.0/), modified), and the
+  lettering on the [Goldman](https://fonts.google.com/specimen/Goldman) typeface
+  (SIL Open Font License). The name and logo identify Scientographer; please don't
+  use them for other projects. A map you publish may keep them or remove them.
 
 Each file states its license in an `SPDX-License-Identifier` header.
 

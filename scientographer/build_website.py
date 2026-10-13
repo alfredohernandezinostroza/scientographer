@@ -116,7 +116,8 @@ OUTLIER_COLOR: Final[str] = "#cccccc"
 
 ASSETS_DIR: Final[Path] = Path(__file__).resolve().parent / "website_assets"
 FRONTEND_FILES: Final[tuple[str, ...]] = ("index.html", "main.js", "styles.css", "tour.js", "textmatch.js",
-                                         "wordmap.js", "renderer3d.js")
+                                         "wordmap.js", "renderer3d.js", "scientographer-logo-dark.svg",
+                                         "scientographer-icon.svg")
 DATA_SUBDIR: Final[str] = "network_data"
 # Extra views of the same papers on other 2-D layouts (e.g. text-embedding maps);
 # each becomes `<key>_data/` next to network_data/ and an entry in views.json.
