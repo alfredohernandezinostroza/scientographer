@@ -116,12 +116,14 @@ OUTLIER_COLOR: Final[str] = "#cccccc"
 
 ASSETS_DIR: Final[Path] = Path(__file__).resolve().parent / "website_assets"
 FRONTEND_FILES: Final[tuple[str, ...]] = ("index.html", "main.js", "styles.css", "tour.js", "textmatch.js",
-                                         "wordmap.js")
+                                         "wordmap.js", "renderer3d.js")
 DATA_SUBDIR: Final[str] = "network_data"
 # Extra views of the same papers on other 2-D layouts (e.g. text-embedding maps);
 # each becomes `<key>_data/` next to network_data/ and an entry in views.json.
 EXTRA_LAYOUTS: Final[list[dict]] = list(_cfg.get("extra_layouts") or [])
 BASE_VIEW_LABEL: Final[str] = str(_cfg.get("view_label") or "Citation network")
+# The view the site opens on: "network" (the main 2D map) or an extra layout's key.
+DEFAULT_VIEW: Final[str] = str(_cfg.get("default_view") or "network")
 # Topics for the citation layout when the graph has none of its own: the key of
 # an extra layout whose `topic` column to show there ("auto": the first extra
 # layout that has topics; "none": none, the Topic colouring is then left out).
@@ -153,6 +155,7 @@ DEFAULT_INPUTS: Final[dict] = dict(
     site_title=str(_cfg.get("title") or "Citation map"),
     extra_layouts=EXTRA_LAYOUTS,
     base_view_label=BASE_VIEW_LABEL,
+    default_view=DEFAULT_VIEW,
     network_topics=NETWORK_TOPICS,
 )
 
@@ -176,6 +179,12 @@ def _to_float(value, default=0.0):
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def _centroid(totals: dict, three_d: bool) -> list[float]:
+    """A group's mean position: [x, y], or [x, y, z] in a 3-D view."""
+    keys = ("sx", "sy", "sz") if three_d else ("sx", "sy")
+    return [round(totals[k] / totals["size"], 3) for k in keys]
 
 
 def _cluster_color(cid: int) -> str:
@@ -216,6 +225,32 @@ def _parse_graphml(graphml_file: Path):
         if s is not None and t is not None:
             edges.append((s, t))
     return nodes, edges, graph_attributes, node_attribute_names
+
+
+def _fill_citation_counts_and_sizes(raw_nodes: list, edges: list) -> None:
+    """Citation counts and dot sizes for a graph that lacks Gephi's columns.
+
+    A graph laid out in Gephi carries in-degree, degree and node size
+    (``Eingangsgrad``, ``Grad`` and ``size`` in its German locale); one laid out
+    by the pipeline does not, which left every paper at 0 citations and the
+    same tiny dot. Fill them from the graph's own edges (in place, only where
+    missing): in-degree = citations received within the corpus, degree = all
+    citation links, and size growing linearly with in-degree from 2 to 20, as
+    Gephi's default ranking."""
+    indegree = [0] * len(raw_nodes)
+    degree = [0] * len(raw_nodes)
+    for s, t in edges:
+        indegree[t] += 1
+        degree[s] += 1
+        degree[t] += 1
+    most = max(indegree, default=0) or 1
+    for i, (_, attrs) in enumerate(raw_nodes):
+        if attrs.get("Eingangsgrad") is None:
+            attrs["Eingangsgrad"] = str(indegree[i])
+        if attrs.get("Grad") is None:
+            attrs["Grad"] = str(degree[i])
+        if attrs.get("size") is None:
+            attrs["size"] = str(round(2.0 + 18.0 * _to_int(attrs["Eingangsgrad"], 0) / most, 3))
 
 
 def _resolutions_from_attribute_names(names) -> list[float]:
@@ -384,7 +419,7 @@ def _extra_view(
     connectivity_modifier_membership_df: Optional[pd.DataFrame] = None,
 ) -> dict:
     """One extra view: the papers of `spec["positions"]` (a table with `doi`, `x`,
-    `y`, optionally `topic` (integer, -1 = none) and `topic_name`) placed on that
+    `y`, optionally `z` (a 3D view), `topic` (integer, -1 = none) and `topic_name`) placed on that
     layout, with the citation communities of every resolution recomputed for
     those papers, the citations among them, and optional time snapshots
     (`spec["snapshots"]`: {"cutoffs": [...], "snapshots": {"<year>": {"<doi>": [x, y]}}}).
@@ -399,6 +434,9 @@ def _extra_view(
     table = table.assign(doi=table["doi"].astype(str).str.strip().str.lower()).drop_duplicates("doi")
     by_doi = table.set_index("doi")
     has_topics = "topic" in table.columns
+    three_d = "z" in table.columns
+    if three_d and spec.get("snapshots"):
+        raise ValueError(f"extra layout {key!r}: time snapshots are 2-D; a 3-D view (a `z` column) cannot have them")
 
     keep = [i for i, r in enumerate(node_records) if r["doi"].lower() in by_doi.index]
     new_index = {old: new for new, old in enumerate(keep)}
@@ -410,6 +448,7 @@ def _extra_view(
             **node_records[i],
             "x": round(float(row["x"]), 3),
             "y": round(float(row["y"]), 3),
+            **({"z": round(float(row["z"]), 3)} if three_d else {}),
             "cluster": topic,
             "color": _cluster_color(topic),
         })
@@ -452,6 +491,7 @@ def _extra_view(
         "label": str(spec.get("label") or key),
         "subtitle": str(spec.get("subtitle") or ""),
         "topic_label": str(spec.get("topic_label") or "Topic"),
+        "dims": 3 if three_d else 2,
         "records": records,
         "edges": view_edges,
         "clusters": clusters,
@@ -579,6 +619,7 @@ def _main() -> int:
 @unpack_fields("raw_nodes", "edges", "graph_attributes", "node_attribute_names")
 def parsed_graphml(graphml_path: Path) -> tuple[list, list, dict, list]:
     raw_nodes, edges, graph_attributes, node_attribute_names = _parse_graphml(graphml_path)
+    _fill_citation_counts_and_sizes(raw_nodes, edges)
     logger.info("parsed graphml: %d nodes, %d edges, %d graph-level attributes",
                 len(raw_nodes), len(edges), len(graph_attributes))
     return raw_nodes, edges, graph_attributes, node_attribute_names
@@ -725,7 +766,9 @@ def clusters_legend(node_records: list[dict], topic_metrics: dict,
         g["size"] += 1
         g["sx"] += r["x"]
         g["sy"] += r["y"]
+        g["sz"] = g.get("sz", 0.0) + r.get("z", 0.0)
 
+    three_d = any("z" in r for r in node_records)
     clusters = {}
     for cid in sorted(agg):
         if cid < 0:
@@ -737,7 +780,7 @@ def clusters_legend(node_records: list[dict], topic_metrics: dict,
             "id": cid,
             "name": _label_from_keywords(kws, f"Topic {cid}"),
             "color": _cluster_color(cid),
-            "centroid": [round(a["sx"] / a["size"], 3), round(a["sy"] / a["size"], 3)],
+            "centroid": _centroid(a, three_d),
             "size": a["size"],
             "top_papers": lists.get("top_papers", []),
             "top_authors": lists.get("top_authors", []),
@@ -879,7 +922,9 @@ def communities_legend_by_resolution(
             g["size"] += 1
             g["sx"] += r["x"]
             g["sy"] += r["y"]
+            g["sz"] = g.get("sz", 0.0) + r.get("z", 0.0)
 
+        three_d = any("z" in r for r in recs_at_res)
         communities = {}
         for cid in sorted(agg):
             if cid < 0 or agg[cid]["size"] < MIN_NAMED_GROUP_SIZE:
@@ -893,7 +938,7 @@ def communities_legend_by_resolution(
                 "name": graph_label or _label_from_keywords(kws, f"Community {cid}"),
                 "name_source": "pipeline" if graph_label else "site",
                 "color": _cluster_color(cid),
-                "centroid": [round(a["sx"] / a["size"], 3), round(a["sy"] / a["size"], 3)],
+                "centroid": _centroid(a, three_d),
                 "size": a["size"],
                 "top_papers": lists.get("top_papers", []),
                 "top_authors": lists.get("top_authors", []),
@@ -1170,7 +1215,7 @@ def save_extra_views(extra_views: list[dict], community_resolution: Optional[flo
                              bool(view["communities"]))
         _write_optional_json(d / "snapshots.json", view["snapshots"], view["snapshots"] is not None)
         _write_optional_json(d / "well_connected.json", view["well_connected"], view["well_connected"] is not None)
-        written[view["key"]] = {"dir": d.name, "nodes": n, "edges": len(view["edges"]),
+        written[view["key"]] = {"dir": d.name, "dims": view["dims"], "nodes": n, "edges": len(view["edges"]),
                                 "topics": len(view["clusters"]),
                                 "snapshots": len(view["snapshots"]["cutoffs"]) if view["snapshots"] else 0}
     return written
@@ -1179,21 +1224,27 @@ def save_extra_views(extra_views: list[dict], community_resolution: Optional[flo
 @datasaver()
 def save_views_manifest(
     save_extra_views: dict, extra_views: list[dict], base_view_label: str, website_dir: Path,
-    clusters_legend: dict, network_topic_source: Optional[dict] = None,
+    clusters_legend: dict, network_topic_source: Optional[dict] = None, default_view: str = "network",
 ) -> dict:
     """views.json, the list of views the site offers and how each can be
     coloured. Without it the page assumes one citation view with topics, so it
     is left out (any stale copy removed) only when that is what the site has."""
     topic_label = network_topic_source["label"] if network_topic_source else "Topic"
     views = [{"key": "network", "label": base_view_label, "dir": DATA_SUBDIR,
-              "subtitle": "Citation-network layout", "snapshots": False,
+              "subtitle": "Citation-network layout", "snapshots": False, "dims": 2,
               "groupings": _view_groupings(topic_label, bool(clusters_legend))}]
     for view in extra_views:
         views.append({"key": view["key"], "label": view["label"], "dir": save_extra_views[view["key"]]["dir"],
                       "subtitle": view["subtitle"], "snapshots": view["snapshots"] is not None,
+                      "dims": view["dims"],
                       "groupings": _view_groupings(view["topic_label"], bool(view["clusters"]))})
+    keys = [v["key"] for v in views]
+    if default_view not in keys:
+        logger.warning("website.default_view %r is not one of the views %s; opening on the main map",
+                       default_view, keys)
+        default_view = "network"
     path = Path(website_dir) / "views.json"
-    _write_optional_json(path, {"default": "network", "shared_dir": DATA_SUBDIR, "views": views},
+    _write_optional_json(path, {"default": default_view, "shared_dir": DATA_SUBDIR, "views": views},
                          len(views) > 1 or not clusters_legend)
     return {"views": [v["key"] for v in views], "extra": save_extra_views}
 

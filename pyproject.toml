@@ -49,6 +49,8 @@ dependencies = [
     # the word-cloud stage, and DVC with S3-compatible remotes (DagsHub, AWS S3, MinIO;
     # other storage needs its plugin, e.g. `pip install dvc-gdrive`).
     "fa2>=1.1",
+    # Exact, multi-core ForceAtlas2 for the extra (3D, LinLog) layouts.
+    "numba>=0.59",
     "wordcloud>=1.9",
     "shapely>=2",
     "pillow>=10",
