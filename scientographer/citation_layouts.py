@@ -95,15 +95,16 @@ def aligned_to_map(positions: np.ndarray, map_xy: np.ndarray) -> np.ndarray:
     """Turn, mirror, scale and move a layout so it lines up with the main 2D map.
 
     The rotation (or mirror image), scale and shift that bring the layout's
-    first two axes closest to the map's x/y (orthogonal Procrustes, fitted on
-    the map's main body so a few far-off papers do not steer it); in 3D the
-    third axis completes a right-handed frame. Seen from the front (looking
-    down z), a 3D view then shows the communities where the 2D map has them."""
-    distance = np.linalg.norm(map_xy - np.median(map_xy, axis=0), axis=1)
-    core = distance <= np.quantile(distance, ORIENTATION_CORE_SHARE)
-    layout_centre = positions[core].mean(axis=0)
-    map_centre = map_xy[core].mean(axis=0)
-    a, b = positions[core] - layout_centre, map_xy[core] - map_centre
+    first two axes closest to the map's x/y over all papers (orthogonal
+    Procrustes); in 3D the third axis completes a right-handed frame. Seen from
+    the front (looking down z), a 3D view then shows the communities where the
+    2D map has them. On the motor-learning corpus, the centres of the 43
+    communities of at least 100 papers (γ = 0.0015) then correlate with the 2D
+    map's at 0.74 (x) and 0.93 (y) for the standard 3D layout. (Fitting on the
+    map's dense core only did worse, and flipped LinLog upside down.)"""
+    layout_centre = positions.mean(axis=0)
+    map_centre = map_xy.mean(axis=0)
+    a, b = positions - layout_centre, map_xy - map_centre
     u, singular, vt = np.linalg.svd(a.T @ b, full_matrices=False)
     turn = u @ vt  # (dimensions x 2), orthonormal columns
     if positions.shape[1] == 3:
