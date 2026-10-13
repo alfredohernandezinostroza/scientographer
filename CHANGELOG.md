@@ -13,6 +13,9 @@ settings or outputs).
   their own references table use `init --own-references`.
 - `init` on an existing project keeps its `dvc.yaml` and `params.yaml` as they are
   (`--force` starts it again).
+- **Search and filters:** `|` means OR and quoted text is matched literally (commas,
+  brackets and all), so `"First title" | "Second title"` finds exactly those papers;
+  a comma still means AND.
 
 ## [0.1.0] - 2026-10-09
 
