@@ -295,9 +295,7 @@ get it with `scientographer init --force` (which rewrites `dvc.yaml` and
 - **Search and filters** on title, author, abstract, journal, keywords and (for a
   PubMed corpus) MeSH terms, matching
   whole words by default (so *dance* does not match *guidance*), or prefixes,
-  substrings or regular expressions. A comma means AND, `|` means OR, and quoted
-  text is matched literally, so pasted titles find exactly those papers:
-  `"First title" | "Second title"`.
+  substrings or regular expressions.
 - **Panels** per paper and per community (top papers, authors, keyword bars), a
   **Metrics** tab with every measure above against resolution, a **Figures** tab with
   the word clouds, and a **Word map** tab: where words occur across the map, as

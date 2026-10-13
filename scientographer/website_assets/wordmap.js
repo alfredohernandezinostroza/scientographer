@@ -17,7 +17,7 @@
 // filter on, only the papers the Connectivity Modifier keeps at that resolution
 // are counted, smoothed and drawn.
 
-import { MATCH_MODES, buildMatcher, parseTerms } from "./textmatch.js?v=2";
+import { MATCH_MODES, buildMatcher, parseTerms } from "./textmatch.js";
 
 const FIELDS = [
   { key: "abstract", label: "Abstract" },
