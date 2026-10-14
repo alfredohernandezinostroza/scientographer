@@ -305,6 +305,9 @@ html, body {
   align-items: center;
   gap: 6px;
 }
+/* "Highlight top papers" + its ranking menu on one line. */
+.top-papers-row { justify-content: space-between; flex-wrap: wrap; }
+.top-papers-row select { min-width: 0; flex: 0 1 auto; }
 .checkbox-row label {
   text-transform: none;
   letter-spacing: 0;
@@ -464,6 +467,23 @@ details.about p {
   line-height: 1.4;
 }
 #detail ul.top-list li:last-child { border-bottom: none; }
+/* "Top papers" heading with its "Rank top papers by" menu on the right. */
+#detail h3.top-papers-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+#detail h3.top-papers-head select {
+  text-transform: none;
+  letter-spacing: 0;
+  padding: 3px 6px;
+  background: #161a22;
+  color: var(--text);
+  border: 1px solid var(--panel-border);
+  border-radius: 5px;
+  font-size: 11px;
+}
 #detail ul.top-list .sub {
   color: var(--text-dim);
   font-size: 11px;

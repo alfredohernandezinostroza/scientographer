@@ -17,6 +17,16 @@
 import Graph from "https://cdn.jsdelivr.net/npm/graphology@0.25.4/+esm";
 import { Sigma } from "https://cdn.jsdelivr.net/npm/sigma@2.4.0/+esm";
 import { MATCH_MODES, makeFilter } from "./textmatch.js?v=2";
+import {
+  BRIDGE_MIN_LINKS,
+  BRIDGE_MIN_PARTICIPATION,
+  DEFAULT_RANKING,
+  RANKINGS,
+  bridgePapers,
+  participationCoefficients,
+  rankingScores,
+  topPapersByGroup,
+} from "./rankings.js?v=1";
 
 // ── Dataset definitions ─────────────────────────────────────────────────────
 // Each grouping: key (also the "Color by" value), label (detail panel + color
@@ -111,6 +121,16 @@ const state = {
   legendEls: {}, // grouping key -> <ul> element
   colorBy: "topic", // a grouping key | year | indegree
   highlightBridges: false,
+  // Bridge papers (rankings.js): every paper's participation coefficient at the
+  // current community resolution, computed when first needed and dropped when
+  // the resolution or the view changes. See bridgeData().
+  bridges: null, // { resolution, coefficient, links, communitiesReached, bridge } | null
+  // Top papers per group: one ranking (a rankings.js RANKINGS key) shared by the
+  // "Highlight top papers" menu and the group panel's "Rank top papers by" menu.
+  highlightTopPapers: false,
+  topPaperRanking: DEFAULT_RANKING,
+  topPapers: null, // Map(grouping|ranking|resolution -> { byGroup, scores, set }), see topPapersFor()
+  detailGroup: null, // { key, gid } of the open group panel, else null
   showEdges: false,
   _citeLayerBuilt: false,
   shiftDown: false,
@@ -335,6 +355,9 @@ async function loadDataset(name) {
   state._intraLayerBuilt = false;
   state.snapshotData = null; // belongs to the previous dataset
   state.snapshot = null; // back to the full "now" layout
+  state.bridges = null; // computed on the previous dataset's citations
+  state.topPapers = null;
+  state.detailGroup = null;
 
   document.getElementById("subtitle").innerHTML = cfg.subtitle;
 
@@ -1175,6 +1198,10 @@ function applyCommunityResolution(resolution) {
   }
   state.groupData.community = legend;
   state.muted.community = new Set();
+  // Bridges and top papers depend on the communities (bridgeData() also checks
+  // the resolution; the well-connected filter changes which ones are named).
+  state.bridges = null;
+  state.topPapers = null;
   computeSnapshotGroupStats();
   updateWellConnectedRow();
   refreshResolutionOptions();
@@ -1221,6 +1248,92 @@ function parseCSR(buf) {
 }
 function csrNeighbors(csr, idx) {
   return csr.targets.subarray(csr.offsets[idx], csr.offsets[idx + 1]);
+}
+
+// ── Bridge papers + top papers (rankings.js) ─────────────────────────────
+// Highlight colours on the dark map: bridges gold, top papers white, so both can
+// be on at once and still be told apart (and neither is a community colour).
+const BRIDGE_COLOR = "#ffd76e";
+const TOP_PAPER_COLOR = "#ffffff";
+// Papers per group, as the build's TOP_PAPERS.
+const TOP_PAPER_COUNT = 5;
+
+// Every paper's id in grouping `key` (its community at the current resolution,
+// or its topic), -1 for none.
+function groupIds(key) {
+  const field = groupingConfig(key).nodeField;
+  const nodes = state.nodesData.nodes;
+  const ids = new Int32Array(nodes.length);
+  for (let i = 0; i < nodes.length; i++) {
+    const gid = nodes[i][field];
+    ids[i] = gid != null && gid >= 0 ? gid : -1;
+  }
+  return ids;
+}
+
+// Participation coefficients and bridge papers at the current community
+// resolution, computed on first use. Null when the view has no communities:
+// with every paper in a community of its own, every well-linked paper would
+// look like a bridge.
+function bridgeData() {
+  const communities = citationGrouping();
+  if (!communities || state.communityResolution == null || !state.outCSR) return null;
+  if (state.bridges?.resolution !== state.communityResolution) {
+    const participation = participationCoefficients(state.outCSR, state.inCSR, groupIds(communities.key));
+    state.bridges = { resolution: state.communityResolution, ...participation, bridge: bridgePapers(participation) };
+  }
+  return state.bridges;
+}
+
+// The grouping whose top papers "Highlight top papers" marks: the one the map is
+// coloured by, else (year, citations or integration colouring) the communities.
+function topPaperGroupingKey() {
+  if (groupingConfig(state.colorBy)) return state.colorBy;
+  return (citationGrouping() || activeGroupings()[0]).key;
+}
+
+// The top papers of every named group of grouping `key` by the current ranking:
+// { byGroup: Map(group id -> paper indices, best first), scores, set (of node
+// keys) }. Cached per grouping, ranking and resolution; the cache is dropped
+// whenever the groups change (view, resolution, well-connected filter).
+function topPapersFor(key) {
+  const cacheKey = `${key}|${state.topPaperRanking}|${state.communityResolution}`;
+  state.topPapers ||= new Map();
+  if (!state.topPapers.has(cacheKey)) {
+    const nodes = state.nodesData.nodes;
+    const groupOf = groupIds(key);
+    const scores = rankingScores(state.topPaperRanking, nodes, state.inCSR, groupOf, state.nodesData.year_max);
+    const named = new Set(Object.keys(state.groupData[key] || {}).map(Number));
+    const byGroup = topPapersByGroup(scores, groupOf, named, TOP_PAPER_COUNT);
+    // As in the build's lists, a paper without a title is dropped after ranking.
+    const set = new Set();
+    for (const [gid, list] of byGroup) {
+      const titled = list.filter((i) => nodes[i].title);
+      byGroup.set(gid, titled);
+      for (const i of titled) set.add(String(i));
+    }
+    state.topPapers.set(cacheKey, { byGroup, scores, set });
+  }
+  return state.topPapers.get(cacheKey);
+}
+
+// The two "Rank top papers by" menus (control panel + group panel) show one
+// shared ranking: set it, keep both menus on it, and redraw what depends on it.
+function setTopPaperRanking(ranking) {
+  if (!RANKINGS[ranking]) return;
+  state.topPaperRanking = ranking;
+  for (const id of ["top-papers-ranking", "detail-rank-by"]) {
+    const menu = document.getElementById(id);
+    if (menu) menu.value = ranking;
+  }
+  renderTopPapersList();
+  if (state.highlightTopPapers) state.renderer.refresh();
+}
+
+function rankingOptionsHtml() {
+  return Object.entries(RANKINGS)
+    .map(([value, ranking]) => `<option value="${value}"${value === state.topPaperRanking ? " selected" : ""}>${escapeHtml(ranking.label)}</option>`)
+    .join("");
 }
 
 // ── Index build (fast filtering) ──────────────────────────────────────────
@@ -1397,8 +1510,14 @@ function nodeReducer(node, attrs) {
 
   a.color = nodeColor(r);
 
-  if (state.highlightBridges && r.bridge) {
-    a.color = "#ffd76e";
+  if (state.highlightBridges && bridgeData()?.bridge[parseInt(node, 10)]) {
+    a.color = BRIDGE_COLOR;
+    a.size = a._baseSize * 1.6;
+    a.zIndex = 3;
+  }
+  // Drawn over the bridge highlight: the few papers that are both show as top papers.
+  if (state.highlightTopPapers && topPapersFor(topPaperGroupingKey()).set.has(node)) {
+    a.color = TOP_PAPER_COLOR;
     a.size = a._baseSize * 1.6;
     a.zIndex = 3;
   }
@@ -1961,6 +2080,7 @@ function termList(label, value) {
 
 function showPaperDetail(idx) {
   const r = state.nodesData.nodes[idx];
+  state.detailGroup = null;
   const auths = (r.authors || "").split("|").join(", ");
   const doiHtml = r.doi
     ? `<a href="https://doi.org/${encodeURIComponent(r.doi)}" target="_blank" rel="noopener">Open DOI</a>`
@@ -1976,8 +2096,13 @@ function showPaperDetail(idx) {
         : "";
     })
     .join(" ");
-  const bridgeBadge = r.bridge
-    ? `<span class="cluster-tag" style="background:#ffd76e;color:#0e1116">Bridge paper</span>`
+  // Its participation coefficient at the current resolution (rankings.js).
+  const bridges = bridgeData();
+  const bridgeBadge = bridges?.bridge[idx]
+    ? `<span class="cluster-tag" style="background:${BRIDGE_COLOR};color:#0e1116" title="Links many communities: at least ${BRIDGE_MIN_LINKS} links and a participation coefficient above ${BRIDGE_MIN_PARTICIPATION}">Bridge paper</span>`
+    : "";
+  const participationHtml = bridges && bridges.links[idx]
+    ? `<div class="meta">Participation coefficient ${bridges.coefficient[idx].toFixed(2)} &middot; links reach ${bridges.communitiesReached[idx]} ${bridges.communitiesReached[idx] === 1 ? "community" : "communities"}</div>`
     : "";
 
   const numOut = state.outCSR.offsets[idx + 1] - state.outCSR.offsets[idx];
@@ -1989,6 +2114,7 @@ function showPaperDetail(idx) {
     <div class="meta">${escapeHtml(auths)}</div>
     <div class="meta">${r.year ?? ""}${r.journal ? " &middot; " + escapeHtml(r.journal) : ""}</div>
     <div class="meta">${r.indegree || 0} citations &middot; cites ${numOut} &middot; cited by ${numIn}</div>
+    ${participationHtml}
     ${termList("Keywords", r.keywords)}
     ${termList("MeSH terms", r.mesh)}
     <div class="actions">
@@ -2122,9 +2248,12 @@ function showGroupDetail(key, gid) {
     ? `<button id="show-islands">Highlight citation islands</button>`
     : "";
 
-  const papers = (c.top_papers || [])
-    .map((p) => `<li>${escapeHtml(p.title)}<div class="sub">${p.year ?? ""}${p.in_degree ? " &middot; " + p.in_degree + " citations" : ""}</div></li>`)
-    .join("");
+  // Top papers: ranked here, by the ranking the "Rank top papers by" menu picks
+  // (the build's `top_papers` are the "Citations" lists).
+  const papersBlock = `<h3 class="top-papers-head">Top papers
+      <select id="detail-rank-by" aria-label="Rank top papers by" title="Rank top papers by">${rankingOptionsHtml()}</select>
+    </h3>
+    <ul class="top-list" id="detail-top-papers"></ul>`;
   const authors = (c.top_authors || [])
     .map((a) => `<li>${escapeHtml(a.name)}<div class="sub">${a.papers ?? ""} papers</div></li>`)
     .join("");
@@ -2172,14 +2301,35 @@ function showGroupDetail(key, gid) {
     ${keywordBarsBlock}
     ${keywords ? `<h3>Top keywords</h3><ul class="top-list">${keywords}</ul>` : ""}
     ${authors ? `<h3>Top authors</h3><ul class="top-list">${authors}</ul>` : ""}
-    ${papers ? `<h3>Top papers</h3><ul class="top-list">${papers}</ul>` : ""}
+    ${papersBlock}
   `;
   document.getElementById("detail").hidden = false;
+  state.detailGroup = { key, gid };
+  renderTopPapersList();
+  document.getElementById("detail-rank-by").addEventListener("change", (e) => setTopPaperRanking(e.target.value));
   const barsEl = document.getElementById("detail-keyword-bars");
   if (barsEl && barItems) renderKeywordBars(barsEl, { items: barItems, color: c.color, maxBars: 12 });
   document.getElementById("frame-group").addEventListener("click", () => frameGroup(key, gid));
   document.getElementById("isolate-group").addEventListener("click", () => toggleIsolateGroup(key, gid));
   document.getElementById("show-islands")?.addEventListener("click", () => highlightTopicIslands(key, gid));
+}
+
+// The open group panel's top papers by the current ranking, with the value each
+// was ranked by. A no-op when no group panel is open.
+function renderTopPapersList() {
+  const list = document.getElementById("detail-top-papers");
+  if (!list || !state.detailGroup) return;
+  const { key, gid } = state.detailGroup;
+  const { byGroup, scores } = topPapersFor(key);
+  const ranking = RANKINGS[state.topPaperRanking];
+  const groupLabel = groupingConfig(key).label.toLowerCase();
+  const nodes = state.nodesData.nodes;
+  const papers = byGroup.get(Number(gid)) || [];
+  list.innerHTML = papers.length
+    ? papers
+        .map((i) => `<li>${escapeHtml(nodes[i].title)}<div class="sub">${nodes[i].year ?? ""} &middot; ${ranking.describe(scores[i], groupLabel)}</div></li>`)
+        .join("")
+    : `<li class="sub">No paper of this ${escapeHtml(groupLabel)} has a ${escapeHtml(ranking.label.toLowerCase())} value.</li>`;
 }
 
 // One-click: isolate this topic and turn on the intra-topic islands view, so its
@@ -2203,6 +2353,7 @@ function highlightTopicIslands(key, gid) {
 
 function hideDetail() {
   document.getElementById("detail").hidden = true;
+  state.detailGroup = null;
 }
 
 // ── Camera helpers ────────────────────────────────────────────────────────
@@ -2320,6 +2471,14 @@ function initControls() {
     state.highlightBridges = e.target.checked;
     state.renderer.refresh();
   });
+
+  document.getElementById("top-papers-toggle").addEventListener("change", (e) => {
+    state.highlightTopPapers = e.target.checked;
+    state.renderer.refresh();
+  });
+  const rankingMenu = document.getElementById("top-papers-ranking");
+  rankingMenu.innerHTML = rankingOptionsHtml();
+  rankingMenu.addEventListener("change", (e) => setTopPaperRanking(e.target.value));
 
   document.getElementById("edges-toggle").addEventListener("change", (e) => {
     state.showEdges = e.target.checked;

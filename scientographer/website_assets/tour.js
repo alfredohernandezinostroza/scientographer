@@ -104,8 +104,19 @@ const STEPS = [
     row: true,
     title: "Bridge papers",
     body:
-      "Highlight <strong>bridge papers</strong> — the ones that link otherwise " +
-      "separate parts of the map.",
+      "Highlight <strong>bridge papers</strong> in gold: papers with at least 10 " +
+      "citation links spread over many communities (a participation coefficient " +
+      "above 0.62), so they connect otherwise separate parts of the map.",
+  },
+  {
+    target: "#top-papers-toggle",
+    row: true,
+    title: "Top papers",
+    body:
+      "Highlight in white the <strong>five top papers</strong> of every community " +
+      "(or topic, when coloured by topic), ranked by citations, citations from " +
+      "within the community, citations per year or PageRank. The same ranking " +
+      "orders the top papers in a community's panel.",
   },
   {
     target: "#edges-toggle",
