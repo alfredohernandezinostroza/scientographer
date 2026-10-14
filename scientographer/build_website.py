@@ -40,7 +40,7 @@ Output (default ``reports/website/``)::
 
     index.html  main.js  styles.css  tour.js        (vendored frontend, copied)
     network_data/
-      nodes.json                     per-paper records (+ community id at every resolution)
+      nodes.json                     per-paper records (+ community id at every resolution, PageRank)
       clusters.json                  topic legend
       communities_by_resolution.json citation-community legend per resolution (+ quality)
       resolution_metrics.json        whole-graph metrics vs. resolution
@@ -71,6 +71,7 @@ import xml.etree.ElementTree as ET
 from hamilton import driver
 from hamilton.function_modifiers import datasaver, unpack_fields
 import hamilton.log_setup
+import igraph as ig
 import numpy as np
 import pandas as pd
 
@@ -99,6 +100,12 @@ DEFAULT_COMMUNITY_RESOLUTION: Final[float] = float(_cfg["default_resolution"])  
 
 # Communities below this size are left uncoloured/unnamed ("No community").
 MIN_NAMED_GROUP_SIZE: Final[int] = int(_cfg["min_named_group_size"])
+
+# PageRank of every paper on the directed citation graph (the "PageRank" ranking
+# of a group's top papers), with the usual damping factor, kept to a few
+# significant digits in nodes.json.
+PAGERANK_DAMPING: Final[float] = 0.85
+PAGERANK_SIGNIFICANT_DIGITS: Final[int] = 4
 
 # How many entries to keep per group for the detail panels.
 TOP_PAPERS: Final[int] = 5
@@ -686,20 +693,32 @@ def network_topic_source(raw_nodes: list, extra_layouts: list, network_topics: s
     return None
 
 
+def paper_pagerank(raw_nodes: list, edges: list) -> list[float]:
+    """Every paper's PageRank on the directed citation graph (a citation passes
+    rank from the citing paper to the cited one), in node order, rounded to
+    PAGERANK_SIGNIFICANT_DIGITS significant digits. Sums to 1 over the papers."""
+    graph = ig.Graph(n=len(raw_nodes), edges=edges, directed=True)
+    scores = graph.pagerank(damping=PAGERANK_DAMPING, directed=True) if len(raw_nodes) else []
+    return [float(f"{score:.{PAGERANK_SIGNIFICANT_DIGITS}g}") for score in scores]
+
+
 def node_records(raw_nodes: list, resolutions: list[float], community_resolution: Optional[float],
-                 network_topic_source: Optional[dict] = None) -> list[dict]:
+                 network_topic_source: Optional[dict] = None,
+                 paper_pagerank: Optional[list[float]] = None) -> list[dict]:
     """Per-paper web records: position (graph x/y), semantic topic (`cluster`
     + `color`; the graph's `topic`, else `network_topic_source`'s), citation
     community at the default resolution (`community` +
     `community_color`, greyed below MIN_NAMED_GROUP_SIZE), the community id at
-    every resolution (`communities`), and display metadata."""
+    every resolution (`communities`), PageRank on the whole citation graph
+    (`pagerank`, when given; every view keeps the full graph's value), and
+    display metadata."""
     community_attr = f"{COMMUNITY_ATTRIBUTE_PREFIX}{community_resolution}" if community_resolution is not None else None
     community_sizes: Counter = Counter(
         _to_int(a.get(community_attr), OUTLIER) for _, a in raw_nodes) if community_attr else Counter()
 
     borrowed = network_topic_source["topic"] if network_topic_source else None
     records = []
-    for nid, a in raw_nodes:
+    for index, (nid, a) in enumerate(raw_nodes):
         topic = (borrowed.get((a.get("name") or "").strip().lower(), OUTLIER) if borrowed is not None
                  else _to_int(a.get(TOPIC_ATTR), OUTLIER))
         community = _to_int(a.get(community_attr), OUTLIER) if community_attr else OUTLIER
@@ -724,6 +743,7 @@ def node_records(raw_nodes: list, resolutions: list[float], community_resolution
             "size": round(_to_float(a.get("size"), 1.0), 3),
             "indegree": _to_int(a.get("Eingangsgrad"), 0),
             "degree": _to_int(a.get("Grad"), 0),
+            **({"pagerank": paper_pagerank[index]} if paper_pagerank is not None else {}),
         })
     return records
 
