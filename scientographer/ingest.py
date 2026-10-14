@@ -15,12 +15,24 @@ Formats:
   ``author`` (the authors' own keywords), ``mesh`` (MeSH major topics) or
   ``author_then_mesh`` (the default: the authors' keywords, else the MeSH major
   topics, since many PubMed records have no author keywords).
+- ``scopus``: Scopus's CSV export (all fields). Keywords: the authors' own
+  ("Author Keywords"); Scopus's index keywords are kept as ``index_keywords``.
+- ``wos``: Web of Science's tab-delimited export (``savedrecs.txt``; a folder of
+  them, as Web of Science exports at most 1,000 records per file). Keywords: the
+  authors' own (DE); Keywords Plus are kept as ``keywords_plus``.
+- ``ebsco``: an EBSCOhost CSV export (e.g. Academic Search Ultimate). Keywords:
+  EBSCO's subject terms.
+
+DOIs are lower-cased and stripped of ``https://doi.org/`` and ``doi:`` prefixes.
+`keywords_from` applies to ``medline`` only. Field choices for the other formats
+are described in ``_database_exports``.
 
 Outputs:
   citation_network.papers_table   doi, title, abstract, authors, keywords, journal,
-                                  year, plus the format's own columns (pmid, mesh, ...)
-                                  and `sources`
-  <report_dir>/report.json        records read per source, left out (no DOI),
+                                  year, plus the formats' own columns (pmid, mesh,
+                                  scopus_id, wos_id, ebsco_id, ...) and `sources`
+  <report_dir>/report.json        records read per source, left out (no DOI, or a
+                                  Web of Science line that could not be read),
                                   duplicates merged, papers written
   <report_dir>/without_doi.csv    the records left out for lacking a DOI
 """
@@ -39,7 +51,7 @@ from hamilton.io import utils
 import hamilton.log_setup
 import pandas as pd
 
-from scientographer import _medline
+from scientographer import _database_exports, _medline
 from scientographer.config import FIGURES_PATH, draw_dag, ensure_dirs, params, tracker_adapters
 
 ###################
@@ -67,10 +79,35 @@ def _read_medline(path: Path, keywords_from: str) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _read_scopus(path: Path, keywords_from: str) -> pd.DataFrame:
+    return _database_exports.read_scopus(path)
+
+
+def _read_web_of_science(path: Path, keywords_from: str) -> pd.DataFrame:
+    return _database_exports.read_web_of_science(path)
+
+
+def _read_ebsco(path: Path, keywords_from: str) -> pd.DataFrame:
+    return _database_exports.read_ebsco(path)
+
+
 # format -> (reader(path, keywords_from) -> one row per record, file patterns in a directory)
 READERS: Final[dict[str, tuple[Callable[[Path, str], pd.DataFrame], tuple[str, ...]]]] = {
     "medline": (_read_medline, ("*.txt", "*.nbib", "*.medline")),
+    "scopus": (_read_scopus, ("*.csv",)),
+    "wos": (_read_web_of_science, ("*.txt",)),
+    "ebsco": (_read_ebsco, ("*.csv",)),
 }
+_DOI_PREFIXES: Final[tuple[str, ...]] = ("https://doi.org/", "http://doi.org/", "https://dx.doi.org/",
+                                         "http://dx.doi.org/", "doi:")
+
+
+def _normalize_doi(doi: str) -> str:
+    """Lower-cased, without a resolver or ``doi:`` prefix: "https://doi.org/10.1/AB" -> "10.1/ab"."""
+    doi = doi.strip().lower()
+    for prefix in _DOI_PREFIXES:
+        doi = doi.removeprefix(prefix)
+    return doi.strip()
 
 
 def _files(path: str, patterns: tuple[str, ...]) -> list[Path]:
@@ -97,11 +134,16 @@ def _read_sources(sources: list[dict], keywords_from: str) -> tuple[list[pd.Data
             table["sources"] = [[f"{fmt}:{file.name}"] for _ in range(len(table))]
             if "doi" not in table:
                 table["doi"] = ""
-            table["doi"] = table["doi"].fillna("").astype(str).str.strip().str.lower()
+            table["doi"] = [_normalize_doi(doi) for doi in table["doi"].fillna("").astype(str)]
             frames.append(table)
             report.append({"format": fmt, "file": str(file), "records": len(table),
                            "without_doi": int((table["doi"] == "").sum())})
             logger.info("%s: %d records (%d without a DOI)", file, len(table), report[-1]["without_doi"])
+            unreadable = int(table.attrs.get("unreadable_records", 0))
+            if unreadable:
+                report[-1]["unreadable_records"] = unreadable
+                logger.warning("%s: %d lines could not be read (more fields than the header) and are left out",
+                               file, unreadable)
     return frames, report
 
 
@@ -180,6 +222,7 @@ def ingest_report(read_sources: dict, papers_table: pd.DataFrame) -> dict:
         "files": read_sources["files"],
         "records": len(table),
         "records_without_doi": len(table) - with_doi,
+        "unreadable_records": sum(f.get("unreadable_records", 0) for f in read_sources["files"]),
         "duplicates_merged": with_doi - len(papers_table),
         "papers": len(papers_table),
     }
@@ -199,7 +242,8 @@ def save_ingest_report(ingest_report: dict, read_sources: dict, report_dir: Path
     report_dir.mkdir(parents=True, exist_ok=True)
     (report_dir / "report.json").write_text(json.dumps(ingest_report, indent=1), encoding="utf-8")
     table = read_sources["table"]
-    columns = [c for c in ("pmid", "title", "year", "journal", "sources") if c in table.columns]
+    columns = [c for c in ("pmid", "scopus_id", "wos_id", "ebsco_id", "title", "year", "journal", "sources")
+               if c in table.columns]
     table.loc[table["doi"] == "", columns].to_csv(report_dir / "without_doi.csv", index=False)
     logger.info("ingest: %s", {k: v for k, v in ingest_report.items() if k != "files"})
     return utils.get_file_metadata(report_dir / "report.json")
