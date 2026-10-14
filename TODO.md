@@ -67,3 +67,8 @@ Finished items stay at the bottom until the next release, then go to the CHANGEL
       favicon; Guided tour moved to the top right (#8)
 - [x] Rulesets: `main` protected (pull requests, status checks, no force pushes or
       deletions); a repository setting, no PR
+- [x] Bridge papers work: participation coefficient at the current resolution
+      (Guimerà & Amaral), in the highlight and the paper panel
+- [x] Top papers by four rankings (citations, citations within the community,
+      citations per year, PageRank), in the community panel and a "Highlight top
+      papers" control
