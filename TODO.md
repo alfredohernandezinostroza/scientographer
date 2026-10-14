@@ -11,6 +11,10 @@ Finished items stay at the bottom until the next release, then go to the CHANGEL
 - [ ] Dot size: a "Same size" option
 - [ ] 3D views: time snapshots and PNG export (2D only for now)
 - [ ] Communities whose keyword names come out the same: tell them apart in the legend
+- [ ] Word heatmaps (the Word map tab's densities) as a filter in the map views: 2D, 3D,
+      LinLog, all of them. Needs a way to handle the density (KDE) in 3D and on each layout
+- [ ] Journal reputation: hold journal ranking metadata (SCImago, Web of Science, other
+      reputable sources), filter by it on the map, and colour papers by it
 
 ## Pipeline and analysis
 
@@ -21,11 +25,28 @@ Finished items stay at the bottom until the next release, then go to the CHANGEL
 - [ ] More ingest formats
 - [ ] Gemini-only topics, without BERTopic and PyTorch
 
+## Provenance: how a map was made
+
+- [ ] An "About this map" panel on the site: Scientographer version, build date, every
+      stage with its settings, the input files with their checksums (from `params.yaml`
+      and `dvc.lock`), and the pipeline's stage graph (`dvc dag`)
+- [ ] Each GraphML file records its own history: every stage appends what it did
+      (stage, version, settings, input checksums) to a graph-level attribute
+- [ ] The stages' Hamilton DAG drawings in the site's Figures tab (already drawn to
+      `reports/figures/`)
+- [ ] Where each paper came from: a registry of searches (database, query, date,
+      filters, export file), each with an id; every paper keeps all the routes that
+      brought it in (which searches; or, by snowballing, which paper's references or
+      citations, how many steps from which search); merging duplicates merges their
+      routes. Filter and colour the map by origin
+- [ ] Citation snowballing (backward: references; forward: citing papers) as a way to
+      build or extend a corpus
+- [ ] A PRISMA-style flow on the site: records per source, duplicates removed, papers
+      in the graph
+
 ## Project
 
 - [ ] Release 0.2.0 (PyPI and Zenodo)
-- [ ] Rulesets: protect `main` (pull requests, status checks, no force pushes or
-      deletions)
 - [ ] CI: cancel outdated runs (`concurrency` in `tests.yml`)
 - [ ] GitHub social preview image (the logo)
 
@@ -44,3 +65,5 @@ Finished items stay at the bottom until the next release, then go to the CHANGEL
 - [x] 0.0015 in the default resolution sweep (#7)
 - [x] The logo: README, "Made with" while the map loads, the compass badge and
       favicon; Guided tour moved to the top right (#8)
+- [x] Rulesets: `main` protected (pull requests, status checks, no force pushes or
+      deletions); a repository setting, no PR
