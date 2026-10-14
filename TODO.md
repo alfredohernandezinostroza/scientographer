@@ -10,15 +10,14 @@ Finished items stay at the bottom until the next release, then go to the CHANGEL
 - [ ] 3D views: a "Reset view" button
 - [ ] Dot size: a "Same size" option
 - [ ] 3D views: time snapshots and PNG export (2D only for now)
-- [ ] Communities that share a keyword name (two "Cerebellum" at γ = 0.0015): tell them
-      apart in the legend
+- [ ] Communities whose keyword names come out the same: tell them apart in the legend
 
 ## Pipeline and analysis
 
-- [ ] Detached communities far from the map: filter them out, or pull them in with
-      ForceAtlas2's strong gravity (0.003)
-- [ ] Topic granularity: replace the fixed `min_cluster_size` with a stability sweep
-- [ ] SPECTER2: check its `min_cluster_size`
+- [ ] Layouts: an option for ForceAtlas2's strong gravity, to pull detached groups of
+      papers in towards the map
+- [ ] Embedding topics: choose `min_cluster_size` by a stability sweep instead of a fixed
+      value
 - [ ] More ingest formats
 - [ ] Gemini-only topics, without BERTopic and PyTorch
 
@@ -29,7 +28,6 @@ Finished items stay at the bottom until the next release, then go to the CHANGEL
       deletions)
 - [ ] CI: cancel outdated runs (`concurrency` in `tests.yml`)
 - [ ] GitHub social preview image (the logo)
-- [ ] ORCID: connect DataCite, so the Zenodo records appear on the profile
 
 ## Done since 0.1.0
 
