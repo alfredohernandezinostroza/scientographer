@@ -178,6 +178,25 @@ Put your papers in `data/papers.parquet` (or a CSV or TSV file, set in
 OpenAlex by DOI and writes the citations between them to `data/references.parquet`,
 as on the PubMed path; papers without a DOI cannot be looked up.
 
+Have database exports instead of a table? The `ingest` stage reads Scopus CSV
+(`scopus`), Web of Science tab-delimited (`wos`, a folder of `savedrecs.txt` files),
+EBSCOhost CSV (`ebsco`) and PubMed MEDLINE (`medline`) exports into the papers table,
+one row per DOI: list them in `params.yaml`,
+
+```yaml
+ingest:
+  sources:
+    - {format: scopus, path: data/raw/scopus.csv}
+    - {format: wos, path: data/raw/wos}
+    - {format: ebsco, path: data/raw/ebsco.csv}
+```
+
+then run `scientographer run ingest` before `dvc repro`. A paper found in several
+exports becomes one row: the first source listing it gives its fields, later ones fill
+the gaps, and the `sources` column names every export it came from. Keywords are the
+authors' own (EBSCO's subject terms for `ebsco`); records without a DOI are left out
+and listed in `data/ingest/`, with the counts per file in `data/ingest/report.json`.
+
 Already have the references (from Web of Science or Scopus exports, say)? Start with
 `scientographer init my-field --own-references` and put them next to the papers:
 

@@ -42,7 +42,11 @@ Finished items stay at the bottom until the next release, then go to the CHANGEL
       papers in towards the map
 - [ ] Embedding topics: choose `min_cluster_size` by a stability sweep instead of a fixed
       value
-- [ ] More ingest formats
+- [ ] More ingest formats: RIS, BibTeX, Web of Science plain text, Dimensions, Lens
+- [ ] `scientographer init --exports`: put the `ingest` stage in the pipeline for a
+      corpus built from database exports (today only `--pubmed` does), so `dvc repro`
+      reads the exports too and reruns when one changes; now `scientographer run
+      ingest` has to be run by hand first
 - [ ] Gemini-only topics, without BERTopic and PyTorch
 
 ## Provenance: how a map was made
@@ -92,3 +96,5 @@ Finished items stay at the bottom until the next release, then go to the CHANGEL
 - [x] Top papers by four rankings (citations, citations within the community,
       citations per year, PageRank), in the community panel and a "Highlight top
       papers" control
+- [x] Ingest reads Scopus CSV, Web of Science tab-delimited and EBSCOhost CSV exports,
+      merged by DOI with PubMed's MEDLINE

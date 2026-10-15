@@ -7,6 +7,16 @@ settings or outputs).
 
 ## [Unreleased]
 
+- **More ingest formats:** `ingest` now reads Scopus CSV (`scopus`), Web of Science
+  tab-delimited (`wos`, a folder of `savedrecs.txt` files) and EBSCOhost CSV (`ebsco`)
+  exports as well as PubMed's MEDLINE, and merges them by DOI: a paper in several
+  exports is one row whose `sources` lists them all. Keywords are the authors' own
+  (EBSCO's subject terms); Scopus index keywords, Web of Science Keywords Plus and
+  each database's record id are kept in their own columns. DOIs given as
+  `https://doi.org/...` links are matched too, and of two DOIs joined by "; " the
+  first is used. A journal name ending in its ISSN in brackets (as EBSCO writes it)
+  loses it to an `issn` column. Web of Science lines that cannot be split are
+  reported as `unreadable_records`.
 - **Citations fetched for any corpus:** `scientographer init` now puts the
   `fetch_references` stage in front of the pipeline, so a papers table with DOIs is
   enough; the citations between the papers come from OpenAlex. Projects that bring

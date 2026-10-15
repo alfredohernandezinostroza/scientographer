@@ -88,8 +88,11 @@ and `fetch_references` (citations among the papers from OpenAlex by DOI, to
 - The search does not re-run by itself: `dvc repro -f search_pubmed` fetches papers
   published since. Report the funnel from the two report files (records, without DOI,
   found in OpenAlex, citations, papers in the graph).
-- `ingest` reads only the `medline` format so far; other exports become a papers table
-  (with DOIs) and take the own-corpus route.
+- `ingest` reads `medline`, `scopus` (CSV), `wos` (Web of Science tab-delimited; a folder
+  of `savedrecs.txt`) and `ebsco` (CSV) exports, listed in `ingest.sources`; mixed
+  formats merge by DOI (first source wins, `sources` lists all). In an own-corpus project
+  run `scientographer run ingest` before `dvc repro`; other formats become a papers
+  table (with DOIs) by hand.
 
 ### Input tables (Parquet, CSV or TSV)
 
