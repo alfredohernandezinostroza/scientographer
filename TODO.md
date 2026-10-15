@@ -22,7 +22,11 @@ Finished items stay at the bottom until the next release, then go to the CHANGEL
       papers in towards the map
 - [ ] Embedding topics: choose `min_cluster_size` by a stability sweep instead of a fixed
       value
-- [ ] More ingest formats
+- [ ] More ingest formats: RIS, BibTeX, Web of Science plain text, Dimensions, Lens
+- [ ] `scientographer init --exports`: put the `ingest` stage in the pipeline for a
+      corpus built from database exports (today only `--pubmed` does), so `dvc repro`
+      reads the exports too and reruns when one changes; now `scientographer run
+      ingest` has to be run by hand first
 - [ ] Gemini-only topics, without BERTopic and PyTorch
 
 ## Provenance: how a map was made
@@ -67,3 +71,5 @@ Finished items stay at the bottom until the next release, then go to the CHANGEL
       favicon; Guided tour moved to the top right (#8)
 - [x] Rulesets: `main` protected (pull requests, status checks, no force pushes or
       deletions); a repository setting, no PR
+- [x] Ingest reads Scopus CSV, Web of Science tab-delimited and EBSCOhost CSV exports,
+      merged by DOI with PubMed's MEDLINE
