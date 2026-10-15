@@ -52,6 +52,7 @@ import pandas as pd
 import scipy.sparse
 from sklearn.feature_extraction.text import TfidfVectorizer
 
+from scientographer._provenance import step_record, write_graphml_with_step
 from scientographer.config import (
     FIGURES_PATH,
     draw_dag,
@@ -535,10 +536,15 @@ def keyword_scores_df(
 
 @datasaver()
 def save_graph_with_community_keywords(
-    citation_network_with_keywords: ig.Graph, output_graphml_path: Path
+    citation_network_with_keywords: ig.Graph,
+    output_graphml_path: Path,
+    input_graphml_path: Path,
+    synonyms_file: Optional[Path],
 ) -> dict:
+    """The graph, its history (see _provenance.py) kept and this step added."""
     Path(output_graphml_path).parent.mkdir(parents=True, exist_ok=True)
-    citation_network_with_keywords.write_graphml(str(output_graphml_path))
+    record = step_record(CURRENT_FILE_NAME, _cfg, [input_graphml_path, synonyms_file])
+    write_graphml_with_step(citation_network_with_keywords, output_graphml_path, record)
     return utils.get_file_metadata(output_graphml_path)
 
 

@@ -34,6 +34,7 @@ import hamilton.log_setup
 import igraph as ig
 import pandas as pd
 
+from scientographer._provenance import step_record, write_graphml_with_step
 from scientographer.config import FIGURES_PATH, draw_dag, ensure_dirs, params, tracker_adapters
 
 ###################
@@ -203,9 +204,13 @@ def citation_network(
 
 
 @datasaver()
-def save_citation_network(citation_network: ig.Graph, output_graphml_path: Path) -> dict:
+def save_citation_network(
+    citation_network: ig.Graph, output_graphml_path: Path, papers_table_path: Path, references_table_path: Path
+) -> dict:
+    """The graph, with this step as the first record of its history (see _provenance.py)."""
     Path(output_graphml_path).parent.mkdir(parents=True, exist_ok=True)
-    citation_network.write_graphml(str(output_graphml_path))
+    record = step_record(CURRENT_FILE_NAME, _cfg, [papers_table_path, references_table_path])
+    write_graphml_with_step(citation_network, output_graphml_path, record)
     return utils.get_file_metadata(output_graphml_path)
 
 
