@@ -15,6 +15,26 @@ Finished items stay at the bottom until the next release, then go to the CHANGEL
       LinLog, all of them. Needs a way to handle the density (KDE) in 3D and on each layout
 - [ ] Journal reputation: hold journal ranking metadata (SCImago, Web of Science, other
       reputable sources), filter by it on the map, and colour papers by it
+- [ ] Bridge papers: a "rule" menu next to "Highlight bridge papers", offering several
+      definitions instead of the one fixed rule. Today (`rankings.js`): at least 10
+      citation links (`BRIDGE_MIN_LINKS`) and participation coefficient P > 0.62
+      (`BRIDGE_MIN_PARTICIPATION`), P = 1 - sum over communities c of (k_ic / k_i)^2,
+      at the current resolution. The options, with how many of the 22,982 papers of the
+      motor-learning map each marks at γ = 0.0015:
+      - the current rule (>= 10 links, P > 0.62): 3,033 (13.2%), too many to highlight
+      - P > 0.75 (>= 10 links): 1,089 (4.7%)
+      - P > 0.80 (>= 10 links), Guimerà & Amaral's "kinless" nodes: 521 (2.3%)
+      - **hub rule** (recommended default): within-community z-score >= 2.5 and P > 0.30,
+        Guimerà & Amaral's connector and kinless hubs: 419 (1.8%). The z-score of paper i
+        in community c: (its links inside c - the mean of that over c's papers) / the
+        standard deviation over c's papers (0 when c has one paper or no spread)
+      - hubs with P > 0.62: 163 (0.7%)
+      - the top 1% by P among papers with >= 10 links: 102 (0.4%)
+
+      Compute z alongside P (one pass over the citations, per resolution) and show both
+      in the paper panel. Counts change with the resolution (the current rule: 861 at
+      0.0005, 6,108 at 0.01). Reference: Guimerà & Amaral (2005), Functional
+      cartography of complex metabolic networks, Nature 433, 895-900.
 
 ## Pipeline and analysis
 
@@ -71,5 +91,10 @@ Finished items stay at the bottom until the next release, then go to the CHANGEL
       favicon; Guided tour moved to the top right (#8)
 - [x] Rulesets: `main` protected (pull requests, status checks, no force pushes or
       deletions); a repository setting, no PR
+- [x] Bridge papers work: participation coefficient at the current resolution
+      (Guimerà & Amaral), in the highlight and the paper panel
+- [x] Top papers by four rankings (citations, citations within the community,
+      citations per year, PageRank), in the community panel and a "Highlight top
+      papers" control
 - [x] Ingest reads Scopus CSV, Web of Science tab-delimited and EBSCOhost CSV exports,
       merged by DOI with PubMed's MEDLINE

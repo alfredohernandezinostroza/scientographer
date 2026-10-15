@@ -7,7 +7,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{SITE_TITLE}}</title>
   <link rel="icon" type="image/svg+xml" href="scientographer-icon.svg">
-  <link rel="stylesheet" href="styles.css?v=11">
+  <link rel="stylesheet" href="styles.css?v=12">
 
   <!-- Tabulator -->
   <link href="https://unpkg.com/tabulator-tables@6.3.1/dist/css/tabulator.min.css" rel="stylesheet">
@@ -369,6 +369,12 @@
       <label><input id="bridge-toggle" type="checkbox"> Highlight bridge papers</label>
     </div>
 
+    <div class="control-row checkbox-row top-papers-row">
+      <label><input id="top-papers-toggle" type="checkbox"> Highlight top papers</label>
+      <!-- Options come from rankings.js (RANKINGS); shared with the group panel's menu. -->
+      <select id="top-papers-ranking" aria-label="Rank top papers by" title="Rank top papers by"></select>
+    </div>
+
     <div class="control-row checkbox-row">
       <label><input id="edges-toggle" type="checkbox"> Show citation edges</label>
     </div>
@@ -444,9 +450,9 @@
   <script src="https://unpkg.com/tabulator-tables@6.3.1/dist/js/tabulator.min.js"></script>
 
   <!-- App -->
-  <script type="module" src="main.js?v=37"></script>
+  <script type="module" src="main.js?v=38"></script>
   <!-- Guided tour (independent of main.js; only reads the DOM) -->
-  <script type="module" src="tour.js?v=2"></script>
+  <script type="module" src="tour.js?v=3"></script>
   <!-- Word map tab (lazy: loads its data the first time the tab is opened) -->
   <script type="module" src="wordmap.js?v=3"></script>
 </body>
