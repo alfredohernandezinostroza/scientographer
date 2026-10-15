@@ -23,7 +23,10 @@ Formats:
 - ``ebsco``: an EBSCOhost CSV export (e.g. Academic Search Ultimate). Keywords:
   EBSCO's subject terms.
 
-DOIs are lower-cased and stripped of ``https://doi.org/`` and ``doi:`` prefixes.
+DOIs are lower-cased and stripped of ``https://doi.org/`` and ``doi:`` prefixes; a
+field holding two DOIs joined by "; " (as Web of Science sometimes writes) keeps the
+first. A journal name ending in its ISSN in brackets, "Behavioral Sciences
+(2076-328X)" (as EBSCO writes), loses it; the ISSN goes to an ``issn`` column.
 `keywords_from` applies to ``medline`` only. Field choices for the other formats
 are described in ``_database_exports``.
 
@@ -42,6 +45,7 @@ import glob
 import json
 import logging
 from pathlib import Path
+import re
 import sys
 from typing import Final
 
@@ -102,12 +106,43 @@ _DOI_PREFIXES: Final[tuple[str, ...]] = ("https://doi.org/", "http://doi.org/", 
                                          "http://dx.doi.org/", "doi:")
 
 
+# Two DOIs in one field are joined by a semicolon AND a space; a semicolon alone can
+# be part of a DOI (old Wiley ones: "10.1002/(sici)1097-0177(199601)205:1<1::aid-aja1>3.0.co;2-#").
+_DOI_SEPARATOR: Final[re.Pattern] = re.compile(r";\s+")
+# A journal name that ends in its ISSN in brackets: "Behavioral Sciences (2076-328X)".
+_TRAILING_ISSN: Final[re.Pattern] = re.compile(r"\s*\((\d{4}-\d{3}[\dXx])\)\s*$")
+
+
 def _normalize_doi(doi: str) -> str:
-    """Lower-cased, without a resolver or ``doi:`` prefix: "https://doi.org/10.1/AB" -> "10.1/ab"."""
-    doi = doi.strip().lower()
+    """Lower-cased, without a resolver or ``doi:`` prefix: "https://doi.org/10.1/AB" -> "10.1/ab".
+    Of two DOIs joined by "; ", the first."""
+    doi = _DOI_SEPARATOR.split(doi.strip())[0].strip().lower()
     for prefix in _DOI_PREFIXES:
         doi = doi.removeprefix(prefix)
     return doi.strip()
+
+
+def _split_trailing_issn(journal: str) -> tuple[str, str]:
+    """("Behavioral Sciences (2076-328X)") -> ("Behavioral Sciences", "2076-328X"); a name
+    without a trailing ISSN is returned unchanged, with an empty ISSN."""
+    match = _TRAILING_ISSN.search(journal)
+    if not match:
+        return journal, ""
+    return journal[: match.start()].strip(), match.group(1).upper()
+
+
+def _without_trailing_issn(table: pd.DataFrame) -> pd.DataFrame:
+    """Move an ISSN written at the end of the journal name to an ``issn`` column (kept
+    when the format already gives one)."""
+    if "journal" not in table:
+        return table
+    split = [_split_trailing_issn(j) if isinstance(j, str) else (j, "") for j in table["journal"]]
+    table["journal"] = [name for name, _ in split]
+    issns = [issn for _, issn in split]
+    if any(issns):
+        existing = table["issn"].fillna("").astype(str) if "issn" in table else pd.Series([""] * len(table), index=table.index)
+        table["issn"] = [old or new for old, new in zip(existing, issns)]
+    return table
 
 
 def _files(path: str, patterns: tuple[str, ...]) -> list[Path]:
@@ -135,6 +170,7 @@ def _read_sources(sources: list[dict], keywords_from: str) -> tuple[list[pd.Data
             if "doi" not in table:
                 table["doi"] = ""
             table["doi"] = [_normalize_doi(doi) for doi in table["doi"].fillna("").astype(str)]
+            table = _without_trailing_issn(table)
             frames.append(table)
             report.append({"format": fmt, "file": str(file), "records": len(table),
                            "without_doi": int((table["doi"] == "").sum())})

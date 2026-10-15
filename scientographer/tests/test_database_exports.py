@@ -165,6 +165,33 @@ def test_ingest_reads_wos_folders_and_merges_across_formats(tmp_path):
     assert report == {**report, "records": 5, "records_without_doi": 2, "duplicates_merged": 1, "papers": 2}
 
 
+def test_doi_normalisation_keeps_the_first_of_two_and_semicolons_inside_a_doi():
+    from scientographer.ingest import _normalize_doi
+
+    assert _normalize_doi("10.1000/ABC.1; 10.1000/def.2") == "10.1000/abc.1"  # Web of Science's "; "
+    assert _normalize_doi("https://doi.org/10.1000/X") == "10.1000/x"
+    # Old Wiley DOIs contain a semicolon without a space: kept whole.
+    wiley = "10.1002/(SICI)1097-0177(199601)205:1<1::AID-AJA1>3.0.CO;2-#"
+    assert _normalize_doi(wiley) == wiley.lower()
+
+
+def test_trailing_issn_leaves_the_journal_name_for_its_own_column():
+    import pandas as pd
+
+    from scientographer.ingest import _split_trailing_issn, _without_trailing_issn
+
+    assert _split_trailing_issn("Behavioral Sciences (2076-328X)") == ("Behavioral Sciences", "2076-328X")
+    assert _split_trailing_issn("Motor Control (1087-164x)") == ("Motor Control", "1087-164X")  # check digit X
+    # Names without a trailing ISSN are left alone, brackets and all.
+    for name in ("Journal of Motor Behavior", "Brain (London)", "Acta (2020) Proceedings", "Cortex (1234)"):
+        assert _split_trailing_issn(name) == (name, "")
+    table = pd.DataFrame({"journal": ["Behavioral Sciences (2076-328X)", "Journal of Motor Behavior", None],
+                          "issn": ["", "0022-2895", ""]})
+    out = _without_trailing_issn(table)
+    assert list(out["journal"])[:2] == ["Behavioral Sciences", "Journal of Motor Behavior"]
+    assert list(out["issn"]) == ["2076-328X", "0022-2895", ""]  # a format's own ISSN is kept
+
+
 def test_ingest_stage_runs_on_the_three_formats(tmp_path):
     """`scientographer run ingest` in a project with one export of each format."""
     raw = tmp_path / "data" / "raw"
