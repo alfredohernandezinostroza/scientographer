@@ -248,10 +248,49 @@ window.scientographer = {
   },
 };
 
+// How the map was made (build_website.py writes network_data/provenance.json):
+// the Scientographer version and the build date, shown under the logo while the
+// map loads and next to the badge after. Older sites have no such file; then
+// nothing is shown.
+async function loadProvenance() {
+  try {
+    const response = await fetch(`${sharedDir(DATASETS[DEFAULT_DATASET])}/provenance.json`);
+    const provenance = response.ok ? await response.json() : null;
+    return provenance && typeof provenance.scientographer === "string" ? provenance : null;
+  } catch {
+    return null;
+  }
+}
+
+function showLoadingVersion(provenance) {
+  const el = document.getElementById("loading-version");
+  if (!el || !provenance) return;
+  el.textContent = provenance.scientographer;
+  el.hidden = false;
+}
+
+function showProvenanceStamp(provenance) {
+  if (!provenance) return;
+  const built = typeof provenance.built === "string" ? provenance.built.slice(0, 10) : "";
+  const text = `Scientographer ${provenance.scientographer}` + (built ? ` \u00b7 built ${built}` : "");
+  const stamp = document.getElementById("provenance-stamp");
+  if (stamp) {
+    stamp.textContent = text;
+    stamp.hidden = false;
+  }
+  const badge = document.getElementById("scientographer-badge");
+  if (badge) {
+    badge.title = `Made with ${text}`;
+    badge.setAttribute("aria-label", `Made with ${text} (opens its GitHub page)`);
+  }
+}
+
 async function main() {
   // One-time wiring (event listeners on static DOM); the renderer + per-frame
   // hooks are created lazily on the first loadDataset call.
   await loadViewsManifest();
+  const provenance = loadProvenance();
+  provenance.then(showLoadingVersion);
   initShiftTracking();
   initControls();
   initOrientationControls();
@@ -279,6 +318,7 @@ async function main() {
   document.getElementById("loading")?.classList.add("hidden");
   const badge = document.getElementById("scientographer-badge");
   if (badge) badge.hidden = false;
+  showProvenanceStamp(await provenance);
 }
 
 // Load (or switch to) a dataset: fetch its files, (re)build the graph, and

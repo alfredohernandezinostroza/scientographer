@@ -7,7 +7,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{SITE_TITLE}}</title>
   <link rel="icon" type="image/svg+xml" href="scientographer-icon.svg">
-  <link rel="stylesheet" href="styles.css?v=11">
+  <link rel="stylesheet" href="styles.css?v=12">
 
   <!-- Tabulator -->
   <link href="https://unpkg.com/tabulator-tables@6.3.1/dist/css/tabulator.min.css" rel="stylesheet">
@@ -427,6 +427,7 @@
     <div class="loading-brand">
       <span class="made-with">Made with</span>
       <img src="scientographer-logo-dark.svg" alt="Scientographer" width="360" height="30">
+      <span id="loading-version" hidden></span>
       <span id="loading-status">Loading map...</span>
     </div>
   </div>
@@ -439,12 +440,14 @@
      title="Made with Scientographer" aria-label="Made with Scientographer (opens its GitHub page)" hidden>
     <img src="scientographer-icon.svg" alt="" width="30" height="30">
   </a>
+  <!-- Which Scientographer made the map and when (network_data/provenance.json; hidden without it) -->
+  <p id="provenance-stamp" hidden></p>
 
   <!-- Tabulator JS -->
   <script src="https://unpkg.com/tabulator-tables@6.3.1/dist/js/tabulator.min.js"></script>
 
   <!-- App -->
-  <script type="module" src="main.js?v=37"></script>
+  <script type="module" src="main.js?v=38"></script>
   <!-- Guided tour (independent of main.js; only reads the DOM) -->
   <script type="module" src="tour.js?v=2"></script>
   <!-- Word map tab (lazy: loads its data the first time the tab is opened) -->

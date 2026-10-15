@@ -33,6 +33,9 @@ What comes from where:
   nodes' own keyword fields, computed here.
 - **per-community keyword bars** -- ``community_keyword_scores.parquet`` from
   ``community_keywords.py`` when given; otherwise the same quick TF-IDF.
+- **provenance** -- the step records the GraphML carries (its ``provenance``
+  graph attribute), plus this stage's own, written to ``provenance.json``; the page
+  shows the version and build date next to its "Made with" badge.
 - **figures** -- any list of files (word-cloud SVGs, PNGs) tagged with the graph
   and resolution they belong to; copied into the site with a ``figures.json``.
 
@@ -48,6 +51,7 @@ Output (default ``reports/website/``)::
       community_distributions.json   (optional panels)
       community_keywords.json        per-resolution, per-community ranked keywords
       figures.json                   the figure gallery index
+      provenance.json                how the map was made: every step's record (see _provenance.py)
       abstracts.json, edges_out.bin, edges_in.bin
     figures/                         copied figure files
 
@@ -74,6 +78,13 @@ import hamilton.log_setup
 import numpy as np
 import pandas as pd
 
+from scientographer._provenance import (
+    PROVENANCE_ATTRIBUTE,
+    exact_version,
+    history_from_text,
+    step_record,
+    utc_now,
+)
 from scientographer.config import FIGURES_PATH, draw_dag, ensure_dirs, params, tracker_adapters
 
 ###################
@@ -1167,6 +1178,43 @@ def save_figures(figure_entries: list[dict], graphml_path: Path, website_dir: Pa
     return {"path": written, "n_figures": len(index)}
 
 
+def website_step(
+    graphml_path: Path,
+    extra_layouts: list,
+    topic_metrics_path: Optional[Path],
+    per_community_metrics_path: Optional[Path],
+    per_partition_metrics_path: Optional[Path],
+    after_cm_partition_metrics_path: Optional[Path],
+    connectivity_diagnostic_partition_path: Optional[Path],
+    connectivity_modifier_partition_path: Optional[Path],
+    connectivity_modifier_membership_path: Optional[Path],
+    community_keyword_scores_path: Optional[Path],
+) -> dict:
+    """This stage's step record: the website settings and every input file it read
+    (the graph, the optional metric tables given, the extra layouts' positions)."""
+    inputs = [graphml_path, topic_metrics_path, per_community_metrics_path, per_partition_metrics_path,
+              after_cm_partition_metrics_path, connectivity_diagnostic_partition_path,
+              connectivity_modifier_partition_path, connectivity_modifier_membership_path,
+              community_keyword_scores_path]
+    inputs += [spec.get("positions") for spec in extra_layouts or []]
+    return step_record(CURRENT_FILE_NAME, _cfg, inputs)
+
+
+def provenance_records(graph_attributes: dict, website_step: dict) -> dict:
+    """How the map was made: the steps the graph carries (oldest first; none for a
+    graph made before Scientographer kept them) followed by this one."""
+    steps = history_from_text(graph_attributes.get(PROVENANCE_ATTRIBUTE)) + [website_step]
+    return {"scientographer": exact_version(), "built": utc_now(), "steps": steps}
+
+
+@datasaver()
+def save_provenance_json(provenance_records: dict, website_dir: Path) -> dict:
+    path = _data_dir(website_dir) / "provenance.json"
+    _write_json(path, provenance_records)
+    return {"path": str(path), "n_steps": len(provenance_records["steps"]),
+            "scientographer": provenance_records["scientographer"]}
+
+
 @datasaver()
 def save_well_connected_json(well_connected_masks: dict, node_records: list[dict], website_dir: Path) -> dict:
     """Which papers the Connectivity Modifier keeps at each resolution (the map's
@@ -1264,6 +1312,7 @@ def assembled_website(
     save_edges_bins: dict,
     save_views_manifest: dict,
     save_well_connected_json: dict,
+    save_provenance_json: dict,
     website_dir: Path,
     site_title: str,
 ) -> dict:
@@ -1296,6 +1345,8 @@ def assembled_website(
         "views": save_views_manifest["views"],
         "well_connected_resolutions": save_well_connected_json["n_resolutions"],
         "extra_views": save_views_manifest["extra"],
+        "provenance_steps": save_provenance_json["n_steps"],
+        "scientographer": save_provenance_json["scientographer"],
     }
     logger.info("assembled website: %s", manifest)
     logger.info("serve with: python -m http.server 8123 --directory %s", website_dir)
