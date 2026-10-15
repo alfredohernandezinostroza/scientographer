@@ -331,6 +331,11 @@ get it with `scientographer init --force` (which rewrites `dvc.yaml` and
   edges, and labels on the communities or around the map's outline.
 - **Rotate and flip** buttons. The default orientation is reproducible: the main
   body's long axis horizontal, its long tail down, its most-cited side left.
+- **How it was made:** the Scientographer version and build date, next to the "Made
+  with" badge. `network_data/provenance.json` lists every step that made the map: the
+  stage, the version, its settings, its input files with their md5 (the checksums in
+  `dvc.lock`) and the date. The GraphML outputs carry the same steps in their
+  `provenance` graph attribute.
 
 ## Commands
 
@@ -345,6 +350,7 @@ get it with `scientographer init --force` (which rewrites `dvc.yaml` and
 | `scientographer store-existing-results` | fill the per-resolution stores from current outputs |
 | `scientographer ui` | start the Hamilton UI tracker (set `tracker.enabled: true`) |
 | `scientographer params` | show which `params.yaml` is in effect |
+| `scientographer --version` | the exact version: the release, or from a git checkout the release plus the commit (`0.2.0.dev0+g1a2b3c4`, `.dirty` with uncommitted changes) |
 
 `params.yaml` is found in this order: the file named by `SCIENTOGRAPHER_PARAMS`, then
 `./params.yaml`, then the packaged defaults.

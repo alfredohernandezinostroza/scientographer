@@ -190,6 +190,7 @@ the Gephi graphml (or a CSV with `name`/`id`, `x`, `y`), and add the file to the
 | `data/citation_layouts/<key>.csv`, `citation_layouts.json` | extra layouts of the citation graph (`doi`, `x`, `y`, `z` in 3D) and what was run |
 | `data/wordclouds/` | word clouds and TF-IDF histograms |
 | `reports/website/` | the site; `reports/figures/` the stages' Hamilton DAG drawings |
+| `reports/website/network_data/provenance.json` | how the map was made: each step's stage, Scientographer version, settings, input md5s (comparable with `dvc.lock`) and date; the GraphML outputs keep the same list in their `provenance` graph attribute |
 
 Load results with pandas (`pd.read_parquet`) and igraph (`ig.Graph.Read_GraphML`);
 community ids are integers, `-1` means none.
