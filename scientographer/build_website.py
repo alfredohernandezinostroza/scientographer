@@ -1266,14 +1266,13 @@ def _difference_text(difference: dict, lock_path: str) -> str:
     return f"{difference.get('package')} {have}, {lock_path} says {difference.get('locked')}"
 
 
-def environment_warnings(steps: list[dict]) -> list[dict]:
-    """What the steps' environments say about the map, as ``{"kind", "text"}``:
-    ``versions`` when steps ran on different versions of Python or of a key package;
-    ``lock`` when a step ran on an environment that did not match the project's lock
-    (with the override); ``no_lock`` (a quiet note) when steps ran without a lock.
-    Steps recorded before environments were kept are skipped."""
-    recorded = [s for s in steps if isinstance(s.get("environment"), dict)]
-    warnings = []
+def _version_warnings(recorded: list[dict]) -> list[dict]:
+    """Steps that ran on different versions of Python or of a key package. Packages
+    that split the steps the same way are one warning: when they split them in two,
+    it names the fewer steps (``community_keywords ran on different versions from
+    the other steps: numpy 2.2.6 instead of 2.5.4, ...``); otherwise it lists each
+    version with its steps."""
+    splits: dict = {}
     for package in ("python", *KEY_PACKAGES):
         by_version: dict = {}
         for step in recorded:
@@ -1281,12 +1280,42 @@ def environment_warnings(steps: list[dict]) -> list[dict]:
             version = (environment.get("python") if package == "python"
                        else (environment.get("packages") or {}).get(package))
             if version:
-                by_version.setdefault(str(version), []).append(str(step.get("stage") or "a step"))
+                stage = str(step.get("stage") or "a step")
+                by_version.setdefault(str(version), [])
+                if stage not in by_version[str(version)]:
+                    by_version[str(version)].append(stage)
         if len(by_version) > 1:
-            label = "Python" if package == "python" else package
+            split = tuple(sorted(tuple(sorted(stages)) for stages in by_version.values()))
+            splits.setdefault(split, []).append(("Python" if package == "python" else package, by_version))
+    warnings = []
+    for packages in splits.values():
+        groups = list(packages[0][1].values())
+        if len(groups) == 2:
+            # The fewer steps (on a tie, the later ones) are the odd ones out.
+            odd = groups[0] if len(groups[0]) < len(groups[1]) else groups[1]
+            changes = []
+            for label, by_version in packages:
+                odd_version = next(v for v, stages in by_version.items() if sorted(stages) == sorted(odd))
+                usual = next(v for v in by_version if v != odd_version)
+                changes.append(f"{label} {odd_version} instead of {usual}")
+            text = f"{_names(odd)} ran on different versions from the other steps: {', '.join(changes)}."
+            warnings.append({"kind": "versions", "text": text})
+            continue
+        for label, by_version in packages:
             versions = "; ".join(f"{version} in {_names(stages)}" for version, stages in by_version.items())
             text = f"Steps ran on different {label} versions: {versions}."
             warnings.append({"kind": "versions", "text": text})
+    return warnings
+
+
+def environment_warnings(steps: list[dict]) -> list[dict]:
+    """What the steps' environments say about the map, as ``{"kind", "text"}``:
+    ``versions`` when steps ran on different versions of Python or of a key package;
+    ``lock`` when a step ran on an environment that did not match the project's lock
+    (with the override); ``no_lock`` (a quiet note) when steps ran without a lock.
+    Steps recorded before environments were kept are skipped."""
+    recorded = [s for s in steps if isinstance(s.get("environment"), dict)]
+    warnings = _version_warnings(recorded)
     unlocked = []
     for step in recorded:
         lock = step["environment"].get("lock") or {}

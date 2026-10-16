@@ -2,8 +2,6 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """The environment in every step record, and the check against the project's lock."""
 
-from pathlib import Path
-
 import pytest
 from typer.testing import CliRunner
 
@@ -369,12 +367,22 @@ def test_environment_warnings():
     ]
     warnings = environment_warnings(steps)
     assert warnings == [
-        {"kind": "versions", "text": "Steps ran on different Python versions: 3.12.4 in detect_communities "
-                                     "and community_quality_metrics; 3.12.5 in build_website."},
-        {"kind": "versions", "text": "Steps ran on different leidenalg versions: 0.10.2 in detect_communities; "
-                                     "0.11.0 in community_quality_metrics."},
+        {"kind": "versions", "text": "build_website ran on different versions from the other steps: "
+                                     "Python 3.12.5 instead of 3.12.4."},
+        {"kind": "versions", "text": "community_quality_metrics ran on different versions from the other "
+                                     "steps: leidenalg 0.11.0 instead of 0.10.2."},
         {"kind": "lock", "text": "community_quality_metrics ran outside the project's pixi.lock (override): "
                                  "leidenalg 0.11.0 installed, pixi.lock says 0.10.2."},
+    ]
+    # Packages that split the steps the same way are one warning; three versions list each.
+    same_split = [_step("a", packages={"numpy": "2.1.0", "scipy": "1.14.0"}),
+                  _step("b", packages={"numpy": "2.1.0", "scipy": "1.14.0"}),
+                  _step("c", python="3.10.12", packages={"numpy": "2.2.6", "scipy": "1.15.3"}),
+                  _step("d", python="3.11.0", packages={"numpy": "2.1.0", "scipy": "1.14.0"})]
+    assert [w["text"] for w in environment_warnings(same_split)] == [
+        "Steps ran on different Python versions: 3.12.4 in a and b; 3.10.12 in c; 3.11.0 in d.",
+        "c ran on different versions from the other steps: numpy 2.2.6 instead of 2.1.0, "
+        "scipy 1.15.3 instead of 1.14.0.",
     ]
     assert environment_warnings([_step("a")]) == []  # old records: nothing to say
 
@@ -386,4 +394,5 @@ def test_no_lock_is_a_quiet_note():
     assert environment_warnings([_step("a", packages={}, lock=none), _step("b", packages={}, lock=none)]) == [
         {"kind": "no_lock", "text": "No lock file: the environment is recorded but was not pinned."}]
     assert environment_warnings([_step("a", packages={}, lock=none), _step("b", packages={})]) == [
-        {"kind": "no_lock", "text": "No lock file when a ran: their environment is recorded but was not pinned."}]
+        {"kind": "no_lock",
+         "text": "No lock file when a ran: their environment is recorded but was not pinned."}]
