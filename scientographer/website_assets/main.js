@@ -437,8 +437,9 @@ function renderAbout(provenance) {
 }
 
 // ── About panel: opens out of the badge ──────────────────────────────────
-// The panel sits beside the controls (never under them): --about-left follows
-// the controls' right edge as they open and collapse. Opening animates its clip
+// The panel is as wide as its content, anchored at the bottom right, and never
+// reaches under the controls: --about-left (its furthest left edge) follows the
+// controls' right edge as they open and collapse. Opening animates its clip
 // from the badge's 44px circle to the full panel, while the logo, cropped to its
 // compass and shrunk onto the badge's compass, slides into the header and its
 // letters are revealed around the compass (the logo's O). Closing reverses it.
@@ -544,7 +545,6 @@ function initAboutPanel() {
   document.getElementById("scientographer-badge")?.addEventListener("click", openAbout);
   document.getElementById("provenance-stamp")?.addEventListener("click", toggleAbout);
   document.getElementById("about-close")?.addEventListener("click", closeAbout);
-  document.getElementById("about-logo")?.addEventListener("click", closeAbout);
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && aboutState.open) closeAbout();
   });

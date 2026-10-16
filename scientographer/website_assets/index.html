@@ -7,7 +7,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{SITE_TITLE}}</title>
   <link rel="icon" type="image/svg+xml" href="scientographer-icon.svg">
-  <link rel="stylesheet" href="styles.css?v=16">
+  <link rel="stylesheet" href="styles.css?v=17">
 
   <!-- Tabulator -->
   <link href="https://unpkg.com/tabulator-tables@6.3.1/dist/css/tabulator.min.css" rel="stylesheet">
@@ -451,20 +451,21 @@
        without it); opens About too -->
   <button id="provenance-stamp" type="button" title="How this map was made" hidden></button>
 
-  <!-- About this map: how it was made (network_data/provenance.json). A panel beside the
-       controls that opens out of the badge; its compass becomes the logo's O. -->
+  <!-- About this map: how it was made (network_data/provenance.json). A panel at the
+       bottom right, as wide as its content and never under the controls, that opens out of
+       the badge; its compass becomes the logo's O, which links to Scientographer's GitHub. -->
   <section id="about-panel" role="dialog" aria-labelledby="about-title" hidden>
     <header class="about-panel-head">
-      <button id="about-logo" type="button" title="Close" aria-label="Close About this map">
+      <a id="about-logo" href="https://github.com/alfredohernandezinostroza/scientographer" target="_blank"
+         rel="noopener" title="Scientographer on GitHub (opens in a new tab)"
+         aria-label="Scientographer on GitHub (opens in a new tab)">
         <img id="about-logo-image" src="scientographer-logo-dark.svg" alt="Scientographer" width="360" height="33">
-      </button>
+      </a>
       <button id="about-close" type="button" aria-label="Close About this map">&times;</button>
     </header>
     <div class="about-panel-body">
       <h2 id="about-title">About this map: how it was made</h2>
       <p class="meta" id="about-summary">Reading the map's record...</p>
-      <p class="meta"><a id="about-github" href="https://github.com/alfredohernandezinostroza/scientographer"
-         target="_blank" rel="noopener">Scientographer on GitHub</a></p>
       <div id="about-warnings"></div>
       <ol id="about-steps"></ol>
     </div>
@@ -474,7 +475,7 @@
   <script src="https://unpkg.com/tabulator-tables@6.3.1/dist/js/tabulator.min.js"></script>
 
   <!-- App -->
-  <script type="module" src="main.js?v=41"></script>
+  <script type="module" src="main.js?v=42"></script>
   <!-- Guided tour (independent of main.js; only reads the DOM) -->
   <script type="module" src="tour.js?v=4"></script>
   <!-- Word map tab (lazy: loads its data the first time the tab is opened) -->

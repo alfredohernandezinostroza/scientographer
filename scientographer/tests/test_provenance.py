@@ -421,6 +421,8 @@ def test_the_page_has_the_stamp_and_the_about_panel():
     assert 'id="about-panel"' in page and 'aria-controls="about-panel"' in page
     assert 'id="tab-about"' not in page and 'id="view-about"' not in page
     assert '<button id="scientographer-badge"' in page
+    # The panel's wordmark is the link to Scientographer on GitHub.
+    assert '<a id="about-logo" href="https://github.com/alfredohernandezinostroza/scientographer"' in page
     script = (ASSETS_DIR / "main.js").read_text(encoding="utf-8")
     assert "/provenance.json`" in script
     for field in ("from_step", "unrecorded_inputs", "versions", "outputs"):

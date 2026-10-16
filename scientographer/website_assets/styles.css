@@ -1102,15 +1102,16 @@ body:has(#view-graph:not(.active)) #provenance-stamp { display: none; }
 .loading-brand #loading-version[hidden] { display: none; }
 
 /* ── About this map: a panel that opens out of the badge ─────────────────── */
-/* It sits beside the controls (--about-left, set by main.js from the controls' right
-   edge), keeps the badge's 16px margins, and is drawn above the floating buttons.
+/* As wide as its content (the steps' 760px plus padding), anchored at the right with the
+   badge's 16px margins, and never further left than the controls' right edge
+   (--about-left, set by main.js); drawn above the floating buttons.
    Closed, it is clipped to the badge's 44px circle in its bottom-right corner, with
    the logo shrunk and cropped to its compass exactly over the badge's; opening
    animates both clips and the logo's transform (main.js sets --logo-*). */
 #about-panel {
   position: fixed;
-  left: var(--about-left, 372px);
   right: 16px;
+  width: min(812px, calc(100vw - var(--about-left, 372px) - 16px));
   top: 16px;
   bottom: 16px;
   z-index: 950;
@@ -1139,12 +1140,9 @@ body:has(#view-graph:not(.active)) #provenance-stamp { display: none; }
 #about-logo {
   flex: 1;
   min-width: 0;
-  padding: 0;
-  border: 0;
-  background: none;
-  cursor: pointer;
-  text-align: left;
+  display: block;
 }
+#about-logo:focus-visible { outline: 1px solid var(--accent); outline-offset: 4px; border-radius: 4px; }
 #about-logo-image {
   display: block;
   width: min(360px, 100%);
@@ -1190,7 +1188,7 @@ body.about-open #scientographer-badge { visibility: hidden; }
 body.about-open #provenance-stamp { display: none; }
 @media (max-width: 600px) {
   /* Full width below the top buttons; the controls are collapsed while it is open */
-  #about-panel { left: 16px; top: 76px; }
+  #about-panel { width: calc(100vw - 32px); top: 76px; }
 }
 @media (prefers-reduced-motion: reduce) {
   #about-panel, #about-logo-image, .about-panel-body, #about-close { transition: none; }
