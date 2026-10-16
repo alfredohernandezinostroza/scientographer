@@ -1091,6 +1091,8 @@ table.health-table tr.active td { color: var(--text); background: rgba(78, 161, 
 #provenance-stamp:hover,
 #provenance-stamp:focus-visible { color: var(--accent); outline: none; text-decoration: underline; }
 #provenance-stamp[hidden] { display: none; }
+/* Only over the map: the other tabs fill the page, and About shows the version itself */
+body:has(#view-graph:not(.active)) #provenance-stamp { display: none; }
 @media (max-width: 600px) {
   #provenance-stamp { right: 16px; bottom: 68px; max-width: calc(100vw - 32px); }
 }
