@@ -110,7 +110,12 @@ def test_embedding_maps_topics_layout_and_snapshots(tmp_path, monkeypatch):
     monkeypatch.setattr(embedding_maps, "EMBEDDINGS_DIR", tmp_path / "emb")
 
     maps = embedding_maps.embedding_maps(texts, [{"name": "fake", "min_cluster_size": 20, "snapshots": [1990, 2010]}])
-    written = embedding_maps.save_embedding_maps(maps, tmp_path / "layouts")
+    steps = embedding_maps.provenance_steps(store_dir.parent / "paper_texts.parquet", tmp_path / "layouts")
+    written = embedding_maps.save_embedding_maps(maps, tmp_path / "layouts", steps)
+    # The CSVs' record is the folder's provenance.json: this step, reading the stores' folder.
+    record = json.loads((tmp_path / "layouts" / "provenance.json").read_text())
+    assert [s["stage"] for s in record["steps"]] == ["embedding_maps"]
+    assert record["steps"][0]["inputs"][0]["path"] == (tmp_path / "emb").as_posix()
     layout = pd.read_csv(tmp_path / "layouts" / "fake.csv")
     assert list(layout.columns) == ["doi", "x", "y", "topic", "topic_name"] and len(layout) == 180
     assert written["fake"]["topics"] == 3
