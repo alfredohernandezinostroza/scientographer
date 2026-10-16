@@ -33,9 +33,11 @@ What comes from where:
   nodes' own keyword fields, computed here.
 - **per-community keyword bars** -- ``community_keyword_scores.parquet`` from
   ``community_keywords.py`` when given; otherwise the same quick TF-IDF.
-- **provenance** -- the step records the GraphML carries (its ``provenance``
-  graph attribute), plus this stage's own, written to ``provenance.json``; the page
-  shows the version and build date next to its "Made with" badge.
+- **provenance** -- the step records every input carries (the GraphML's
+  ``provenance`` attribute, the tables' parquet metadata, the ``provenance.json`` of
+  the word-cloud and layout folders), merged, plus this stage's own, written to
+  ``provenance.json``; the page shows the version and build date next to its "Made
+  with" badge and every step in its About tab.
 - **figures** -- any list of files (word-cloud SVGs, PNGs) tagged with the graph
   and resolution they belong to; copied into the site with a ``figures.json``.
 
@@ -82,6 +84,9 @@ from scientographer._provenance import (
     PROVENANCE_ATTRIBUTE,
     exact_version,
     history_from_text,
+    input_history,
+    merge_steps,
+    stage_settings,
     step_record,
     utc_now,
 )
@@ -162,6 +167,7 @@ DEFAULT_INPUTS: Final[dict] = dict(
     connectivity_modifier_partition_path=_optional_path("connectivity_modifier_partition"),
     connectivity_modifier_membership_path=_optional_path("connectivity_modifier_membership"),
     community_keyword_scores_path=_optional_path("community_keyword_scores"),
+    wordclouds_dir=WORDCLOUDS_DIR,
     default_resolution=DEFAULT_COMMUNITY_RESOLUTION,
     website_dir=Path(_cfg["output_dir"]),
     site_title=str(_cfg.get("title") or "Citation map"),
@@ -1178,7 +1184,7 @@ def save_figures(figure_entries: list[dict], graphml_path: Path, website_dir: Pa
     return {"path": written, "n_figures": len(index)}
 
 
-def website_step(
+def website_inputs(
     graphml_path: Path,
     extra_layouts: list,
     topic_metrics_path: Optional[Path],
@@ -1189,22 +1195,84 @@ def website_step(
     connectivity_modifier_partition_path: Optional[Path],
     connectivity_modifier_membership_path: Optional[Path],
     community_keyword_scores_path: Optional[Path],
-) -> dict:
-    """This stage's step record: the website settings and every input file it read
-    (the graph, the optional metric tables given, the extra layouts' positions)."""
-    inputs = [graphml_path, topic_metrics_path, per_community_metrics_path, per_partition_metrics_path,
-              after_cm_partition_metrics_path, connectivity_diagnostic_partition_path,
-              connectivity_modifier_partition_path, connectivity_modifier_membership_path,
-              community_keyword_scores_path]
-    inputs += [spec.get("positions") for spec in extra_layouts or []]
-    return step_record(CURRENT_FILE_NAME, _cfg, inputs)
+    wordclouds_dir: Optional[Path],
+) -> list[Path]:
+    """Every file or folder the site is built from: the graph, the optional metric
+    tables given, the word-cloud folder and the extra layouts' positions."""
+    paths = [graphml_path, topic_metrics_path, per_community_metrics_path, per_partition_metrics_path,
+             after_cm_partition_metrics_path, connectivity_diagnostic_partition_path,
+             connectivity_modifier_partition_path, connectivity_modifier_membership_path,
+             community_keyword_scores_path, wordclouds_dir]
+    paths += [spec.get("positions") for spec in extra_layouts or []]
+    unique: list[Path] = []
+    for p in paths:
+        if p and Path(p).exists() and Path(p) not in unique:
+            unique.append(Path(p))
+    return unique
 
 
-def provenance_records(graph_attributes: dict, website_step: dict) -> dict:
-    """How the map was made: the steps the graph carries (oldest first; none for a
-    graph made before Scientographer kept them) followed by this one."""
-    steps = history_from_text(graph_attributes.get(PROVENANCE_ATTRIBUTE)) + [website_step]
-    return {"scientographer": exact_version(), "built": utc_now(), "steps": steps}
+def website_step(website_inputs: list[Path], website_dir: Path) -> dict:
+    """This stage's step record: the website settings, every input with its md5, the site."""
+    return step_record(CURRENT_FILE_NAME, stage_settings("website"), website_inputs, [website_dir])
+
+
+def _normalized(path: str) -> str:
+    text = str(path).replace("\\", "/")
+    while text.startswith("./"):
+        text = text[2:]
+    return text.rstrip("/")
+
+
+def _reads_output(input_path: str, output_path: str) -> bool:
+    """True when an input is an earlier step's output, or a file inside its output folder."""
+    a, b = _normalized(input_path), _normalized(output_path)
+    return bool(a) and bool(b) and (a == b or a.startswith(b + "/"))
+
+
+def _provenance_payload(histories: list[list[dict]], website_step: dict, unrecorded: list[str]) -> dict:
+    """The site's provenance.json: every input's steps merged (each step once, in
+    order of date) and the site's own step last; each input of a step names the
+    earlier step that wrote it (``from_step``, an index into ``steps``); the
+    versions the steps ran on; the inputs that came without any record."""
+    steps = []
+    for step in merge_steps(*histories) + [website_step]:
+        step = dict(step)
+        inputs = []
+        for entry in step.get("inputs") or []:
+            entry = dict(entry) if isinstance(entry, dict) else {"path": str(entry)}
+            for j in range(len(steps) - 1, -1, -1):
+                if any(_reads_output(entry.get("path", ""), out) for out in steps[j].get("outputs") or []):
+                    entry["from_step"] = j
+                    break
+            inputs.append(entry)
+        step["inputs"] = inputs
+        steps.append(step)
+    versions = []
+    for step in steps:
+        version = step.get("scientographer")
+        if version and version not in versions:
+            versions.append(version)
+    return {"scientographer": exact_version(), "built": utc_now(), "versions": versions,
+            "steps": steps, "unrecorded_inputs": unrecorded}
+
+
+def provenance_records(graph_attributes: dict, graphml_path: Path, website_inputs: list[Path],
+                       website_step: dict) -> dict:
+    """How the map was made: the steps every input carries -- the graph's history
+    (read from the graph already parsed), the metric tables' parquet metadata, the
+    provenance.json of the word-cloud and layout folders -- merged, then the site's
+    own step. Inputs made before Scientographer kept records have none and are
+    listed as such; they never stop the build."""
+    histories, unrecorded = [], []
+    for path in website_inputs:
+        if Path(path) == Path(graphml_path):
+            steps = history_from_text(graph_attributes.get(PROVENANCE_ATTRIBUTE))
+        else:
+            steps = input_history(path)
+        histories.append(steps)
+        if not steps:
+            unrecorded.append(Path(path).as_posix())
+    return _provenance_payload(histories, website_step, unrecorded)
 
 
 @datasaver()
