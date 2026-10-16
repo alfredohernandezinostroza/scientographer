@@ -7,20 +7,29 @@ import shutil
 import subprocess
 
 import igraph as ig
+import pandas as pd
 import pytest
 from typer.testing import CliRunner
 
 from scientographer import __version__, _provenance
 from scientographer._provenance import (
+    PARQUET_METADATA_KEY,
     PROVENANCE_ATTRIBUTE,
     exact_version,
     file_md5,
+    folder_history,
+    graphml_history,
     history,
     history_from_text,
+    input_history,
+    merge_steps,
+    parquet_history,
     step_record,
+    steps_for,
     version_for,
-    with_step,
-    write_graphml_with_step,
+    write_folder_record,
+    write_graphml_with_steps,
+    write_parquet_with_steps,
 )
 
 needs_git = pytest.mark.skipif(shutil.which("git") is None, reason="git is not installed")
@@ -130,14 +139,16 @@ def test_cli_prints_the_version():
     assert result.output.strip() == f"scientographer {exact_version()}"
 
 
+
 # ── Step records ──────────────────────────────────────────────────────────────
-def test_step_record_has_settings_inputs_with_md5_and_date(tmp_path):
+def test_step_record_has_settings_inputs_outputs_and_date(tmp_path):
     table = tmp_path / "papers.csv"
     table.write_bytes(b"doi\n10.1/a\n")
     record = step_record(
         "build_citation_network",
         {"papers_table": tmp_path / "papers.csv", "resolutions": (0.1, 0.2), "keep": True},
-        [table, None, tmp_path / "missing.csv"],
+        [table, None, tmp_path / "missing.csv", table],
+        [tmp_path / "graph.graphml", None],
     )
     assert record["stage"] == "build_citation_network"
     assert record["scientographer"] == exact_version()
@@ -147,65 +158,171 @@ def test_step_record_has_settings_inputs_with_md5_and_date(tmp_path):
         {"path": table.as_posix(), "md5": hashlib.md5(b"doi\n10.1/a\n").hexdigest()},
         {"path": (tmp_path / "missing.csv").as_posix(), "md5": None},
     ]
+    assert record["outputs"] == [(tmp_path / "graph.graphml").as_posix()]
     assert len(record["date"]) == len("2026-10-15T09:30:00Z") and record["date"].endswith("Z")
     json.dumps(record)  # plain JSON throughout
 
 
-def test_a_directory_md5_follows_its_files(tmp_path):
+def test_a_directory_input_counts_its_files_and_skips_the_md5_when_large(tmp_path, monkeypatch):
     folder = tmp_path / "store"
     (folder / "sub").mkdir(parents=True)
     (folder / "a.txt").write_text("a")
-    (folder / "sub" / "b.txt").write_text("b")
+    (folder / "sub" / "b.txt").write_text("bb")
     before = file_md5(folder)
     assert before is not None and before == file_md5(folder)
+    entry = step_record("s", {}, [folder])["inputs"][0]
+    assert entry == {"path": folder.as_posix(), "md5": before, "files": 2, "bytes": 3}
     (folder / "sub" / "b.txt").write_text("changed")
     assert file_md5(folder) != before
+    monkeypatch.setattr(_provenance, "DIRECTORY_HASH_LIMIT_BYTES", 5)
+    assert step_record("s", {}, [folder])["inputs"][0] == {
+        "path": folder.as_posix(), "md5": None, "files": 2, "bytes": 8}
 
 
-# ── A graph's history ─────────────────────────────────────────────────────────
-def test_history_tolerates_absent_and_invalid_attributes():
+# ── Where the records are kept, and reading them back ─────────────────────────
+def test_history_tolerates_absent_and_invalid_records(tmp_path):
     graph = ig.Graph(2)
     assert history(graph) == []
     graph[PROVENANCE_ATTRIBUTE] = "not json"
     assert history(graph) == []
-    graph[PROVENANCE_ATTRIBUTE] = '{"stage": "a dict, not a list"}'
-    assert history(graph) == []
+    assert history_from_text('{"stage": "a dict without steps"}') == []
     assert history_from_text('[{"stage": "a"}, 3, "x"]') == [{"stage": "a"}]
+    assert history_from_text('{"steps": [{"stage": "a"}]}') == [{"stage": "a"}]
     assert history_from_text(None) == []
+    # Files made before records were kept, or not readable as such.
+    (tmp_path / "old.parquet").write_bytes(b"not a parquet file")
+    (tmp_path / "old.graphml").write_text("<graphml>broken")
+    pd.DataFrame({"a": [1]}).to_parquet(tmp_path / "plain.parquet")
+    for name in ("old.parquet", "old.graphml", "plain.parquet", "missing.parquet"):
+        assert input_history(tmp_path / name) == []
+    assert input_history(None) == [] and folder_history(tmp_path) == []
 
 
-def test_history_survives_graphml_and_each_stage_adds_its_step(tmp_path):
+def test_graphml_keeps_the_steps_and_the_graph_in_memory_is_unchanged(tmp_path):
     graph = ig.Graph(3, [(0, 1), (1, 2)], directed=True)
+    graph.vs["name"] = ["a", "b", "c"]
     graph["leiden_seed"] = 42
-    first = tmp_path / "first.graphml"
-    write_graphml_with_step(graph, first, {"stage": "build_citation_network"})
-    assert PROVENANCE_ATTRIBUTE not in graph.attributes()  # the graph in memory is unchanged
-
-    read = ig.Graph.Read_GraphML(str(first))
+    path = tmp_path / "g.graphml"
+    write_graphml_with_steps(graph, path, [{"stage": "build_citation_network"}])
+    assert PROVENANCE_ATTRIBUTE not in graph.attributes()
+    assert graphml_history(path) == [{"stage": "build_citation_network"}]  # read without loading the graph
+    read = ig.Graph.Read_GraphML(str(path))
     assert history(read) == [{"stage": "build_citation_network"}]
-    second = tmp_path / "second.graphml"
-    write_graphml_with_step(read, second, {"stage": "detect_communities"})
+    assert read["leiden_seed"] == 42
+    write_graphml_with_steps(read, tmp_path / "h.graphml", history(read) + [{"stage": "detect_communities"}])
     assert history(read) == [{"stage": "build_citation_network"}]  # restored after writing
-
-    again = ig.Graph.Read_GraphML(str(second))
-    assert [s["stage"] for s in history(again)] == ["build_citation_network", "detect_communities"]
-    assert again["leiden_seed"] == 42  # other graph attributes untouched
-    assert [s["stage"] for s in history(with_step(again, {"stage": "layout_graph"}))][-1] == "layout_graph"
+    assert [s["stage"] for s in input_history(tmp_path / "h.graphml")] == ["build_citation_network",
+                                                                           "detect_communities"]
 
 
-def test_detect_communities_saver_keeps_the_history_and_adds_its_step(tmp_path):
-    from scientographer.detect_communities import save_citation_network_with_communities
+def test_parquet_keeps_the_steps_in_its_metadata(tmp_path):
+    table = pd.DataFrame({"doi": ["10.1/a", "10.1/b"], "year": [2001, 2002]}, index=[5, 6])
+    steps = [{"stage": "ingest", "date": "2026-10-16T08:00:00Z"}]
+    write_parquet_with_steps(table, tmp_path / "t.parquet", steps, index=False)
+    assert parquet_history(tmp_path / "t.parquet") == steps
+    assert input_history(tmp_path / "t.parquet") == steps
+    pd.testing.assert_frame_equal(pd.read_parquet(tmp_path / "t.parquet"), table.reset_index(drop=True))
+    write_parquet_with_steps(table, tmp_path / "i.parquet", steps)  # the index kept, as to_parquet does
+    pd.testing.assert_frame_equal(pd.read_parquet(tmp_path / "i.parquet"), table)
+    import pyarrow.parquet as pq
+
+    assert PARQUET_METADATA_KEY.encode() in pq.read_schema(tmp_path / "t.parquet").metadata
+
+
+def test_a_folder_record_describes_the_folder_and_its_csv_files(tmp_path):
+    folder = tmp_path / "layouts"
+    steps = [{"stage": "embedding_maps"}]
+    write_folder_record(folder, steps)
+    (folder / "gemini.csv").write_text("doi,x,y\n")
+    assert json.loads((folder / "provenance.json").read_text()) == {"steps": steps}
+    assert input_history(folder) == steps
+    assert input_history(folder / "gemini.csv") == steps  # a CSV has no metadata: its folder's record
+    write_folder_record(folder, [{"stage": "embedding_maps", "date": "later"}])  # a re-run replaces it
+    assert folder_history(folder) == [{"stage": "embedding_maps", "date": "later"}]
+
+
+def test_merge_keeps_each_step_once_in_order_of_date():
+    ingest = {"stage": "ingest", "scientographer": "0.2.0", "date": "2026-10-16T08:00:00Z"}
+    fetch = {"stage": "fetch_references", "scientographer": "0.2.0", "date": "2026-10-16T08:05:00Z"}
+    rerun = {**ingest, "date": "2026-10-16T09:00:00Z"}
+    merged = merge_steps([ingest, fetch], [ingest], [rerun, {"stage": "undated"}], ["junk"])
+    assert merged == [{"stage": "undated"}, ingest, fetch, rerun]
+
+
+# ── Every kind of stage writes its record ─────────────────────────────────────
+def _ingest_and_fetch(tmp_path):
+    """ingest writes data/papers.parquet (metadata) + data/ingest/provenance.json;
+    fetch_references reads the papers table and writes data/references.parquet."""
+    from scientographer import fetch_references, ingest
+
+    export = tmp_path / "exports" / "pubmed.txt"
+    export.parent.mkdir()
+    export.write_text("PMID- 1\n")
+    papers = pd.DataFrame({"doi": ["10.1/a", "10.1/b"], "title": ["A", "B"]})
+    read = {"table": papers, "files": [{"format": "medline", "file": str(export), "records": 2}]}
+    ingest_steps = ingest.provenance_steps([{"format": "medline", "path": str(export.parent)}], read,
+                                           tmp_path / "papers.parquet", tmp_path / "ingest")
+    ingest.save_papers_table(papers, tmp_path / "papers.parquet", ingest_steps)
+    ingest.save_ingest_report({"papers": 2}, read, tmp_path / "ingest", ingest_steps)
+
+    references = pd.DataFrame({"citing_doi": ["10.1/a"], "cited_dois": [["10.1/b"]]})
+    works = pd.DataFrame({"found": [True, True], "referenced_works": [["W2"], []]})
+    fetch_steps = fetch_references.provenance_steps(tmp_path / "papers.parquet", tmp_path / "references.parquet",
+                                                    tmp_path / "store")
+    fetch_references.save_references_table(references, works, tmp_path / "references.parquet", tmp_path / "store",
+                                           fetch_steps)
+    return ingest_steps, fetch_steps
+
+
+def test_folder_and_table_stages_write_their_records(tmp_path):
+    ingest_steps, fetch_steps = _ingest_and_fetch(tmp_path)
+    assert [s["stage"] for s in ingest_steps] == ["ingest"]
+    assert ingest_steps[0]["inputs"][0]["path"] == (tmp_path / "exports").as_posix()
+    assert ingest_steps[0]["outputs"] == [(tmp_path / "papers.parquet").as_posix(), (tmp_path / "ingest").as_posix()]
+    assert parquet_history(tmp_path / "papers.parquet") == ingest_steps
+    assert folder_history(tmp_path / "ingest") == ingest_steps
+    # fetch_references carries ingest's step (read from the table's metadata) before its own.
+    assert [s["stage"] for s in fetch_steps] == ["ingest", "fetch_references"]
+    assert parquet_history(tmp_path / "references.parquet") == fetch_steps
+    assert folder_history(tmp_path / "store") == fetch_steps
+
+
+def test_the_graph_starts_with_its_tables_lineage(tmp_path):
+    from scientographer.build_citation_network import provenance_steps, save_citation_network
+
+    ingest_steps, fetch_steps = _ingest_and_fetch(tmp_path)
+    steps = provenance_steps(tmp_path / "papers.parquet", tmp_path / "references.parquet", tmp_path / "g.graphml")
+    # ingest's step reached through both tables counts once.
+    assert [s["stage"] for s in steps] == ["ingest", "fetch_references", "build_citation_network"]
+    assert steps[:2] == fetch_steps
+    assert "citation_network" in steps[-1]["settings"]
+    save_citation_network(ig.Graph(2, [(0, 1)], directed=True), tmp_path / "g.graphml", steps)
+    assert graphml_history(tmp_path / "g.graphml") == steps
+
+
+def test_a_graph_stage_keeps_the_history_and_adds_its_step(tmp_path):
+    from scientographer.detect_communities import (
+        provenance_steps,
+        save_citation_network_with_communities,
+        save_partition_summary,
+    )
 
     source = tmp_path / "in.graphml"
-    graph = ig.Graph(2, [(0, 1)], directed=True)
-    write_graphml_with_step(graph, source, {"stage": "build_citation_network"})
-    loaded = ig.Graph.Read_GraphML(str(source))
-    out = tmp_path / "out.graphml"
-    save_citation_network_with_communities(loaded, out, source)
-    steps = history(ig.Graph.Read_GraphML(str(out)))
-    assert [s["stage"] for s in steps] == ["build_citation_network", "detect_communities"]
+    write_graphml_with_steps(ig.Graph(2, [(0, 1)], directed=True), source, [{"stage": "build_citation_network"}])
+    steps = provenance_steps(source, tmp_path / "out.graphml", tmp_path / "summary.parquet")
+    save_citation_network_with_communities(ig.Graph.Read_GraphML(str(source)), tmp_path / "out.graphml", steps)
+    save_partition_summary(pd.DataFrame({"resolution": [0.1]}), tmp_path / "summary.parquet", steps)
+    assert [s["stage"] for s in graphml_history(tmp_path / "out.graphml")] == ["build_citation_network",
+                                                                               "detect_communities"]
+    assert parquet_history(tmp_path / "summary.parquet") == steps
     assert steps[-1]["inputs"] == [{"path": source.as_posix(), "md5": file_md5(source)}]
-    assert "seed" in steps[-1]["settings"]
+    assert set(steps[-1]["settings"]) == {"detect_communities", "resolutions"}
+
+
+def test_an_old_graph_without_history_gives_only_the_new_step(tmp_path):
+    old = tmp_path / "old.graphml"
+    ig.Graph(2, [(0, 1)]).write_graphml(str(old))
+    assert [s["stage"] for s in steps_for("layout_graph", {}, [old], [tmp_path / "new.graphml"])] == ["layout_graph"]
 
 
 def test_the_site_ignores_the_history_when_reading_metrics(tmp_path):
@@ -214,48 +331,94 @@ def test_the_site_ignores_the_history_when_reading_metrics(tmp_path):
     graph = ig.Graph(2, [(0, 1)], directed=True)
     graph["modularity_at_res=0.01"] = 0.5
     path = tmp_path / "g.graphml"
-    write_graphml_with_step(graph, path, {"stage": "s", "settings": {"x_at_res=1": 2}})
+    write_graphml_with_steps(graph, path, [{"stage": "s", "settings": {"x_at_res=1": 2}}])
     _, _, graph_attributes, _ = _parse_graphml(path)
     assert history_from_text(graph_attributes[PROVENANCE_ATTRIBUTE])[0]["stage"] == "s"
     assert _partition_records_from_graph_attributes(graph_attributes) == [
         {"resolution": 0.01, "modularity": 0.5}]
 
 
-# ── The website's provenance.json ─────────────────────────────────────────────
-def _website_provenance(tmp_path, graph_attributes: dict) -> dict:
-    from scientographer.build_website import provenance_records, save_provenance_json, website_step
+# ── The website gathers every input's records ─────────────────────────────────
+def _step(stage, date, version="0.2.0", inputs=(), outputs=()):
+    return {"stage": stage, "scientographer": version, "date": date, "settings": {},
+            "inputs": [{"path": p, "md5": "0" * 32} for p in inputs], "outputs": list(outputs)}
 
-    graphml = tmp_path / "site.graphml"
-    graphml.write_text("<graphml/>")
-    step = website_step(graphml, [], *([None] * 8))
-    saved = save_provenance_json(provenance_records(graph_attributes, step), tmp_path / "website")
+
+def _website(tmp_path, graph_steps, other_inputs):
+    """Builds provenance.json for a site whose graph carries `graph_steps` and which
+    also reads `other_inputs` (paths); returns the written file."""
+    from scientographer.build_website import (
+        _parse_graphml,
+        provenance_records,
+        save_provenance_json,
+        website_inputs,
+        website_step,
+    )
+
+    graphml = tmp_path / "data" / "graph.graphml"
+    graphml.parent.mkdir(parents=True, exist_ok=True)
+    graph = ig.Graph(2, [(0, 1)], directed=True)
+    if graph_steps:
+        write_graphml_with_steps(graph, graphml, graph_steps)
+    else:
+        graph.write_graphml(str(graphml))
+    _, _, graph_attributes, _ = _parse_graphml(graphml)
+    paths = [graphml, *other_inputs, None, None, None, None, None, None, None, None, None]
+    inputs = website_inputs(paths[0], [], *paths[1:10])
+    step = website_step(inputs, tmp_path / "website")
+    saved = save_provenance_json(provenance_records(graph_attributes, graphml, inputs, step), tmp_path / "website")
     written = json.loads((tmp_path / "website" / "network_data" / "provenance.json").read_text())
     assert saved["n_steps"] == len(written["steps"])
     return written
 
 
-def test_website_writes_provenance_with_the_graphs_steps_and_its_own(tmp_path):
-    earlier = [{"stage": "build_citation_network", "scientographer": "0.1.0"},
-               {"stage": "detect_communities", "scientographer": "0.2.0"}]
-    written = _website_provenance(tmp_path, {PROVENANCE_ATTRIBUTE: json.dumps(earlier)})
-    assert written["scientographer"] == exact_version()
-    assert written["built"].endswith("Z")
-    assert written["steps"][:2] == earlier
-    website = written["steps"][2]
-    assert website["stage"] == "build_website"
-    assert website["inputs"] == [{"path": (tmp_path / "site.graphml").as_posix(),
-                                  "md5": hashlib.md5(b"<graphml/>").hexdigest()}]
+def test_website_merges_dedupes_orders_and_links_the_steps(tmp_path):
+    build = _step("build_citation_network", "2026-10-16T08:00:00Z", inputs=["data/papers.parquet"],
+                  outputs=["data/graph0.graphml"])
+    detect = _step("detect_communities", "2026-10-16T08:10:00Z", inputs=["data/graph0.graphml"],
+                   outputs=["data/graph1.graphml"])
+    table = tmp_path / "data" / "analysis" / "community_quality_metrics" / "per_partition.parquet"
+    metrics = _step("community_quality_metrics", "2026-10-16T08:20:00Z", version="0.2.0+gabc1234.dirty",
+                    inputs=["./data/graph1.graphml"], outputs=[table.parent.as_posix()])
+    keywords = _step("community_keywords", "2026-10-16T08:30:00Z", inputs=["data/graph1.graphml"],
+                     outputs=[(tmp_path / "data" / "graph.graphml").as_posix()])
+    table.parent.mkdir(parents=True)
+    write_parquet_with_steps(pd.DataFrame({"resolution": [0.1]}), table, [build, detect, metrics])
+    written = _website(tmp_path, [build, detect, keywords], [table])
+
+    stages = [s["stage"] for s in written["steps"]]
+    assert stages == ["build_citation_network", "detect_communities", "community_quality_metrics",
+                      "community_keywords", "build_website"]  # each once, in order of date
+    assert written["scientographer"] == exact_version() and written["built"].endswith("Z")
+    assert written["versions"][:2] == ["0.2.0", "0.2.0+gabc1234.dirty"]
+    assert written["unrecorded_inputs"] == []
+    steps = written["steps"]
+    assert steps[1]["inputs"][0]["from_step"] == 0          # detect reads build's graph
+    assert steps[2]["inputs"][0]["from_step"] == 1          # "./" paths match too
+    assert "from_step" not in steps[0]["inputs"][0]         # the papers table: no recorded step wrote it
+    website = steps[-1]
+    assert [i["path"] for i in website["inputs"]] == [(tmp_path / "data" / "graph.graphml").as_posix(),
+                                                      table.as_posix()]
+    assert website["inputs"][1]["from_step"] == 2           # a file inside the metrics stage's folder
+    assert website["outputs"] == [(tmp_path / "website").as_posix()]
 
 
-def test_website_provenance_for_a_graph_without_history(tmp_path):
-    written = _website_provenance(tmp_path, {"modularity_at_res=0.01": "0.5"})
+def test_website_works_on_old_inputs_without_records(tmp_path):
+    old_table = tmp_path / "metrics.parquet"
+    pd.DataFrame({"resolution": [0.1]}).to_parquet(old_table)
+    written = _website(tmp_path, [], [old_table])
     assert [s["stage"] for s in written["steps"]] == ["build_website"]
+    assert written["unrecorded_inputs"] == [(tmp_path / "data" / "graph.graphml").as_posix(), old_table.as_posix()]
+    assert written["versions"] == [exact_version()]
 
 
-def test_the_page_shows_the_stamp_from_provenance_json():
+def test_the_page_has_the_stamp_and_the_about_tab():
     from scientographer.build_website import ASSETS_DIR
 
     page = (ASSETS_DIR / "index.html").read_text(encoding="utf-8")
-    assert 'id="provenance-stamp" hidden' in page and 'id="loading-version" hidden' in page
+    assert 'id="provenance-stamp"' in page and 'id="loading-version" hidden' in page
+    assert 'data-view="about"' in page and 'id="about-wrap"' in page
     script = (ASSETS_DIR / "main.js").read_text(encoding="utf-8")
     assert "/provenance.json`" in script
+    for field in ("from_step", "unrecorded_inputs", "versions", "outputs"):
+        assert field in script
