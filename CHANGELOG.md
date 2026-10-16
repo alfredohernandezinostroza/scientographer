@@ -58,6 +58,11 @@ settings or outputs).
   every map shows "Made with" and the logo while it loads (for at least 1 s), then
   a round compass badge linking to the project; the compass is also the map's
   browser-tab icon. The Guided tour button moves to the top right.
+- **Bridge papers work** (the toggle and badge never did anything): a bridge paper
+  has at least 10 citation links and a participation coefficient above 0.62 at the
+  current resolution, shown in the paper panel; **top papers by four rankings**
+  (citations, citations within the community, citations per year, PageRank), in
+  the community panel and as a new "Highlight top papers" control.
 
 ## [0.1.0] - 2026-10-09
 

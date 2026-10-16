@@ -26,6 +26,7 @@ from scientographer.build_website import (
     discover_wordcloud_figures,
     figure_entries,
     node_records,
+    paper_pagerank,
     resolution_metrics_records,
 )
 
@@ -436,6 +437,22 @@ def test_well_connected_masks_sizes_and_bitset():
     bits = np.unpackbits(np.frombuffer(base64.b64decode(payload["resolutions"][str(RES)]), dtype=np.uint8),
                          bitorder="little")[: payload["n"]]
     assert bits.astype(bool).tolist() == masks[str(RES)].tolist()
+
+
+def test_pagerank_reaches_every_node_record():
+    # A star: n1, n2 and n3 all cite n0, which cites nothing.
+    raw = [_mk_node(f"n{i}", topic=1, community=2) for i in range(4)]
+    scores = paper_pagerank(raw, [(1, 0), (2, 0), (3, 0)])
+    assert len(scores) == 4 and abs(sum(scores) - 1) < 1e-3
+    # The cited paper ranks first; the three citing papers tie.
+    assert scores[0] > scores[1] == scores[2] == scores[3]
+    # Kept to four significant digits.
+    assert all(float(f"{s:.4g}") == s for s in scores)
+    recs = node_records(raw, resolutions=[RES], community_resolution=RES, paper_pagerank=scores)
+    assert [r["pagerank"] for r in recs] == scores
+    # Without scores (a caller outside the pipeline) the field is left out.
+    assert "pagerank" not in node_records(raw, resolutions=[RES], community_resolution=RES)[0]
+    assert paper_pagerank([], []) == []
 
 
 def test_mesh_terms_reach_the_site_only_when_papers_have_them():
