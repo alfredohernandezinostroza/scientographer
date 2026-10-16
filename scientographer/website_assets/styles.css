@@ -1204,6 +1204,46 @@ body.about-open #provenance-stamp { display: none; }
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
+#about-warnings p.about-quiet {
+  border: none;
+  padding: 0 0 0 2px;
+  color: var(--text-dim);
+}
+/* The environment: a collapsible section with the package list wrapping in a
+   scrollable box (fine at phone width), then the download link. */
+#about-environment {
+  max-width: 760px;
+  margin: 4px 0 10px;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+#about-environment[hidden] { display: none; }
+#about-environment summary { cursor: pointer; font-weight: 600; font-size: 12.5px; }
+#about-environment p { margin: 6px 0; color: var(--text-dim); overflow-wrap: anywhere; }
+.about-package-list {
+  list-style: none;
+  margin: 6px 0;
+  padding: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px 12px;
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.03);
+}
+.about-package-list li { min-width: 0; overflow-wrap: anywhere; }
+.about-package-list code, .about-step-packages {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+}
+.about-download { color: var(--accent); font-size: 12px; }
+.about-step-packages { color: var(--text-dim); margin: 0 0 4px; overflow-wrap: anywhere; line-height: 1.5; }
+.about-override { color: var(--accent-after); font-family: inherit; }
 #about-steps {
   list-style: none;
   margin: 8px 0 0;
