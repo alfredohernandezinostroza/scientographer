@@ -412,12 +412,15 @@ def test_website_works_on_old_inputs_without_records(tmp_path):
     assert written["versions"] == [exact_version()]
 
 
-def test_the_page_has_the_stamp_and_the_about_tab():
+def test_the_page_has_the_stamp_and_the_about_panel():
     from scientographer.build_website import ASSETS_DIR
 
     page = (ASSETS_DIR / "index.html").read_text(encoding="utf-8")
     assert 'id="provenance-stamp"' in page and 'id="loading-version" hidden' in page
-    assert 'data-view="about"' in page and 'id="about-wrap"' in page
+    # About is a panel that opens out of the badge, not a tab.
+    assert 'id="about-panel"' in page and 'aria-controls="about-panel"' in page
+    assert 'id="tab-about"' not in page and 'id="view-about"' not in page
+    assert '<button id="scientographer-badge"' in page
     script = (ASSETS_DIR / "main.js").read_text(encoding="utf-8")
     assert "/provenance.json`" in script
     for field in ("from_step", "unrecorded_inputs", "versions", "outputs"):

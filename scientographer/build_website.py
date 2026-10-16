@@ -37,7 +37,7 @@ What comes from where:
   ``provenance`` attribute, the tables' parquet metadata, the ``provenance.json`` of
   the word-cloud and layout folders), merged, plus this stage's own, written to
   ``provenance.json``; the page shows the version and build date next to its "Made
-  with" badge and every step in its About tab.
+  with" badge and every step in "About this map", opened from the badge.
 - **figures** -- any list of files (word-cloud SVGs, PNGs) tagged with the graph
   and resolution they belong to; copied into the site with a ``figures.json``.
 

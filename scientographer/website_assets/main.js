@@ -300,16 +300,16 @@ function showProvenanceStamp(provenance) {
   }
   const badge = document.getElementById("scientographer-badge");
   if (badge) {
-    badge.title = `Made with ${text}`;
-    badge.setAttribute("aria-label", `Made with ${text} (opens its GitHub page)`);
+    badge.title = `About this map: how it was made (${text})`;
+    badge.setAttribute("aria-label", `About this map: how it was made (${text})`);
   }
 }
 
-// ── About tab: how the map was made ──────────────────────────────────────
+// ── About this map: how it was made ──────────────────────────────────────
 // provenance.json lists every step that made the map, oldest first: the
 // stage, the Scientographer version, its settings, its input files (with md5
 // and `from_step`, the earlier step that wrote the file) and its outputs.
-// Older sites have no such file; the tab then says so.
+// Older sites have no such file; the panel then says so.
 function shortDate(text) {
   if (typeof text !== "string" || !text) return "";
   return text.replace("T", " ").replace(/:\d\dZ$/, " UTC").replace(/Z$/, " UTC");
@@ -436,9 +436,129 @@ function renderAbout(provenance) {
   });
 }
 
-function openAboutTab() {
-  document.getElementById("tab-about")?.click();
+// ── About panel: opens out of the badge ──────────────────────────────────
+// The panel sits beside the controls (never under them): --about-left follows
+// the controls' right edge as they open and collapse. Opening animates its clip
+// from the badge's 44px circle to the full panel, while the logo, cropped to its
+// compass and shrunk onto the badge's compass, slides into the header and its
+// letters are revealed around the compass (the logo's O). Closing reverses it.
+const ABOUT_GAP = 12;
+const PHONE_WIDTH = 600;
+// The compass's square in the logo, as fractions of the logo (see styles.css).
+const LOGO_COMPASS = { left: 912.75 / 2398.83, top: 12.93 / 217.53, width: 177.32 / 2398.83 };
+const aboutState = { open: false, timer: null };
+
+function isPhone() {
+  return window.innerWidth <= PHONE_WIDTH;
 }
+
+function controlsExpanded() {
+  const controls = document.getElementById("controls");
+  return !!controls && !controls.classList.contains("collapsed");
+}
+
+function updateAboutLeft() {
+  const controls = document.getElementById("controls");
+  const left = isPhone() || !controls ? 16 : Math.round(controls.getBoundingClientRect().right + ABOUT_GAP);
+  document.documentElement.style.setProperty("--about-left", `${left}px`);
+}
+
+function reducedMotion() {
+  return window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+}
+
+// Where the logo starts (and ends, when closing): its compass square exactly over
+// the badge's icon, the 30px square centred in the 44px circle that shares the
+// panel's bottom-right corner. Measured on the untransformed logo.
+function placeLogoOnBadge(panel) {
+  const logo = document.getElementById("about-logo-image");
+  if (!logo) return;
+  panel.classList.remove("closed");
+  const end = logo.getBoundingClientRect();
+  const corner = panel.getBoundingClientRect();
+  const target = { left: corner.right - 37, top: corner.bottom - 37, width: 30 };
+  const square = LOGO_COMPASS.width * end.width;
+  const scale = square > 0 ? target.width / square : 1;
+  const x = target.left - end.left - scale * LOGO_COMPASS.left * end.width;
+  const y = target.top - end.top - scale * LOGO_COMPASS.top * end.height;
+  panel.style.setProperty("--logo-x", `${x}px`);
+  panel.style.setProperty("--logo-y", `${y}px`);
+  panel.style.setProperty("--logo-scale", String(scale));
+}
+
+function setAboutExpanded(open) {
+  document.getElementById("scientographer-badge")?.setAttribute("aria-expanded", String(open));
+  document.body.classList.toggle("about-open", open);
+}
+
+function openAbout() {
+  const panel = document.getElementById("about-panel");
+  if (!panel || aboutState.open) return;
+  aboutState.open = true;
+  clearTimeout(aboutState.timer);
+  // On a phone the two panels would overlap: collapse the controls first.
+  if (isPhone() && controlsExpanded()) document.getElementById("controls-toggle")?.click();
+  updateAboutLeft();
+  panel.hidden = false;
+  // Set up the badge-sized start without animating to it, then let the
+  // transitions run to the open state.
+  panel.classList.add("instant");
+  placeLogoOnBadge(panel);
+  panel.classList.add("closed");
+  void panel.offsetWidth;
+  panel.classList.remove("instant");
+  void panel.offsetWidth;
+  setAboutExpanded(true);
+  requestAnimationFrame(() => requestAnimationFrame(() => panel.classList.remove("closed")));
+  document.getElementById("about-close")?.focus({ preventScroll: true });
+}
+
+function closeAbout() {
+  const panel = document.getElementById("about-panel");
+  if (!panel || !aboutState.open) return;
+  aboutState.open = false;
+  placeLogoOnBadge(panel);
+  panel.classList.add("closed");
+  const finish = () => {
+    clearTimeout(aboutState.timer);
+    panel.removeEventListener("transitionend", onEnd);
+    if (aboutState.open) return;
+    panel.hidden = true;
+    setAboutExpanded(false);
+  };
+  const onEnd = (event) => { if (event.target === panel && event.propertyName === "clip-path") finish(); };
+  if (reducedMotion()) {
+    finish();
+    return;
+  }
+  panel.addEventListener("transitionend", onEnd);
+  aboutState.timer = setTimeout(finish, 700);
+}
+
+function toggleAbout() {
+  if (aboutState.open) closeAbout();
+  else openAbout();
+}
+
+function initAboutPanel() {
+  document.getElementById("scientographer-badge")?.addEventListener("click", openAbout);
+  document.getElementById("provenance-stamp")?.addEventListener("click", toggleAbout);
+  document.getElementById("about-close")?.addEventListener("click", closeAbout);
+  document.getElementById("about-logo")?.addEventListener("click", closeAbout);
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && aboutState.open) closeAbout();
+  });
+  // Follow the controls as they open and collapse, and the window as it resizes.
+  const controls = document.getElementById("controls");
+  if (controls && "ResizeObserver" in window) new ResizeObserver(updateAboutLeft).observe(controls);
+  window.addEventListener("resize", updateAboutLeft);
+  // On a phone, expanding the controls closes About (they would overlap).
+  document.getElementById("controls-toggle")?.addEventListener("click", () => {
+    if (isPhone() && aboutState.open && controlsExpanded()) closeAbout();
+  });
+  updateAboutLeft();
+}
+
 
 async function main() {
   // One-time wiring (event listeners on static DOM); the renderer + per-frame
@@ -476,8 +596,8 @@ async function main() {
   const record = await provenance;
   showProvenanceStamp(record);
   renderAbout(record);
-  document.getElementById("provenance-stamp")?.addEventListener("click", openAboutTab);
-  if (location.hash === "#about") openAboutTab();
+  initAboutPanel();
+  if (location.hash === "#about") openAbout();
 }
 
 // Load (or switch to) a dataset: fetch its files, (re)build the graph, and
@@ -2907,7 +3027,6 @@ function initTabs() {
     { tabId: "tab-metrics", viewId: "view-metrics" },
     { tabId: "tab-figures", viewId: "view-figures" },
     { tabId: "tab-wordmap", viewId: "view-wordmap" },
-    { tabId: "tab-about", viewId: "view-about" },
   ];
   for (const { tabId, viewId } of TABS) {
     const tabEl = document.getElementById(tabId);

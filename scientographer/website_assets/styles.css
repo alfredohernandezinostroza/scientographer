@@ -1063,6 +1063,7 @@ table.health-table tr.active td { color: var(--text); background: rgba(78, 161, 
 #scientographer-badge:hover,
 #scientographer-badge:focus-visible { border-color: var(--accent); transform: scale(1.06); outline: none; }
 #scientographer-badge img { width: 30px; height: 30px; display: block; }
+#scientographer-badge { padding: 0; cursor: pointer; font: inherit; }
 @keyframes badge-in { from { opacity: 0; transform: scale(0.8); } to { opacity: 1; transform: scale(1); } }
 @media (prefers-reduced-motion: reduce) { #scientographer-badge { animation: none; transition: none; } }
 /* The version and build date, a quiet line left of the badge (above it on narrow screens) */
@@ -1100,20 +1101,99 @@ body:has(#view-graph:not(.active)) #provenance-stamp { display: none; }
 .loading-brand #loading-version { font-size: 12px; color: var(--text-dim); margin-top: -8px; }
 .loading-brand #loading-version[hidden] { display: none; }
 
-/* ── About tab (how the map was made) ─────────────────────────────────── */
-#about-wrap {
-  top: 16px;
-  left: 16px;
+/* ── About this map: a panel that opens out of the badge ─────────────────── */
+/* It sits beside the controls (--about-left, set by main.js from the controls' right
+   edge), keeps the badge's 16px margins, and is drawn above the floating buttons.
+   Closed, it is clipped to the badge's 44px circle in its bottom-right corner, with
+   the logo shrunk and cropped to its compass exactly over the badge's; opening
+   animates both clips and the logo's transform (main.js sets --logo-*). */
+#about-panel {
+  position: fixed;
+  left: var(--about-left, 372px);
   right: 16px;
+  top: 16px;
   bottom: 16px;
+  z-index: 950;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+  color: var(--text);
+  clip-path: inset(0 0 0 0 round 12px);
+  transition: clip-path 460ms cubic-bezier(0.3, 0.7, 0.2, 1);
+}
+#about-panel[hidden] { display: none; }
+#about-panel.instant, #about-panel.instant * { transition: none !important; }
+#about-panel.closed { clip-path: inset(calc(100% - 44px) 0 0 calc(100% - 44px) round 22px); }
+.about-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 16px 8px;
+  flex-shrink: 0;
+}
+#about-logo {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  text-align: left;
+}
+#about-logo-image {
+  display: block;
+  width: min(360px, 100%);
+  height: auto;
+  transform-origin: 0 0;
+  clip-path: inset(0 0 0 0 round 0);
+  transition: transform 460ms cubic-bezier(0.3, 0.7, 0.2, 1), clip-path 460ms cubic-bezier(0.3, 0.7, 0.2, 1);
+}
+/* The compass in the logo (viewBox 2398.8 x 217.5): its circle spans x 925-1077, the
+   handle and dial y 12.9-190.3; main.js lines its square (x 912.8-1090.1) up with the badge icon */
+#about-panel.closed #about-logo-image {
+  transform: translate(var(--logo-x, 0px), var(--logo-y, 0px)) scale(var(--logo-scale, 1));
+  clip-path: inset(5.94% 55.10% 12.54% 38.56% round 50%);
+}
+#about-close {
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid var(--panel-border);
+  background: #161a22;
+  color: var(--text);
+  font-size: 18px;
+  line-height: 26px;
+  cursor: pointer;
+}
+#about-close:hover, #about-close:focus-visible { border-color: var(--accent); color: var(--accent); outline: none; }
+.about-panel-body {
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
+  padding: 4px 16px 16px;
+  transition: opacity 220ms ease 200ms;
 }
-#about-wrap .meta { max-width: 760px; }
-/* Clear the floating controls button (top left) and, on narrow screens, the tour button */
-#about-wrap .metrics-head { padding-left: 36px; }
-@media (max-width: 760px) {
-  #about-wrap .metrics-head { padding: 34px 0 0; }
+#about-panel.closed .about-panel-body,
+#about-panel.closed #about-close { opacity: 0; transition: opacity 120ms ease; }
+#about-close { transition: opacity 220ms ease 200ms; }
+#about-title { margin: 6px 0 4px; font-size: 15px; font-weight: 600; }
+.about-panel-body .meta { color: var(--text-dim); font-size: 12px; line-height: 1.5; margin: 0 0 10px; max-width: 760px; }
+.about-panel-body .meta a { color: var(--accent); }
+body.about-open #scientographer-badge { visibility: hidden; }
+body.about-open #provenance-stamp { display: none; }
+@media (max-width: 600px) {
+  /* Full width below the top buttons; the controls are collapsed while it is open */
+  #about-panel { left: 16px; top: 76px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #about-panel, #about-logo-image, .about-panel-body, #about-close { transition: none; }
 }
 #about-warnings p {
   margin: 0 0 8px;
