@@ -52,6 +52,7 @@ import pandas as pd
 from scipy.stats import skew
 
 from scientographer._forceatlas2 import ENGINES, forceatlas2
+from scientographer._provenance import stage_settings, steps_for, write_folder_record
 from scientographer.config import FIGURES_PATH, PARAMS, draw_dag, ensure_dirs, tracker_adapters
 
 ###################
@@ -213,13 +214,20 @@ def citation_layouts(citation_network: ig.Graph, layout_specs: list[dict]) -> di
     return results
 
 
-def save_citation_layouts(citation_layouts: dict, output_dir: Path) -> dict:
+def provenance_steps(input_graphml_path: Path, output_dir: Path) -> list[dict]:
+    """How the layouts were made (see _provenance.py): the steps the input graph
+    carries, then this one; kept in the folder's provenance.json (CSV has no metadata)."""
+    return steps_for(CURRENT_FILE_NAME, stage_settings("citation_layouts"), [input_graphml_path], [output_dir])
+
+
+def save_citation_layouts(citation_layouts: dict, output_dir: Path, provenance_steps: list[dict]) -> dict:
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     for key, (table, _) in citation_layouts.items():
         table.to_csv(output_dir / f"{key}.csv", index=False)
     manifest = {key: run for key, (_, run) in citation_layouts.items()}
     (output_dir / MANIFEST_NAME).write_text(json.dumps(manifest, indent=1) + "\n", encoding="utf-8")
+    write_folder_record(output_dir, provenance_steps)
     return {"output_dir": str(output_dir), "layouts": sorted(manifest)}
 
 

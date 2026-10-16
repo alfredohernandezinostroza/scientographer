@@ -14,6 +14,7 @@ in its ``dvc.yaml`` and keeps every setting in its ``params.yaml``::
     scientographer website [--port 8123]  serve the built site
     scientographer ui [--port 8241]       start the Hamilton UI tracker for this project
     scientographer params                 show which params.yaml is in effect
+    scientographer --version              the exact version (with the commit, from a git checkout)
     scientographer store-existing-results fill the per-resolution stores from current outputs
 """
 
@@ -34,6 +35,24 @@ app = typer.Typer(
 )
 
 PACKAGE_DIR = Path(__file__).resolve().parent
+
+def _print_version(value: bool) -> None:
+    if value:
+        from scientographer._provenance import exact_version
+
+        typer.echo(f"scientographer {exact_version()}")
+        raise typer.Exit()
+
+
+@app.callback()
+def _options(
+    version: bool = typer.Option(
+        False, "--version", callback=_print_version, is_eager=True,
+        help="Show the exact version (the release, or the release plus the commit from a git checkout) and exit.",
+    ),
+) -> None:
+    """Map a scientific literature from its citation network. Start with `scientographer init`."""
+
 # Modules that are shared code rather than pipeline stages.
 NOT_STAGES = {"__init__", "cli", "config", "synonyms", "tracker", "community_resolution_bands"}
 

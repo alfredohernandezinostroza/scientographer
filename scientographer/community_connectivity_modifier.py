@@ -61,6 +61,12 @@ import numpy as np
 import pandas as pd
 
 from scientographer._parallel import resolve_workers, run_in_worker_processes
+from scientographer._provenance import (
+    stage_settings,
+    steps_for,
+    write_folder_record,
+    write_parquet_with_steps,
+)
 from scientographer._resolution_store import (
     STORE_SUBDIR,
     ResolutionStore,
@@ -282,6 +288,7 @@ def _main() -> int:
         "save_connectivity_modifier_membership",
         "save_connectivity_modifier_per_community_metrics",
         "save_connectivity_modifier_per_partition_metrics",
+        "save_provenance_record",
     ]
     import __main__
     dr = (
@@ -486,21 +493,39 @@ def per_partition_connectivity_modifier_df(
     return pd.DataFrame(rows)
 
 
+def provenance_steps(citation_network_path: Path) -> list[dict]:
+    """How the outputs were made (see _provenance.py): the steps the input graph
+    carries, then this one. Written into the tables and the folder."""
+    return steps_for(CURRENT_FILE_NAME, stage_settings("graph", "resolutions", "communities"), [citation_network_path], [OUTPUT_DIR])
+
+
 @datasaver()
-def save_connectivity_modifier_membership(connectivity_modifier_membership_df: pd.DataFrame) -> dict:
-    connectivity_modifier_membership_df.to_parquet(MEMBERSHIP_PARQUET)
+def save_provenance_record(provenance_steps: list[dict]) -> dict:
+    """provenance.json in the output folder (see _provenance.py)."""
+    return {"path": str(write_folder_record(OUTPUT_DIR, provenance_steps))}
+
+
+@datasaver()
+def save_connectivity_modifier_membership(
+    connectivity_modifier_membership_df: pd.DataFrame, provenance_steps: list[dict]
+) -> dict:
+    write_parquet_with_steps(connectivity_modifier_membership_df, MEMBERSHIP_PARQUET, provenance_steps)
     return utils.get_file_metadata(MEMBERSHIP_PARQUET)
 
 
 @datasaver()
-def save_connectivity_modifier_per_community_metrics(per_community_connectivity_modifier_df: pd.DataFrame) -> dict:
-    per_community_connectivity_modifier_df.to_parquet(PER_COMMUNITY_PARQUET)
+def save_connectivity_modifier_per_community_metrics(
+    per_community_connectivity_modifier_df: pd.DataFrame, provenance_steps: list[dict]
+) -> dict:
+    write_parquet_with_steps(per_community_connectivity_modifier_df, PER_COMMUNITY_PARQUET, provenance_steps)
     return utils.get_file_metadata(PER_COMMUNITY_PARQUET)
 
 
 @datasaver()
-def save_connectivity_modifier_per_partition_metrics(per_partition_connectivity_modifier_df: pd.DataFrame) -> dict:
-    per_partition_connectivity_modifier_df.to_parquet(PER_PARTITION_PARQUET)
+def save_connectivity_modifier_per_partition_metrics(
+    per_partition_connectivity_modifier_df: pd.DataFrame, provenance_steps: list[dict]
+) -> dict:
+    write_parquet_with_steps(per_partition_connectivity_modifier_df, PER_PARTITION_PARQUET, provenance_steps)
     return utils.get_file_metadata(PER_PARTITION_PARQUET)
 
 

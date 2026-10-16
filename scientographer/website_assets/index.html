@@ -7,7 +7,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{SITE_TITLE}}</title>
   <link rel="icon" type="image/svg+xml" href="scientographer-icon.svg">
-  <link rel="stylesheet" href="styles.css?v=12">
+  <link rel="stylesheet" href="styles.css?v=17">
 
   <!-- Tabulator -->
   <link href="https://unpkg.com/tabulator-tables@6.3.1/dist/css/tabulator.min.css" rel="stylesheet">
@@ -387,7 +387,7 @@
     <div id="legends"></div>
 
     <details class="about">
-      <summary>About this map</summary>
+      <summary>Help</summary>
       <p>Each dot is a paper; dot size is total citation degree. Positions come
          from the citation graph's layout (papers that cite each other are pulled
          together), so position reflects <strong>citation structure</strong>.</p>
@@ -433,6 +433,7 @@
     <div class="loading-brand">
       <span class="made-with">Made with</span>
       <img src="scientographer-logo-dark.svg" alt="Scientographer" width="360" height="30">
+      <span id="loading-version" hidden></span>
       <span id="loading-status">Loading map...</span>
     </div>
   </div>
@@ -440,19 +441,45 @@
   <!-- Guided tour launcher -->
   <button id="start-tour" type="button"><span class="tour-icon">?</span> Guided tour</button>
 
-  <!-- Made with Scientographer: shown once the map has loaded -->
-  <a id="scientographer-badge" href="https://github.com/alfredohernandezinostroza/scientographer" target="_blank" rel="noopener"
-     title="Made with Scientographer" aria-label="Made with Scientographer (opens its GitHub page)" hidden>
+  <!-- Made with Scientographer: shown once the map has loaded. Opens "About this map",
+       which grows out of it (main.js, About panel) -->
+  <button id="scientographer-badge" type="button" title="About this map: how it was made"
+          aria-label="About this map: how it was made" aria-controls="about-panel" aria-expanded="false" hidden>
     <img src="scientographer-icon.svg" alt="" width="30" height="30">
-  </a>
+  </button>
+  <!-- Which Scientographer made the map and when (network_data/provenance.json; hidden
+       without it); opens About too -->
+  <button id="provenance-stamp" type="button" title="How this map was made" hidden></button>
+
+  <!-- About this map: how it was made (network_data/provenance.json). A panel at the
+       bottom right, as wide as its content and never under the controls, that opens out of
+       the badge; its compass becomes the logo's O, which links to Scientographer's GitHub. -->
+  <section id="about-panel" role="dialog" aria-labelledby="about-title" hidden>
+    <header class="about-panel-head">
+      <a id="about-logo" href="https://github.com/alfredohernandezinostroza/scientographer" target="_blank"
+         rel="noopener" title="Scientographer on GitHub (opens in a new tab)"
+         aria-label="Scientographer on GitHub (opens in a new tab)">
+        <img id="about-logo-image" src="scientographer-logo-dark.svg" alt="Scientographer" width="360" height="33">
+      </a>
+      <button id="about-close" type="button" aria-label="Close About this map">&times;</button>
+    </header>
+    <div class="about-panel-body">
+      <h2 id="about-title">About this map: how it was made</h2>
+      <p class="meta" id="about-summary">Reading the map's record...</p>
+      <p class="meta"><a id="about-github" href="https://github.com/alfredohernandezinostroza/scientographer"
+         target="_blank" rel="noopener">Scientographer on GitHub</a></p>
+      <div id="about-warnings"></div>
+      <ol id="about-steps"></ol>
+    </div>
+  </section>
 
   <!-- Tabulator JS -->
   <script src="https://unpkg.com/tabulator-tables@6.3.1/dist/js/tabulator.min.js"></script>
 
   <!-- App -->
-  <script type="module" src="main.js?v=38"></script>
+  <script type="module" src="main.js?v=42"></script>
   <!-- Guided tour (independent of main.js; only reads the DOM) -->
-  <script type="module" src="tour.js?v=3"></script>
+  <script type="module" src="tour.js?v=5"></script>
   <!-- Word map tab (lazy: loads its data the first time the tab is opened) -->
   <script type="module" src="wordmap.js?v=3"></script>
 </body>

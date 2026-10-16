@@ -40,6 +40,7 @@ import numpy as np
 import pandas as pd
 
 from scientographer._embedding_store import EmbeddingStore
+from scientographer._provenance import stage_settings, steps_for, write_folder_record
 from scientographer.config import FIGURES_PATH, PARAMS, draw_dag, ensure_dirs, tracker_adapters
 
 ###################
@@ -187,7 +188,13 @@ def embedding_maps(paper_texts: pd.DataFrame, maps: list) -> list[dict]:
     return results
 
 
-def save_embedding_maps(embedding_maps: list[dict], output_dir: Path) -> dict:
+def provenance_steps(paper_texts_path: Path, output_dir: Path) -> list[dict]:
+    """How the maps were made (see _provenance.py): the steps the embedding stores'
+    folder carries, then this one; kept in the folder's provenance.json."""
+    return steps_for(CURRENT_FILE_NAME, stage_settings("embedding_maps"), [Path(paper_texts_path).parent], [output_dir])
+
+
+def save_embedding_maps(embedding_maps: list[dict], output_dir: Path, provenance_steps: list[dict]) -> dict:
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     written = {}
@@ -198,6 +205,7 @@ def save_embedding_maps(embedding_maps: list[dict], output_dir: Path) -> dict:
         if result["snapshots"] is not None:
             (output_dir / f"{name}_snapshots.json").write_text(json.dumps(result["snapshots"]), encoding="utf-8")
         written[name] = {"papers": len(result["layout"]), "topics": len(result["topics"])}
+    write_folder_record(output_dir, provenance_steps)
     logger.info("embedding maps written to %s: %s", output_dir, written)
     return written
 

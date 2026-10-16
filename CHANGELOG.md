@@ -7,6 +7,22 @@ settings or outputs).
 
 ## [Unreleased]
 
+- **How a map was made:** `scientographer --version` prints the exact version: the
+  release, or from a git checkout of Scientographer the release plus the commit
+  (`0.2.0.dev0+g1a2b3c4`, with `.dirty` for uncommitted changes). Every stage writes
+  a record of its step: the stage, the version, its settings, its input files with
+  their md5 (as in `dvc.lock`), its outputs and the date. The record travels with the
+  data: in a GraphML's `provenance` graph attribute, in a parquet table's metadata
+  (`scientographer_provenance`), and as `provenance.json` in each output folder. A
+  stage keeps the records it finds in its inputs and adds its own, so the steps run
+  from the PubMed search or table import all the way to the site. The site gathers
+  them into `network_data/provenance.json`, shows the version and build date next
+  to its "Made with" badge (and the version under the loading screen's logo), and
+  lists every step in **About this map**, a panel that opens out of the compass
+  badge (or the stamp) beside the controls: which earlier step wrote each file it
+  read, its settings, and a warning when the steps ran on more than one version or
+  on a checkout with uncommitted changes. Maps and outputs made before keep working;
+  the tab says they have no record.
 - **More ingest formats:** `ingest` now reads Scopus CSV (`scopus`), Web of Science
   tab-delimited (`wos`, a folder of `savedrecs.txt` files) and EBSCOhost CSV (`ebsco`)
   exports as well as PubMed's MEDLINE, and merges them by DOI: a paper in several

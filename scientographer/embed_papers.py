@@ -43,6 +43,7 @@ import numpy as np
 import pandas as pd
 
 from scientographer._embedding_store import EmbeddingStore
+from scientographer._provenance import stage_settings, steps_for, write_folder_record, write_parquet_with_steps
 from scientographer._paper_text import paper_texts as _paper_texts
 from scientographer.config import FIGURES_PATH, PARAMS, draw_dag, ensure_dirs, tracker_adapters
 
@@ -180,7 +181,7 @@ def _model_meta(spec: dict) -> dict:
 def _main() -> int:
     ensure_dirs(FIGURES_PATH, OUTPUT_DIR)
     inputs = dict(citation_network_path=INPUT_GRAPHML, models=MODELS, output_dir=OUTPUT_DIR)
-    outputs = ["save_paper_texts", "embedding_stores"]
+    outputs = ["save_paper_texts", "embedding_stores", "save_provenance_record"]
     import __main__
     dr = (
         driver.Builder()
@@ -229,11 +230,23 @@ def embedding_stores(paper_texts: pd.DataFrame, models: list, output_dir: Path) 
     return summary
 
 
+def provenance_steps(citation_network_path: Path, output_dir: Path) -> list[dict]:
+    """How the stores were made (see _provenance.py): the steps the input graph
+    carries, then this one."""
+    return steps_for(CURRENT_FILE_NAME, stage_settings("embeddings"), [citation_network_path], [output_dir])
+
+
 @datasaver()
-def save_paper_texts(paper_texts: pd.DataFrame, output_dir: Path) -> dict:
+def save_provenance_record(provenance_steps: list[dict], embedding_stores: dict, output_dir: Path) -> dict:
+    """provenance.json in the stores' folder, once the stores are written."""
+    return {"path": str(write_folder_record(output_dir, provenance_steps))}
+
+
+@datasaver()
+def save_paper_texts(paper_texts: pd.DataFrame, output_dir: Path, provenance_steps: list[dict]) -> dict:
     path = Path(output_dir) / "paper_texts.parquet"
     path.parent.mkdir(parents=True, exist_ok=True)
-    paper_texts.to_parquet(path, index=False)
+    write_parquet_with_steps(paper_texts, path, provenance_steps, index=False)
     return utils.get_file_metadata(path)
 
 

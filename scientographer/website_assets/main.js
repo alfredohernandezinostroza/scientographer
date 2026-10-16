@@ -268,10 +268,304 @@ window.scientographer = {
   },
 };
 
+// How the map was made (build_website.py writes network_data/provenance.json):
+// the Scientographer version and the build date, shown under the logo while the
+// map loads and next to the badge after. Older sites have no such file; then
+// nothing is shown.
+async function loadProvenance() {
+  try {
+    const response = await fetch(`${sharedDir(DATASETS[DEFAULT_DATASET])}/provenance.json`);
+    const provenance = response.ok ? await response.json() : null;
+    return provenance && typeof provenance.scientographer === "string" ? provenance : null;
+  } catch {
+    return null;
+  }
+}
+
+function showLoadingVersion(provenance) {
+  const el = document.getElementById("loading-version");
+  if (!el || !provenance) return;
+  el.textContent = provenance.scientographer;
+  el.hidden = false;
+}
+
+function showProvenanceStamp(provenance) {
+  if (!provenance) return;
+  const built = typeof provenance.built === "string" ? provenance.built.slice(0, 10) : "";
+  const text = `Scientographer ${provenance.scientographer}` + (built ? ` \u00b7 built ${built}` : "");
+  const stamp = document.getElementById("provenance-stamp");
+  if (stamp) {
+    stamp.textContent = text;
+    stamp.hidden = false;
+  }
+  const badge = document.getElementById("scientographer-badge");
+  if (badge) {
+    badge.title = `About this map: how it was made (${text})`;
+    badge.setAttribute("aria-label", `About this map: how it was made (${text})`);
+  }
+}
+
+// ── About this map: how it was made ──────────────────────────────────────
+// provenance.json lists every step that made the map, oldest first: the
+// stage, the Scientographer version, its settings, its input files (with md5
+// and `from_step`, the earlier step that wrote the file) and its outputs.
+// Older sites have no such file; the panel then says so.
+function shortDate(text) {
+  if (typeof text !== "string" || !text) return "";
+  return text.replace("T", " ").replace(/:\d\dZ$/, " UTC").replace(/Z$/, " UTC");
+}
+
+function aboutParagraph(text) {
+  const p = document.createElement("p");
+  p.textContent = text;
+  return p;
+}
+
+function aboutFileList(label, entries, steps) {
+  const wrap = document.createDocumentFragment();
+  if (!entries.length) return wrap;
+  const head = document.createElement("div");
+  head.className = "about-label";
+  head.textContent = label;
+  wrap.appendChild(head);
+  const list = document.createElement("ul");
+  list.className = "about-files";
+  for (const entry of entries) {
+    const item = document.createElement("li");
+    const path = document.createElement("code");
+    path.className = "about-path";
+    path.textContent = entry.path;
+    path.title = entry.path;
+    item.appendChild(path);
+    if (entry.md5 !== undefined) {
+      const md5 = document.createElement("code");
+      md5.className = "about-md5";
+      md5.textContent = entry.md5 ? entry.md5.slice(0, 8) : "no checksum";
+      md5.title = entry.md5
+        ? `md5 ${entry.md5}`
+        : (entry.files != null ? `${entry.files} files, ${entry.bytes} bytes: too large to checksum` : "missing when the step ran");
+      item.appendChild(md5);
+    }
+    const from = Number.isInteger(entry.from_step) ? steps[entry.from_step] : null;
+    if (from) {
+      const note = document.createElement("span");
+      note.className = "about-from";
+      note.append("reads the output of ");
+      const link = document.createElement("a");
+      link.href = `#about-step-${entry.from_step}`;
+      link.textContent = from.stage || `step ${entry.from_step + 1}`;
+      note.appendChild(link);
+      item.appendChild(note);
+    }
+    list.appendChild(item);
+  }
+  wrap.appendChild(list);
+  return wrap;
+}
+
+function renderAbout(provenance) {
+  const summary = document.getElementById("about-summary");
+  const warnings = document.getElementById("about-warnings");
+  const list = document.getElementById("about-steps");
+  if (!summary || !warnings || !list) return;
+  warnings.replaceChildren();
+  list.replaceChildren();
+  const steps = provenance && Array.isArray(provenance.steps) ? provenance.steps : [];
+  if (!provenance) {
+    summary.textContent = "This map has no record of how it was made: it was built before Scientographer " +
+      "kept one (its network_data/provenance.json is missing).";
+    return;
+  }
+  summary.textContent = `Made with Scientographer ${provenance.scientographer}, built ${shortDate(provenance.built)}. ` +
+    `${steps.length} step${steps.length === 1 ? "" : "s"}, oldest first: the stage, the version that ran it, ` +
+    "its settings and the files it read, with their md5 checksums (the ones dvc.lock keeps).";
+
+  const versions = Array.isArray(provenance.versions) && provenance.versions.length
+    ? provenance.versions
+    : [...new Set(steps.map((s) => s.scientographer).filter(Boolean))];
+  if (versions.length > 1) {
+    warnings.appendChild(aboutParagraph(`Steps of this map ran on ${versions.length} versions: ${versions.join(", ")}.`));
+  }
+  const dirty = versions.filter((v) => String(v).endsWith(".dirty"));
+  if (dirty.length) {
+    warnings.appendChild(aboutParagraph(
+      `Some steps ran on a Scientographer checkout with uncommitted changes (${dirty.join(", ")}): ` +
+      "that code cannot be checked out again exactly."));
+  }
+  const unrecorded = Array.isArray(provenance.unrecorded_inputs) ? provenance.unrecorded_inputs : [];
+  if (unrecorded.length) {
+    warnings.appendChild(aboutParagraph(
+      `No record for ${unrecorded.join(", ")}: made before Scientographer kept records, so the steps ` +
+      "that made it are not listed."));
+  }
+
+  steps.forEach((step, i) => {
+    const item = document.createElement("li");
+    item.className = "about-step";
+    item.id = `about-step-${i}`;
+    const head = document.createElement("div");
+    head.className = "about-step-head";
+    const number = document.createElement("span");
+    number.className = "about-number";
+    number.textContent = `${i + 1}.`;
+    const stage = document.createElement("span");
+    stage.className = "about-stage";
+    stage.textContent = step.stage || "(unnamed step)";
+    const version = document.createElement("span");
+    version.className = "about-version" + (String(step.scientographer || "").endsWith(".dirty") ? " dirty" : "");
+    version.textContent = step.scientographer ? `Scientographer ${step.scientographer}` : "version not recorded";
+    const date = document.createElement("span");
+    date.className = "about-date";
+    date.textContent = shortDate(step.date);
+    head.append(number, stage, version, date);
+    item.appendChild(head);
+    const inputs = (Array.isArray(step.inputs) ? step.inputs : []).filter((e) => e && e.path);
+    item.appendChild(aboutFileList("Read", inputs, steps));
+    const outputs = (Array.isArray(step.outputs) ? step.outputs : []).map((path) => ({ path }));
+    item.appendChild(aboutFileList("Wrote", outputs, steps));
+    if (step.settings && Object.keys(step.settings).length) {
+      const details = document.createElement("details");
+      const label = document.createElement("summary");
+      label.textContent = "Settings";
+      const pre = document.createElement("pre");
+      pre.textContent = JSON.stringify(step.settings, null, 2);
+      details.append(label, pre);
+      item.appendChild(details);
+    }
+    list.appendChild(item);
+  });
+}
+
+// ── About panel: opens out of the badge ──────────────────────────────────
+// The panel is as wide as its content, anchored at the bottom right, and never
+// reaches under the controls: --about-left (its furthest left edge) follows the
+// controls' right edge as they open and collapse. Opening animates its clip
+// from the badge's 44px circle to the full panel, while the logo, cropped to its
+// compass and shrunk onto the badge's compass, slides into the header and its
+// letters are revealed around the compass (the logo's O). Closing reverses it.
+const ABOUT_GAP = 12;
+const PHONE_WIDTH = 600;
+// The compass's square in the logo, as fractions of the logo (see styles.css).
+const LOGO_COMPASS = { left: 912.75 / 2398.83, top: 12.93 / 217.53, width: 177.32 / 2398.83 };
+const aboutState = { open: false, timer: null };
+
+function isPhone() {
+  return window.innerWidth <= PHONE_WIDTH;
+}
+
+function controlsExpanded() {
+  const controls = document.getElementById("controls");
+  return !!controls && !controls.classList.contains("collapsed");
+}
+
+function updateAboutLeft() {
+  const controls = document.getElementById("controls");
+  const left = isPhone() || !controls ? 16 : Math.round(controls.getBoundingClientRect().right + ABOUT_GAP);
+  document.documentElement.style.setProperty("--about-left", `${left}px`);
+}
+
+function reducedMotion() {
+  return window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+}
+
+// Where the logo starts (and ends, when closing): its compass square exactly over
+// the badge's icon, the 30px square centred in the 44px circle that shares the
+// panel's bottom-right corner. Measured on the untransformed logo.
+function placeLogoOnBadge(panel) {
+  const logo = document.getElementById("about-logo-image");
+  if (!logo) return;
+  panel.classList.remove("closed");
+  const end = logo.getBoundingClientRect();
+  const corner = panel.getBoundingClientRect();
+  const target = { left: corner.right - 37, top: corner.bottom - 37, width: 30 };
+  const square = LOGO_COMPASS.width * end.width;
+  const scale = square > 0 ? target.width / square : 1;
+  const x = target.left - end.left - scale * LOGO_COMPASS.left * end.width;
+  const y = target.top - end.top - scale * LOGO_COMPASS.top * end.height;
+  panel.style.setProperty("--logo-x", `${x}px`);
+  panel.style.setProperty("--logo-y", `${y}px`);
+  panel.style.setProperty("--logo-scale", String(scale));
+}
+
+function setAboutExpanded(open) {
+  document.getElementById("scientographer-badge")?.setAttribute("aria-expanded", String(open));
+  document.body.classList.toggle("about-open", open);
+}
+
+function openAbout() {
+  const panel = document.getElementById("about-panel");
+  if (!panel || aboutState.open) return;
+  aboutState.open = true;
+  clearTimeout(aboutState.timer);
+  // On a phone the two panels would overlap: collapse the controls first.
+  if (isPhone() && controlsExpanded()) document.getElementById("controls-toggle")?.click();
+  updateAboutLeft();
+  panel.hidden = false;
+  // Set up the badge-sized start without animating to it, then let the
+  // transitions run to the open state.
+  panel.classList.add("instant");
+  placeLogoOnBadge(panel);
+  panel.classList.add("closed");
+  void panel.offsetWidth;
+  panel.classList.remove("instant");
+  void panel.offsetWidth;
+  setAboutExpanded(true);
+  requestAnimationFrame(() => requestAnimationFrame(() => panel.classList.remove("closed")));
+  document.getElementById("about-close")?.focus({ preventScroll: true });
+}
+
+function closeAbout() {
+  const panel = document.getElementById("about-panel");
+  if (!panel || !aboutState.open) return;
+  aboutState.open = false;
+  placeLogoOnBadge(panel);
+  panel.classList.add("closed");
+  const finish = () => {
+    clearTimeout(aboutState.timer);
+    panel.removeEventListener("transitionend", onEnd);
+    if (aboutState.open) return;
+    panel.hidden = true;
+    setAboutExpanded(false);
+  };
+  const onEnd = (event) => { if (event.target === panel && event.propertyName === "clip-path") finish(); };
+  if (reducedMotion()) {
+    finish();
+    return;
+  }
+  panel.addEventListener("transitionend", onEnd);
+  aboutState.timer = setTimeout(finish, 700);
+}
+
+function toggleAbout() {
+  if (aboutState.open) closeAbout();
+  else openAbout();
+}
+
+function initAboutPanel() {
+  document.getElementById("scientographer-badge")?.addEventListener("click", openAbout);
+  document.getElementById("provenance-stamp")?.addEventListener("click", toggleAbout);
+  document.getElementById("about-close")?.addEventListener("click", closeAbout);
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && aboutState.open) closeAbout();
+  });
+  // Follow the controls as they open and collapse, and the window as it resizes.
+  const controls = document.getElementById("controls");
+  if (controls && "ResizeObserver" in window) new ResizeObserver(updateAboutLeft).observe(controls);
+  window.addEventListener("resize", updateAboutLeft);
+  // On a phone, expanding the controls closes About (they would overlap).
+  document.getElementById("controls-toggle")?.addEventListener("click", () => {
+    if (isPhone() && aboutState.open && controlsExpanded()) closeAbout();
+  });
+  updateAboutLeft();
+}
+
+
 async function main() {
   // One-time wiring (event listeners on static DOM); the renderer + per-frame
   // hooks are created lazily on the first loadDataset call.
   await loadViewsManifest();
+  const provenance = loadProvenance();
+  provenance.then(showLoadingVersion);
   initShiftTracking();
   initControls();
   initOrientationControls();
@@ -299,6 +593,11 @@ async function main() {
   document.getElementById("loading")?.classList.add("hidden");
   const badge = document.getElementById("scientographer-badge");
   if (badge) badge.hidden = false;
+  const record = await provenance;
+  showProvenanceStamp(record);
+  renderAbout(record);
+  initAboutPanel();
+  if (location.hash === "#about") openAbout();
 }
 
 // Load (or switch to) a dataset: fetch its files, (re)build the graph, and

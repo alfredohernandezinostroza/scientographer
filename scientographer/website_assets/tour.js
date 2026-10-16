@@ -175,9 +175,10 @@ const STEPS = [
     target: ".about",
     title: "That's the tour!",
     body:
-      "Open <strong>About this map</strong> any time for a fuller explanation of the " +
-      "layouts and overlays. Replay this tour from the <strong>Guided tour</strong> " +
-      "button in the corner. Happy exploring!",
+      "Open <strong>Help</strong> any time for a fuller explanation of the " +
+      "layouts and overlays, and the compass in the bottom-right corner for " +
+      "<strong>About this map: how it was made</strong>. Replay this tour from the " +
+      "<strong>Guided tour</strong> button in the corner. Happy exploring!",
   },
 ];
 
