@@ -225,6 +225,7 @@ html, body {
 /* tabs */
 #controls .tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   flex-shrink: 0;
 }
@@ -1059,9 +1060,16 @@ table.health-table tr.active td { color: var(--text); background: rgba(78, 161, 
   line-height: 18px;
   color: var(--text-dim);
   text-shadow: 0 0 4px var(--bg), 0 0 2px var(--bg);   /* legible over the dots */
-  pointer-events: none;     /* never in the way of the map */
+  padding: 0;
+  border: 0;
+  background: none;
+  font-family: inherit;
+  text-align: right;
+  cursor: pointer;          /* opens the About tab */
   animation: badge-in 400ms ease-out;
 }
+#provenance-stamp:hover,
+#provenance-stamp:focus-visible { color: var(--accent); outline: none; text-decoration: underline; }
 #provenance-stamp[hidden] { display: none; }
 @media (max-width: 600px) {
   #provenance-stamp { right: 16px; bottom: 68px; max-width: calc(100vw - 32px); }
@@ -1069,6 +1077,82 @@ table.health-table tr.active td { color: var(--text); background: rgba(78, 161, 
 @media (prefers-reduced-motion: reduce) { #provenance-stamp { animation: none; } }
 .loading-brand #loading-version { font-size: 12px; color: var(--text-dim); margin-top: -8px; }
 .loading-brand #loading-version[hidden] { display: none; }
+
+/* ── About tab (how the map was made) ─────────────────────────────────── */
+#about-wrap {
+  top: 16px;
+  left: 16px;
+  right: 16px;
+  bottom: 16px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+#about-wrap .meta { max-width: 760px; }
+/* Clear the floating controls button (top left) and, on narrow screens, the tour button */
+#about-wrap .metrics-head { padding-left: 36px; }
+@media (max-width: 760px) {
+  #about-wrap .metrics-head { padding: 34px 0 0; }
+}
+#about-warnings p {
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  max-width: 760px;
+  border: 1px solid var(--panel-border);
+  border-left: 3px solid var(--accent-after);
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+#about-steps {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  max-width: 760px;
+}
+.about-step {
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  min-width: 0;
+}
+.about-step:target { border-color: var(--accent); }
+.about-step-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  margin-bottom: 6px;
+}
+.about-number { color: var(--text-dim); font-size: 11px; }
+.about-stage { font-weight: 600; font-size: 13px; overflow-wrap: anywhere; }
+.about-version, .about-date { color: var(--text-dim); font-size: 11px; overflow-wrap: anywhere; }
+.about-version.dirty { color: var(--accent-after); }
+.about-label { color: var(--text-dim); font-size: 11px; margin: 6px 0 2px; }
+.about-files { list-style: none; margin: 0; padding: 0; font-size: 11.5px; line-height: 1.5; }
+.about-files li { margin: 2px 0; overflow-wrap: anywhere; }
+.about-files code, .about-step pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+}
+.about-path { overflow-wrap: anywhere; word-break: break-all; }
+.about-md5 { color: var(--text-dim); margin-left: 6px; }
+.about-from { color: var(--text-dim); margin-left: 6px; }
+.about-from a, .about-figure a { color: var(--accent); }
+.about-step details { margin-top: 6px; }
+.about-step summary { cursor: pointer; color: var(--text-dim); font-size: 11.5px; }
+.about-step pre {
+  margin: 6px 0 0;
+  padding: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 320px;
+  overflow-y: auto;
+}
 #start-tour .tour-icon {
   display: inline-grid;
   place-items: center;

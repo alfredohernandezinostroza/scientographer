@@ -7,7 +7,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{SITE_TITLE}}</title>
   <link rel="icon" type="image/svg+xml" href="scientographer-icon.svg">
-  <link rel="stylesheet" href="styles.css?v=12">
+  <link rel="stylesheet" href="styles.css?v=13">
 
   <!-- Tabulator -->
   <link href="https://unpkg.com/tabulator-tables@6.3.1/dist/css/tabulator.min.css" rel="stylesheet">
@@ -219,6 +219,19 @@
     </div>
   </div>
 
+  <!-- About tab pane: how the map was made, from network_data/provenance.json
+       (every step's version, settings and input files). Filled by main.js. -->
+  <div id="view-about" class="view">
+    <div id="about-wrap" class="panel">
+      <div class="metrics-head">
+        <h2>About this map</h2>
+        <p class="meta" id="about-summary">Reading the map's record...</p>
+      </div>
+      <div id="about-warnings"></div>
+      <ol id="about-steps"></ol>
+    </div>
+  </div>
+
   <!-- Controls panel -->
   <div id="controls" class="panel collapsed">
     <button id="controls-toggle" class="icon-btn" type="button" aria-label="Show controls">⟩</button>
@@ -234,6 +247,7 @@
         <button id="tab-metrics" class="tab" type="button" hidden>Metrics</button>
         <button id="tab-figures" class="tab" type="button" hidden>Figures</button>
         <button id="tab-wordmap" class="tab" type="button">Word map</button>
+        <button id="tab-about" class="tab" type="button" data-view="about">About</button>
         <!-- <button id="tab-table" class="tab" type="button">Table</button> -->
       </div>
     </div>
@@ -440,14 +454,15 @@
      title="Made with Scientographer" aria-label="Made with Scientographer (opens its GitHub page)" hidden>
     <img src="scientographer-icon.svg" alt="" width="30" height="30">
   </a>
-  <!-- Which Scientographer made the map and when (network_data/provenance.json; hidden without it) -->
-  <p id="provenance-stamp" hidden></p>
+  <!-- Which Scientographer made the map and when (network_data/provenance.json; hidden
+       without it); opens the About tab -->
+  <button id="provenance-stamp" type="button" title="How this map was made" hidden></button>
 
   <!-- Tabulator JS -->
   <script src="https://unpkg.com/tabulator-tables@6.3.1/dist/js/tabulator.min.js"></script>
 
   <!-- App -->
-  <script type="module" src="main.js?v=38"></script>
+  <script type="module" src="main.js?v=39"></script>
   <!-- Guided tour (independent of main.js; only reads the DOM) -->
   <script type="module" src="tour.js?v=2"></script>
   <!-- Word map tab (lazy: loads its data the first time the tab is opened) -->

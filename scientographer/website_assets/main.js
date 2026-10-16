@@ -285,6 +285,141 @@ function showProvenanceStamp(provenance) {
   }
 }
 
+// ── About tab: how the map was made ──────────────────────────────────────
+// provenance.json lists every step that made the map, oldest first: the
+// stage, the Scientographer version, its settings, its input files (with md5
+// and `from_step`, the earlier step that wrote the file) and its outputs.
+// Older sites have no such file; the tab then says so.
+function shortDate(text) {
+  if (typeof text !== "string" || !text) return "";
+  return text.replace("T", " ").replace(/:\d\dZ$/, " UTC").replace(/Z$/, " UTC");
+}
+
+function aboutParagraph(text) {
+  const p = document.createElement("p");
+  p.textContent = text;
+  return p;
+}
+
+function aboutFileList(label, entries, steps) {
+  const wrap = document.createDocumentFragment();
+  if (!entries.length) return wrap;
+  const head = document.createElement("div");
+  head.className = "about-label";
+  head.textContent = label;
+  wrap.appendChild(head);
+  const list = document.createElement("ul");
+  list.className = "about-files";
+  for (const entry of entries) {
+    const item = document.createElement("li");
+    const path = document.createElement("code");
+    path.className = "about-path";
+    path.textContent = entry.path;
+    path.title = entry.path;
+    item.appendChild(path);
+    if (entry.md5 !== undefined) {
+      const md5 = document.createElement("code");
+      md5.className = "about-md5";
+      md5.textContent = entry.md5 ? entry.md5.slice(0, 8) : "no checksum";
+      md5.title = entry.md5
+        ? `md5 ${entry.md5}`
+        : (entry.files != null ? `${entry.files} files, ${entry.bytes} bytes: too large to checksum` : "missing when the step ran");
+      item.appendChild(md5);
+    }
+    const from = Number.isInteger(entry.from_step) ? steps[entry.from_step] : null;
+    if (from) {
+      const note = document.createElement("span");
+      note.className = "about-from";
+      note.append("reads the output of ");
+      const link = document.createElement("a");
+      link.href = `#about-step-${entry.from_step}`;
+      link.textContent = from.stage || `step ${entry.from_step + 1}`;
+      note.appendChild(link);
+      item.appendChild(note);
+    }
+    list.appendChild(item);
+  }
+  wrap.appendChild(list);
+  return wrap;
+}
+
+function renderAbout(provenance) {
+  const summary = document.getElementById("about-summary");
+  const warnings = document.getElementById("about-warnings");
+  const list = document.getElementById("about-steps");
+  if (!summary || !warnings || !list) return;
+  warnings.replaceChildren();
+  list.replaceChildren();
+  const steps = provenance && Array.isArray(provenance.steps) ? provenance.steps : [];
+  if (!provenance) {
+    summary.textContent = "This map has no record of how it was made: it was built before Scientographer " +
+      "kept one (its network_data/provenance.json is missing).";
+    return;
+  }
+  summary.textContent = `Made with Scientographer ${provenance.scientographer}, built ${shortDate(provenance.built)}. ` +
+    `${steps.length} step${steps.length === 1 ? "" : "s"}, oldest first: the stage, the version that ran it, ` +
+    "its settings and the files it read, with their md5 checksums (the ones dvc.lock keeps).";
+
+  const versions = Array.isArray(provenance.versions) && provenance.versions.length
+    ? provenance.versions
+    : [...new Set(steps.map((s) => s.scientographer).filter(Boolean))];
+  if (versions.length > 1) {
+    warnings.appendChild(aboutParagraph(`Steps of this map ran on ${versions.length} versions: ${versions.join(", ")}.`));
+  }
+  const dirty = versions.filter((v) => String(v).endsWith(".dirty"));
+  if (dirty.length) {
+    warnings.appendChild(aboutParagraph(
+      `Some steps ran on a Scientographer checkout with uncommitted changes (${dirty.join(", ")}): ` +
+      "that code cannot be checked out again exactly."));
+  }
+  const unrecorded = Array.isArray(provenance.unrecorded_inputs) ? provenance.unrecorded_inputs : [];
+  if (unrecorded.length) {
+    warnings.appendChild(aboutParagraph(
+      `No record for ${unrecorded.join(", ")}: made before Scientographer kept records, so the steps ` +
+      "that made it are not listed."));
+  }
+
+  steps.forEach((step, i) => {
+    const item = document.createElement("li");
+    item.className = "about-step";
+    item.id = `about-step-${i}`;
+    const head = document.createElement("div");
+    head.className = "about-step-head";
+    const number = document.createElement("span");
+    number.className = "about-number";
+    number.textContent = `${i + 1}.`;
+    const stage = document.createElement("span");
+    stage.className = "about-stage";
+    stage.textContent = step.stage || "(unnamed step)";
+    const version = document.createElement("span");
+    version.className = "about-version" + (String(step.scientographer || "").endsWith(".dirty") ? " dirty" : "");
+    version.textContent = step.scientographer ? `Scientographer ${step.scientographer}` : "version not recorded";
+    const date = document.createElement("span");
+    date.className = "about-date";
+    date.textContent = shortDate(step.date);
+    head.append(number, stage, version, date);
+    item.appendChild(head);
+    const inputs = (Array.isArray(step.inputs) ? step.inputs : []).filter((e) => e && e.path);
+    item.appendChild(aboutFileList("Read", inputs, steps));
+    const outputs = (Array.isArray(step.outputs) ? step.outputs : []).map((path) => ({ path }));
+    item.appendChild(aboutFileList("Wrote", outputs, steps));
+    if (step.settings && Object.keys(step.settings).length) {
+      const details = document.createElement("details");
+      const label = document.createElement("summary");
+      label.textContent = "Settings";
+      const pre = document.createElement("pre");
+      pre.textContent = JSON.stringify(step.settings, null, 2);
+      details.append(label, pre);
+      item.appendChild(details);
+    }
+    list.appendChild(item);
+  });
+}
+
+function openAboutTab() {
+  document.getElementById("tab-about")?.click();
+}
+
 async function main() {
   // One-time wiring (event listeners on static DOM); the renderer + per-frame
   // hooks are created lazily on the first loadDataset call.
@@ -318,7 +453,11 @@ async function main() {
   document.getElementById("loading")?.classList.add("hidden");
   const badge = document.getElementById("scientographer-badge");
   if (badge) badge.hidden = false;
-  showProvenanceStamp(await provenance);
+  const record = await provenance;
+  showProvenanceStamp(record);
+  renderAbout(record);
+  document.getElementById("provenance-stamp")?.addEventListener("click", openAboutTab);
+  if (location.hash === "#about") openAboutTab();
 }
 
 // Load (or switch to) a dataset: fetch its files, (re)build the graph, and
@@ -2609,6 +2748,7 @@ function initTabs() {
     { tabId: "tab-metrics", viewId: "view-metrics" },
     { tabId: "tab-figures", viewId: "view-figures" },
     { tabId: "tab-wordmap", viewId: "view-wordmap" },
+    { tabId: "tab-about", viewId: "view-about" },
   ];
   for (const { tabId, viewId } of TABS) {
     const tabEl = document.getElementById(tabId);
