@@ -51,18 +51,32 @@ Finished items stay at the bottom until the next release, then go to the CHANGEL
 
 ## Provenance: how a map was made
 
-- [ ] An "About this map" panel on the site: Scientographer version, build date, every
-      stage with its settings, the input files with their checksums (from `params.yaml`
-      and `dvc.lock`), and the pipeline's stage graph (`dvc dag`)
-- [ ] Each GraphML file records its own history: every stage appends what it did
-      (stage, version, settings, input checksums) to a graph-level attribute
-- [ ] The stages' Hamilton DAG drawings in the site's Figures tab (already drawn to
-      `reports/figures/`)
-- [ ] Where each paper came from: a registry of searches (database, query, date,
-      filters, export file), each with an id; every paper keeps all the routes that
-      brought it in (which searches; or, by snowballing, which paper's references or
-      citations, how many steps from which search); merging duplicates merges their
-      routes. Filter and colour the map by origin
+Two kinds: how the map was processed and where each paper came from (further down).
+Every stage now writes a record of its step (stage, exact version, settings, input
+md5s, outputs, date) that travels with its outputs, and the site's "About this map"
+panel lists them. Still to do on that side:
+
+- [ ] `scientographer status`: the stages that ran on an older version than the one
+      installed (upgrading reruns nothing by itself, since the code is not a DVC
+      dependency; `dvc repro -f <stage>` does)
+- [ ] "About this map": the pipeline's stage graph, drawn from the records' inputs and
+      outputs (or `dvc dag`), and each stage's Hamilton DAG drawing (drawn to
+      `reports/figures/`, not yet shipped with the site)
+- [ ] The exact environment for a rebuild: the project's `pixi.lock`, or a
+      `pip freeze` written next to the site when there is none
+
+Old maps: each site carries its own copy of the page code, so it keeps working after
+the website changes; keeping old maps is the project's job (its git and DVC history,
+or the published site's repository). Maybe later, an opt-in archive: `site/<build>/`
+per build and a "previous versions" list on the page.
+
+Where each paper came from:
+
+- [ ] A registry of searches (database, query, date, filters, export file), each with
+      an id; every paper keeps all the routes that brought it in (which searches; or,
+      by snowballing, which paper's references or citations, how many steps from
+      which search); merging duplicates merges their routes. Filter and colour the
+      map by origin. The ingest step's record lists the searches it read
 - [ ] Citation snowballing (backward: references; forward: citing papers) as a way to
       build or extend a corpus
 - [ ] A PRISMA-style flow on the site: records per source, duplicates removed, papers
@@ -71,8 +85,9 @@ Finished items stay at the bottom until the next release, then go to the CHANGEL
 ## Project
 
 - [ ] Release 0.2.0 (PyPI and Zenodo)
-- [ ] CI: cancel outdated runs (`concurrency` in `tests.yml`)
-- [ ] GitHub social preview image (the logo)
+- [ ] CI: a docs-only pull request (Markdown, `docs/`) finishes the test check in
+      seconds instead of running the suite; it must still report a result, since the
+      check is required (`paths-ignore` would leave it pending forever)
 
 ## Done since 0.1.0
 
@@ -95,6 +110,18 @@ Finished items stay at the bottom until the next release, then go to the CHANGEL
       (Guimerà & Amaral), in the highlight and the paper panel
 - [x] Top papers by four rankings (citations, citations within the community,
       citations per year, PageRank), in the community panel and a "Highlight top
-      papers" control
+      papers" control (#13)
 - [x] Ingest reads Scopus CSV, Web of Science tab-delimited and EBSCOhost CSV exports,
-      merged by DOI with PubMed's MEDLINE
+      merged by DOI with PubMed's MEDLINE (#12)
+- [x] CI cancels outdated runs of a pull request (#11)
+- [x] GitHub social preview image, `docs/logo/scientographer-social-preview.png`
+      (#10; it goes live once uploaded in Settings → Social preview)
+- [x] `scientographer --version` prints the exact version: the release, or the release
+      plus the commit (and `.dirty`) from a git checkout
+- [x] Every stage records its step, carried with its outputs (GraphML attribute,
+      parquet metadata, `provenance.json` in output folders), from search/ingest to
+      the site
+- [x] The site shows its version and build date by the compass badge, which opens
+      "About this map: how it was made": every step, what it read and from which
+      step, its settings, and warnings for mixed versions or uncommitted changes. The
+      controls' old "About this map" section is now "Help"
