@@ -338,7 +338,7 @@ get it with `scientographer init --force` (which rewrites `dvc.yaml` and
 - **Rotate and flip** buttons. The default orientation is reproducible: the main
   body's long axis horizontal, its long tail down, its most-cited side left.
 - **How it was made:** the Scientographer version and build date next to the "Made
-  with" badge, and an **About** tab with every step that made the map, from the search
+  with" badge; click the compass badge for **About this map**, every step that made the map, from the search
   or table import to the site: the stage, the version, its settings, the files it read
   with their md5 (the checksums in `dvc.lock`) and which earlier step wrote them, and
   the date. It warns when the steps ran on more than one version. The records travel

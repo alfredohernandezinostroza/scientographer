@@ -18,7 +18,8 @@ settings or outputs).
   from the PubMed search or table import all the way to the site. The site gathers
   them into `network_data/provenance.json`, shows the version and build date next
   to its "Made with" badge (and the version under the loading screen's logo), and
-  lists every step in a new **About** tab: which earlier step wrote each file it
+  lists every step in **About this map**, a panel that opens out of the compass
+  badge (or the stamp) beside the controls: which earlier step wrote each file it
   read, its settings, and a warning when the steps ran on more than one version or
   on a checkout with uncommitted changes. Maps and outputs made before keep working;
   the tab says they have no record.
