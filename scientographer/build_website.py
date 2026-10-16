@@ -1263,7 +1263,8 @@ def _difference_text(difference: dict, lock_path: str) -> str:
     if difference.get("package") == "platform":
         return f"{difference.get('locked')} (ran on {installed})"
     have = f"{installed} installed" if installed else "not installed"
-    return f"{difference.get('package')} {have}, {lock_path} says {difference.get('locked')}"
+    package = "Python" if difference.get("package") == "python" else difference.get("package")
+    return f"{package} {have}, {lock_path} says {difference.get('locked')}"
 
 
 def _version_warnings(recorded: list[dict]) -> list[dict]:
@@ -1325,7 +1326,7 @@ def environment_warnings(steps: list[dict]) -> list[dict]:
         elif lock.get("matches") is False:
             differences = lock.get("differences") or []
             listed = "; ".join(_difference_text(d, lock.get("path", "the lock")) for d in differences[:5])
-            more = f" and {len(differences) - 5} more" if len(differences) > 5 else ""
+            more = f" (and {len(differences) - 5} more)" if len(differences) > 5 else ""
             how = " (override)" if lock.get("override") else ""
             text = f"{stage} ran outside the project's {lock.get('path', 'lock file')}{how}: {listed}{more}."
             warnings.append({"kind": "lock", "text": text})

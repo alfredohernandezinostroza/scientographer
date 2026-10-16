@@ -258,13 +258,15 @@ def test_a_requirements_lock_is_compared(project, installed):
     assert status["differences"] == [{"package": "leidenalg", "installed": "0.10.2", "locked": "0.11.0"}]
 
 
-def test_a_mismatch_refuses_with_the_differences_and_the_fix(project, installed):
+def test_a_mismatch_refuses_with_the_differences_and_the_fix(project, installed, monkeypatch):
     (project / "pixi.lock").write_text(PIXI_LOCK)
     installed["leidenalg"] = "0.11.0"
+    monkeypatch.setattr(_environment, "python_version", lambda: "3.10.12")
     with pytest.raises(EnvironmentMismatch) as refused:
         check_locked_environment("detect_communities")
     message = str(refused.value)
-    assert "leidenalg 0.11.0 installed, pixi.lock says 0.10.2" in message
+    assert ("  Python 3.10.12 installed, pixi.lock says 3.12.4\n"
+            "  leidenalg 0.11.0 installed, pixi.lock says 0.10.2\n") in message
     assert "`pixi run scientographer run detect_communities`" in message
     assert OVERRIDE_VARIABLE in message and "--allow-environment-mismatch" in message
 

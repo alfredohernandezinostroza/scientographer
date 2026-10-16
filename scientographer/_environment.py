@@ -400,7 +400,8 @@ def _describe(difference: dict, lock_path: str) -> str:
     if difference.get("package") == "platform":
         return f"{lock_path}: {difference.get('locked')} (running on {installed})"
     have = f"{installed} installed" if installed else "not installed"
-    return f"{difference['package']} {have}, {lock_path} says {difference['locked']}"
+    package = "Python" if difference["package"] == "python" else difference["package"]
+    return f"{package} {have}, {lock_path} says {difference['locked']}"
 
 
 def _how_to_fix(status: dict, command: str) -> str:
