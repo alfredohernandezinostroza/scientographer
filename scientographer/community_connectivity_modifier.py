@@ -60,6 +60,7 @@ import leidenalg
 import numpy as np
 import pandas as pd
 
+from scientographer._environment import require_locked_environment
 from scientographer._parallel import resolve_workers, run_in_worker_processes
 from scientographer._provenance import (
     stage_settings,
@@ -530,4 +531,5 @@ def save_connectivity_modifier_per_partition_metrics(
 
 
 if __name__ == "__main__":
+    require_locked_environment(CURRENT_FILE_NAME)
     sys.exit(_main())

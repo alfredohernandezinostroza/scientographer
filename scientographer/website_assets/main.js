@@ -363,6 +363,88 @@ function aboutFileList(label, entries, steps) {
   return wrap;
 }
 
+// The environment: provenance.environment is the one that built the site (Python,
+// platform, every installed package, the lock); each step's `environment` has its
+// key packages. Records made before environments were kept have neither.
+function lockLine(lock) {
+  if (!lock || typeof lock !== "object") return "";
+  if (!lock.kind) return "No lock file: the environment is recorded but was not pinned.";
+  const md5 = lock.md5 ? `, md5 ${String(lock.md5).slice(0, 8)}` : "";
+  const where = lock.environment ? ` (environment ${lock.environment}, ${lock.platform})` : "";
+  if (lock.matches) return `Matches ${lock.path}${where}${md5}.`;
+  const n = Array.isArray(lock.differences) ? lock.differences.length : 0;
+  return `Does not match ${lock.path}${where}${md5}${lock.override ? " (run with the override)" : ""}: ` +
+    `${n} difference${n === 1 ? "" : "s"}.`;
+}
+
+function requirementsText(environment, provenance) {
+  const lines = [
+    `# The environment that built this map: Python ${environment.python || "?"} on ${environment.platform || "?"}`,
+    `# Scientographer ${provenance.scientographer}, built ${shortDate(provenance.built)}`,
+  ];
+  for (const [name, version] of Object.entries(environment.packages || {})) lines.push(`${name}==${version}`);
+  return lines.join("\n") + "\n";
+}
+
+function renderEnvironment(provenance) {
+  const box = document.getElementById("about-environment");
+  if (!box) return;
+  box.replaceChildren();
+  const environment = provenance && provenance.environment;
+  if (!environment || typeof environment !== "object") {
+    box.hidden = true;
+    return;
+  }
+  box.hidden = false;
+  const details = document.createElement("details");
+  details.id = "about-environment-details";
+  const label = document.createElement("summary");
+  const packages = Object.entries(environment.packages || {});
+  label.textContent = `Environment: Python ${environment.python || "?"}, ${packages.length} packages`;
+  details.appendChild(label);
+  details.appendChild(aboutParagraph(
+    `The environment that built the site: Python ${environment.python || "?"} on ${environment.platform || "?"}.`));
+  const lock = lockLine(environment.lock);
+  if (lock) details.appendChild(aboutParagraph(lock));
+  const list = document.createElement("ul");
+  list.className = "about-package-list";
+  for (const [name, version] of packages) {
+    const item = document.createElement("li");
+    const code = document.createElement("code");
+    code.textContent = `${name} ${version}`;
+    item.appendChild(code);
+    list.appendChild(item);
+  }
+  details.appendChild(list);
+  const download = document.createElement("a");
+  download.className = "about-download";
+  download.textContent = "Download the package list (requirements.txt)";
+  download.download = "requirements.txt";
+  // A few KB of text, made once when the panel is filled.
+  download.href = URL.createObjectURL(new Blob([requirementsText(environment, provenance)], { type: "text/plain" }));
+  details.appendChild(download);
+  box.appendChild(details);
+}
+
+// One step's key packages, compactly: "Python 3.12.4 · igraph 0.11.8 · leidenalg 0.10.2".
+function stepEnvironmentLine(step) {
+  const environment = step && step.environment;
+  if (!environment || typeof environment !== "object") return null;
+  const parts = environment.python ? [`Python ${environment.python}`] : [];
+  for (const [name, version] of Object.entries(environment.packages || {})) parts.push(`${name} ${version}`);
+  const line = document.createElement("div");
+  line.className = "about-step-packages";
+  line.textContent = parts.join(" \u00b7 ");
+  const lock = environment.lock;
+  if (lock && lock.kind && lock.matches === false) {
+    const flag = document.createElement("span");
+    flag.className = "about-override";
+    flag.textContent = lock.override ? ` outside ${lock.path} (override)` : ` does not match ${lock.path}`;
+    line.appendChild(flag);
+  }
+  return line;
+}
+
 function renderAbout(provenance) {
   const summary = document.getElementById("about-summary");
   const warnings = document.getElementById("about-warnings");
@@ -370,6 +452,7 @@ function renderAbout(provenance) {
   if (!summary || !warnings || !list) return;
   warnings.replaceChildren();
   list.replaceChildren();
+  renderEnvironment(provenance);
   const steps = provenance && Array.isArray(provenance.steps) ? provenance.steps : [];
   if (!provenance) {
     summary.textContent = "This map has no record of how it was made: it was built before Scientographer " +
@@ -398,6 +481,15 @@ function renderAbout(provenance) {
       `No record for ${unrecorded.join(", ")}: made before Scientographer kept records, so the steps ` +
       "that made it are not listed."));
   }
+  // build_website.py words these: different versions of Python or a key package
+  // across steps, a step run outside the project's lock, and (quietly) no lock.
+  const environmentWarnings = Array.isArray(provenance.environment_warnings) ? provenance.environment_warnings : [];
+  for (const warning of environmentWarnings) {
+    if (!warning || typeof warning.text !== "string") continue;
+    const p = aboutParagraph(warning.text);
+    if (warning.kind === "no_lock") p.className = "about-quiet";
+    warnings.appendChild(p);
+  }
 
   steps.forEach((step, i) => {
     const item = document.createElement("li");
@@ -419,6 +511,8 @@ function renderAbout(provenance) {
     date.textContent = shortDate(step.date);
     head.append(number, stage, version, date);
     item.appendChild(head);
+    const packages = stepEnvironmentLine(step);
+    if (packages) item.appendChild(packages);
     const inputs = (Array.isArray(step.inputs) ? step.inputs : []).filter((e) => e && e.path);
     item.appendChild(aboutFileList("Read", inputs, steps));
     const outputs = (Array.isArray(step.outputs) ? step.outputs : []).map((path) => ({ path }));
@@ -598,6 +692,11 @@ async function main() {
   renderAbout(record);
   initAboutPanel();
   if (location.hash === "#about") openAbout();
+  if (location.hash === "#about-environment") {
+    const details = document.getElementById("about-environment-details");
+    if (details) details.open = true;
+    openAbout();
+  }
 }
 
 // Load (or switch to) a dataset: fetch its files, (re)build the graph, and

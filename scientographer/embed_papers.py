@@ -43,6 +43,7 @@ import numpy as np
 import pandas as pd
 
 from scientographer._embedding_store import EmbeddingStore
+from scientographer._environment import require_locked_environment
 from scientographer._provenance import stage_settings, steps_for, write_folder_record, write_parquet_with_steps
 from scientographer._paper_text import paper_texts as _paper_texts
 from scientographer.config import FIGURES_PATH, PARAMS, draw_dag, ensure_dirs, tracker_adapters
@@ -251,4 +252,5 @@ def save_paper_texts(paper_texts: pd.DataFrame, output_dir: Path, provenance_ste
 
 
 if __name__ == "__main__":
+    require_locked_environment(CURRENT_FILE_NAME)
     sys.exit(_main())

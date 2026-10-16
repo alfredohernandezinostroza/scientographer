@@ -53,17 +53,18 @@ Finished items stay at the bottom until the next release, then go to the CHANGEL
 
 Two kinds: how the map was processed and where each paper came from (further down).
 Every stage now writes a record of its step (stage, exact version, settings, input
-md5s, outputs, date) that travels with its outputs, and the site's "About this map"
-panel lists them. Still to do on that side:
+md5s, outputs, date, environment) that travels with its outputs, and the site's
+"About this map" panel lists them. Still to do on that side:
 
-- [ ] `scientographer status`: the stages that ran on an older version than the one
-      installed (upgrading reruns nothing by itself, since the code is not a DVC
-      dependency; `dvc repro -f <stage>` does)
+- [ ] (Low priority) `scientographer status`: the stages that ran on an older version
+      than the one installed. Releases are rare and the changelog says what changed,
+      so listing old versions adds little; what would earn it its place is saying
+      whether a stage's own code changed between the recorded commit and the
+      installed one, for people running from a git checkout (`dvc repro -f -s
+      <stage>` then reruns just that stage)
 - [ ] "About this map": the pipeline's stage graph, drawn from the records' inputs and
       outputs (or `dvc dag`), and each stage's Hamilton DAG drawing (drawn to
       `reports/figures/`, not yet shipped with the site)
-- [ ] The exact environment for a rebuild: the project's `pixi.lock`, or a
-      `pip freeze` written next to the site when there is none
 
 Old maps: each site carries its own copy of the page code, so it keeps working after
 the website changes; keeping old maps is the project's job (its git and DVC history,
@@ -125,3 +126,9 @@ Where each paper came from:
       "About this map: how it was made": every step, what it read and from which
       step, its settings, and warnings for mixed versions or uncommitted changes. The
       controls' old "About this map" section is now "Help"
+- [x] Every step records its environment (Python, platform, key package versions)
+      and how it compares with the project's `pixi.lock` / `uv.lock` / pinned
+      `requirements.txt`; a stage refuses to run outside the lock unless overridden
+      (`SCIENTOGRAPHER_ALLOW_ENVIRONMENT_MISMATCH=1`, `--allow-environment-mismatch`).
+      The site keeps the full package list, shows it in About (with a
+      `requirements.txt` download) and warns about mixed versions and overrides

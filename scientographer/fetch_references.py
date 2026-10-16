@@ -35,6 +35,7 @@ from hamilton.io import utils
 import hamilton.log_setup
 import pandas as pd
 
+from scientographer._environment import require_locked_environment
 from scientographer._http import HttpError, RateLimiter, request_json
 from scientographer._provenance import stage_settings, steps_for, write_folder_record, write_parquet_with_steps
 from scientographer.config import FIGURES_PATH, draw_dag, ensure_dirs, params, tracker_adapters
@@ -263,4 +264,5 @@ def save_references_table(references_table: pd.DataFrame, works: pd.DataFrame, r
 
 
 if __name__ == "__main__":
+    require_locked_environment(CURRENT_FILE_NAME)
     sys.exit(_main())

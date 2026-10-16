@@ -7,7 +7,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{SITE_TITLE}}</title>
   <link rel="icon" type="image/svg+xml" href="scientographer-icon.svg">
-  <link rel="stylesheet" href="styles.css?v=17">
+  <link rel="stylesheet" href="styles.css?v=18">
 
   <!-- Tabulator -->
   <link href="https://unpkg.com/tabulator-tables@6.3.1/dist/css/tabulator.min.css" rel="stylesheet">
@@ -469,6 +469,8 @@
       <p class="meta"><a id="about-github" href="https://github.com/alfredohernandezinostroza/scientographer"
          target="_blank" rel="noopener">Scientographer on GitHub</a></p>
       <div id="about-warnings"></div>
+      <!-- The environment that built the site: Python, platform, lock, every package -->
+      <div id="about-environment" hidden></div>
       <ol id="about-steps"></ol>
     </div>
   </section>
@@ -477,7 +479,7 @@
   <script src="https://unpkg.com/tabulator-tables@6.3.1/dist/js/tabulator.min.js"></script>
 
   <!-- App -->
-  <script type="module" src="main.js?v=42"></script>
+  <script type="module" src="main.js?v=43"></script>
   <!-- Guided tour (independent of main.js; only reads the DOM) -->
   <script type="module" src="tour.js?v=5"></script>
   <!-- Word map tab (lazy: loads its data the first time the tab is opened) -->

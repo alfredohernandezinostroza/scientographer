@@ -101,6 +101,31 @@ behind your results on record. The DAG drawings also need Graphviz's `dot` progr
 your system's package manager (`apt install graphviz`, `brew install graphviz`); without
 it the stages still run and only skip the drawings.
 
+### The environment check
+
+Every stage compares the installed packages with the project's lock file, the first
+of `pixi.lock`, `uv.lock` or a `requirements.txt` in which every requirement is pinned
+with `==` (a `pip freeze`), and refuses to run when they differ:
+
+```
+scientographer: This environment does not match the project's pixi.lock (environment default, linux-64):
+  Python 3.10.12 installed, pixi.lock says 3.12.15
+  leidenalg 0.11.0 installed, pixi.lock says 0.12.0
+  ...
+Results depend on these versions, so nothing was run.
+```
+
+To fix it, run inside the project's environment (`pixi run scientographer run <stage>`,
+or `pixi shell` first; `uv run ...`), or bring the environment back to the lock
+(`pixi install`, `uv sync`, `pip install -r requirements.txt`). To run anyway, set
+`SCIENTOGRAPHER_ALLOW_ENVIRONMENT_MISMATCH=1` or pass `--allow-environment-mismatch`
+to `scientographer run` or `pipeline`: the stage prints a warning, and its record keeps
+the differences, which the map's **About this map** shows. Without a lock file the
+stages run as usual and record that the environment was not pinned. Either way, every
+step records its Python, platform and the versions of the packages that change
+results (igraph, leidenalg, numpy, pandas, scikit-learn, ...), and the site keeps the
+full package list of the environment that built it.
+
 To check the install: `scientographer --help`. The development version installs
 from GitHub: replace `scientographer` by
 `"scientographer @ git+https://github.com/alfredohernandezinostroza/scientographer.git"`.
@@ -341,7 +366,11 @@ get it with `scientographer init --force` (which rewrites `dvc.yaml` and
   with" badge; click the compass badge for **About this map**, every step that made the map, from the search
   or table import to the site: the stage, the version, its settings, the files it read
   with their md5 (the checksums in `dvc.lock`) and which earlier step wrote them, and
-  the date. It warns when the steps ran on more than one version. The records travel
+  the date, and the environment it ran in (Python and the versions of the packages that
+  change results); an **Environment** section lists every package of the environment
+  that built the site, whether it matched the project's lock file, and downloads the
+  list as a `requirements.txt`. It warns when the steps ran on more than one version
+  of Scientographer or of a key package, or outside the project's lock. The records travel
   with the data: each GraphML carries them in its `provenance` graph attribute, each
   parquet table in its metadata, and each stage's output folder in a
   `provenance.json`; the site gathers them into `network_data/provenance.json`.
@@ -353,8 +382,8 @@ get it with `scientographer init --force` (which rewrites `dvc.yaml` and
 | `scientographer init [dir]` | create a project (`--pubmed QUERY`: from a PubMed search) |
 | `scientographer example [dir]` | create the example project, data included |
 | `scientographer stages` | list the stages (`*` = in this project's dvc.yaml) |
-| `scientographer run <stage>` | run one stage now, without DVC bookkeeping |
-| `scientographer pipeline [stage]` | `dvc repro`, for everything or up to one stage |
+| `scientographer run <stage>` | run one stage now, without DVC bookkeeping (refused outside the project's lock; `--allow-environment-mismatch`) |
+| `scientographer pipeline [stage]` | `dvc repro`, for everything or up to one stage (`--allow-environment-mismatch` as for `run`) |
 | `scientographer website [--port N]` | serve the built site |
 | `scientographer store-existing-results` | fill the per-resolution stores from current outputs |
 | `scientographer ui` | start the Hamilton UI tracker (set `tracker.enabled: true`) |
@@ -382,6 +411,22 @@ Each arrow is a DVC stage (see the project's `dvc.yaml`); each stage is one modu
 this package, and `scientographer run <stage>` draws its Hamilton DAG to
 `reports/figures/`. Stages whose section of `params.yaml` is empty (the embedding
 stages by default) do nothing.
+
+### Rerunning one stage
+
+DVC reruns a stage when its inputs or settings change, but not when the code or the
+packages do (after an upgrade, say). To rerun one stage without touching the search
+and the downloads:
+
+```bash
+dvc repro -f -s community_keywords   # this stage only, even though nothing changed
+dvc repro                            # then the stages after it, whose inputs it just rewrote
+```
+
+Avoid a plain `dvc repro -f`: it reruns every stage, `search_pubmed` and
+`fetch_references` included, and their answers change over time (new papers in PubMed,
+new citations in OpenAlex), so the map would no longer be made from the same corpus.
+`dvc repro -f <stage>` without `-s` also reruns every stage before it.
 
 ## Experiments
 
