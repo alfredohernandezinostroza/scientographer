@@ -51,6 +51,7 @@ import numpy as np
 import pandas as pd
 from scipy.stats import skew
 
+from scientographer._environment import require_locked_environment
 from scientographer._forceatlas2 import ENGINES, forceatlas2
 from scientographer._provenance import stage_settings, steps_for, write_folder_record
 from scientographer.config import FIGURES_PATH, PARAMS, draw_dag, ensure_dirs, tracker_adapters
@@ -232,4 +233,5 @@ def save_citation_layouts(citation_layouts: dict, output_dir: Path, provenance_s
 
 
 if __name__ == "__main__":
+    require_locked_environment(CURRENT_FILE_NAME)
     sys.exit(_main())

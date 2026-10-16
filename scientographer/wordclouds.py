@@ -35,6 +35,7 @@ import matplotlib.pyplot as plt
 from sklearn.feature_extraction.text import TfidfVectorizer
 from wordcloud import WordCloud
 
+from scientographer._environment import require_locked_environment
 from scientographer._provenance import stage_settings, steps_for, write_folder_record
 from scientographer.config import (
     FIGURES_PATH,
@@ -1238,4 +1239,5 @@ def save_provenance_record(provenance_steps: list[dict]) -> dict:
     return {"path": str(write_folder_record(TD_IDF_SAVING_PATH, provenance_steps))}
 
 if __name__ == "__main__":
+    require_locked_environment(CURRENT_FILE_NAME)
     sys.exit(_main())

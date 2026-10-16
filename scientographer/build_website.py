@@ -36,8 +36,10 @@ What comes from where:
 - **provenance** -- the step records every input carries (the GraphML's
   ``provenance`` attribute, the tables' parquet metadata, the ``provenance.json`` of
   the word-cloud and layout folders), merged, plus this stage's own, written to
-  ``provenance.json``; the page shows the version and build date next to its "Made
-  with" badge and every step in "About this map", opened from the badge.
+  ``provenance.json`` with the environment that built the site (Python, platform,
+  every installed package and how they compare with the project's lock); the page
+  shows the version and build date next to its "Made with" badge and every step in
+  "About this map", opened from the badge.
 - **figures** -- any list of files (word-cloud SVGs, PNGs) tagged with the graph
   and resolution they belong to; copied into the site with a ``figures.json``.
 
@@ -81,6 +83,7 @@ import igraph as ig
 import numpy as np
 import pandas as pd
 
+from scientographer._environment import KEY_PACKAGES, full_environment, require_locked_environment
 from scientographer._provenance import (
     PROVENANCE_ATTRIBUTE,
     exact_version,
@@ -1249,11 +1252,70 @@ def _reads_output(input_path: str, output_path: str) -> bool:
     return bool(a) and bool(b) and (a == b or a.startswith(b + "/"))
 
 
+def _names(items: list[str]) -> str:
+    """``a``, ``a and b``, ``a, b and c``."""
+    items = list(dict.fromkeys(items))
+    return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1]
+
+
+def _difference_text(difference: dict, lock_path: str) -> str:
+    installed = difference.get("installed")
+    if difference.get("package") == "platform":
+        return f"{difference.get('locked')} (ran on {installed})"
+    have = f"{installed} installed" if installed else "not installed"
+    return f"{difference.get('package')} {have}, {lock_path} says {difference.get('locked')}"
+
+
+def environment_warnings(steps: list[dict]) -> list[dict]:
+    """What the steps' environments say about the map, as ``{"kind", "text"}``:
+    ``versions`` when steps ran on different versions of Python or of a key package;
+    ``lock`` when a step ran on an environment that did not match the project's lock
+    (with the override); ``no_lock`` (a quiet note) when steps ran without a lock.
+    Steps recorded before environments were kept are skipped."""
+    recorded = [s for s in steps if isinstance(s.get("environment"), dict)]
+    warnings = []
+    for package in ("python", *KEY_PACKAGES):
+        by_version: dict = {}
+        for step in recorded:
+            environment = step["environment"]
+            version = (environment.get("python") if package == "python"
+                       else (environment.get("packages") or {}).get(package))
+            if version:
+                by_version.setdefault(str(version), []).append(str(step.get("stage") or "a step"))
+        if len(by_version) > 1:
+            label = "Python" if package == "python" else package
+            versions = "; ".join(f"{version} in {_names(stages)}" for version, stages in by_version.items())
+            text = f"Steps ran on different {label} versions: {versions}."
+            warnings.append({"kind": "versions", "text": text})
+    unlocked = []
+    for step in recorded:
+        lock = step["environment"].get("lock") or {}
+        stage = str(step.get("stage") or "a step")
+        if lock.get("kind") is None:
+            unlocked.append(stage)
+        elif lock.get("matches") is False:
+            differences = lock.get("differences") or []
+            listed = "; ".join(_difference_text(d, lock.get("path", "the lock")) for d in differences[:5])
+            more = f" and {len(differences) - 5} more" if len(differences) > 5 else ""
+            how = " (override)" if lock.get("override") else ""
+            text = f"{stage} ran outside the project's {lock.get('path', 'lock file')}{how}: {listed}{more}."
+            warnings.append({"kind": "lock", "text": text})
+    if unlocked and len(unlocked) == len(recorded):
+        text = "No lock file: the environment is recorded but was not pinned."
+        warnings.append({"kind": "no_lock", "text": text})
+    elif unlocked:
+        warnings.append({"kind": "no_lock", "text": f"No lock file when {_names(unlocked)} ran: "
+                                                    "their environment is recorded but was not pinned."})
+    return warnings
+
+
 def _provenance_payload(histories: list[list[dict]], website_step: dict, unrecorded: list[str]) -> dict:
     """The site's provenance.json: every input's steps merged (each step once, in
     order of date) and the site's own step last; each input of a step names the
     earlier step that wrote it (``from_step``, an index into ``steps``); the
-    versions the steps ran on; the inputs that came without any record."""
+    versions the steps ran on; the inputs that came without any record; and the
+    environment that built the site, with every installed package (``environment``);
+    and what the steps' environments warn about (``environment_warnings``)."""
     steps = []
     for step in merge_steps(*histories) + [website_step]:
         step = dict(step)
@@ -1273,7 +1335,8 @@ def _provenance_payload(histories: list[list[dict]], website_step: dict, unrecor
         if version and version not in versions:
             versions.append(version)
     return {"scientographer": exact_version(), "built": utc_now(), "versions": versions,
-            "steps": steps, "unrecorded_inputs": unrecorded}
+            "steps": steps, "unrecorded_inputs": unrecorded, "environment": full_environment(),
+            "environment_warnings": environment_warnings(steps)}
 
 
 def provenance_records(graph_attributes: dict, graphml_path: Path, website_inputs: list[Path],
@@ -1442,4 +1505,5 @@ def assembled_website(
 
 
 if __name__ == "__main__":
+    require_locked_environment(CURRENT_FILE_NAME)
     sys.exit(_main())

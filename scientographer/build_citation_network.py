@@ -34,6 +34,7 @@ import hamilton.log_setup
 import igraph as ig
 import pandas as pd
 
+from scientographer._environment import require_locked_environment
 from scientographer._provenance import stage_settings, steps_for, write_graphml_with_steps
 from scientographer.config import FIGURES_PATH, draw_dag, ensure_dirs, params, tracker_adapters
 
@@ -218,4 +219,5 @@ def save_citation_network(citation_network: ig.Graph, output_graphml_path: Path,
 
 
 if __name__ == "__main__":
+    require_locked_environment(CURRENT_FILE_NAME)
     sys.exit(_main())

@@ -18,7 +18,9 @@ module never raises over it.
 **A step record** (``step_record()``): which stage ran, on which version, with which
 settings (the params.yaml sections it reads), on which input files (each with its
 md5, the checksum ``dvc.lock`` keeps, so the two can be compared), which outputs it
-wrote (paths only) and when (UTC). A missing input is recorded with ``md5: null``. A
+wrote (paths only), when (UTC), and in which environment: Python, platform, the
+versions of the result-affecting packages, and how they compare with the project's
+lock file (see ``_environment.py``). A missing input is recorded with ``md5: null``. A
 directory input also gets its number of files and bytes, and one md5 over its
 files: the sorted lines ``<relative path> <md5 of the file>``, which identifies the
 contents but is not the ``.dir`` hash DVC writes. Hashing reads every byte (about
@@ -56,6 +58,7 @@ from typing import Iterable, Optional, Union
 import xml.etree.ElementTree as ET
 
 from scientographer import __version__
+from scientographer._environment import step_environment
 
 # The graph-level GraphML attribute that holds a graph's step records.
 PROVENANCE_ATTRIBUTE = "provenance"
@@ -228,7 +231,8 @@ def step_record(
 ) -> dict:
     """One step: the stage, this Scientographer's exact version, the stage's
     settings, its inputs with their md5 (None entries skipped; a missing file gets
-    ``md5: null``), the paths of its outputs and the date."""
+    ``md5: null``), the paths of its outputs, the date, and the environment it ran
+    in (Python, platform, key packages and the lock; see _environment.py)."""
     return {
         "stage": stage,
         "scientographer": exact_version(),
@@ -236,6 +240,7 @@ def step_record(
         "inputs": [_input_entry(p) for p in _unique_paths(inputs)],
         "outputs": [p.as_posix() for p in _unique_paths(outputs)],
         "date": utc_now(),
+        "environment": _json_safe(step_environment()),
     }
 
 
