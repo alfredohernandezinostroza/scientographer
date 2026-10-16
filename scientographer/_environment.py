@@ -451,10 +451,13 @@ def check_locked_environment(stage: Optional[str] = None, root: Optional[Path] =
         raise EnvironmentMismatch(mismatch_message(status, command))
     if not _OVERRIDE_WARNED:
         _OVERRIDE_WARNED = True
-        listed = "; ".join(_describe(d, status["path"]) for d in status["differences"][:MESSAGE_DIFFERENCES])
-        warning = (f"WARNING: running outside the project's {status['path']} because {OVERRIDE_VARIABLE} "
-                   f"is set. The step record keeps the differences ({len(status['differences'])}): {listed}")
-        print(warning, file=sys.stderr)
+        differences = status["differences"]
+        lines = [f"WARNING: running outside the project's {status['path']} because {OVERRIDE_VARIABLE} "
+                 f"is set; the step record keeps all {len(differences)} differences:"]
+        lines += [f"  {_describe(d, status['path'])}" for d in differences[:MESSAGE_DIFFERENCES]]
+        if len(differences) > MESSAGE_DIFFERENCES:
+            lines.append(f"  ... and {len(differences) - MESSAGE_DIFFERENCES} more")
+        print("\n".join(lines), file=sys.stderr)
     return status
 
 
