@@ -52,7 +52,13 @@ import pandas as pd
 import scipy.sparse
 from sklearn.feature_extraction.text import TfidfVectorizer
 
-from scientographer._provenance import step_record, write_graphml_with_step
+from scientographer._provenance import (
+    stage_settings,
+    steps_for,
+    write_folder_record,
+    write_graphml_with_steps,
+    write_parquet_with_steps,
+)
 from scientographer.config import (
     FIGURES_PATH,
     draw_dag,
@@ -386,6 +392,7 @@ def _main() -> int:
         "save_graph_with_community_keywords",
         "save_community_keywords_parquet",
         "save_community_keyword_scores_parquet",
+        "save_provenance_record",
     ]
 
     import __main__
@@ -534,35 +541,43 @@ def keyword_scores_df(
     return _keyword_scores_df(scored_keywords_per_resolution)
 
 
+def provenance_steps(input_graphml_path: Path, synonyms_file: Optional[Path], output_graphml_path: Path) -> list[dict]:
+    """How the outputs were made (see _provenance.py): the steps the input graph
+    carries, then this one."""
+    return steps_for(CURRENT_FILE_NAME, stage_settings("community_keywords"),
+                     [input_graphml_path, synonyms_file], [Path(output_graphml_path).parent])
+
+
+@datasaver()
+def save_provenance_record(provenance_steps: list[dict], output_graphml_path: Path) -> dict:
+    """provenance.json in the output folder (see _provenance.py)."""
+    return {"path": str(write_folder_record(Path(output_graphml_path).parent, provenance_steps))}
+
+
 @datasaver()
 def save_graph_with_community_keywords(
-    citation_network_with_keywords: ig.Graph,
-    output_graphml_path: Path,
-    input_graphml_path: Path,
-    synonyms_file: Optional[Path],
+    citation_network_with_keywords: ig.Graph, output_graphml_path: Path, provenance_steps: list[dict]
 ) -> dict:
-    """The graph, its history (see _provenance.py) kept and this step added."""
     Path(output_graphml_path).parent.mkdir(parents=True, exist_ok=True)
-    record = step_record(CURRENT_FILE_NAME, _cfg, [input_graphml_path, synonyms_file])
-    write_graphml_with_step(citation_network_with_keywords, output_graphml_path, record)
+    write_graphml_with_steps(citation_network_with_keywords, output_graphml_path, provenance_steps)
     return utils.get_file_metadata(output_graphml_path)
 
 
 @datasaver()
 def save_community_keywords_parquet(
-    community_keywords_df: pd.DataFrame, community_keywords_parquet_path: Path
+    community_keywords_df: pd.DataFrame, community_keywords_parquet_path: Path, provenance_steps: list[dict]
 ) -> dict:
     Path(community_keywords_parquet_path).parent.mkdir(parents=True, exist_ok=True)
-    community_keywords_df.to_parquet(community_keywords_parquet_path, index=False)
+    write_parquet_with_steps(community_keywords_df, community_keywords_parquet_path, provenance_steps, index=False)
     return utils.get_file_metadata(community_keywords_parquet_path)
 
 
 @datasaver()
 def save_community_keyword_scores_parquet(
-    keyword_scores_df: pd.DataFrame, community_keyword_scores_parquet_path: Path
+    keyword_scores_df: pd.DataFrame, community_keyword_scores_parquet_path: Path, provenance_steps: list[dict]
 ) -> dict:
     Path(community_keyword_scores_parquet_path).parent.mkdir(parents=True, exist_ok=True)
-    keyword_scores_df.to_parquet(community_keyword_scores_parquet_path, index=False)
+    write_parquet_with_steps(keyword_scores_df, community_keyword_scores_parquet_path, provenance_steps, index=False)
     return utils.get_file_metadata(community_keyword_scores_parquet_path)
 
 

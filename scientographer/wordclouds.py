@@ -35,6 +35,7 @@ import matplotlib.pyplot as plt
 from sklearn.feature_extraction.text import TfidfVectorizer
 from wordcloud import WordCloud
 
+from scientographer._provenance import stage_settings, steps_for, write_folder_record
 from scientographer.config import (
     FIGURES_PATH,
     draw_dag,
@@ -138,7 +139,7 @@ def _main() -> int:
     frequency_wordcloud_outputs = [f"save_frequency_wordcloud_figure_{name}" for name in _res_node_names]
     # outputs = tfidf_outputs + wordcloud_outputs
     # outputs = wordcloud_outputs + frequency_wordcloud_outputs
-    outputs = wordcloud_outputs + frequency_wordcloud_outputs + tfidf_outputs
+    outputs = wordcloud_outputs + frequency_wordcloud_outputs + tfidf_outputs + ["save_provenance_record"]
 
     import __main__
 
@@ -1222,6 +1223,19 @@ def save_frequency_wordcloud_figure(
         title=f"Cluster wordclouds (keyword frequency)  |  resolution={resolution}",
     )
 
+
+
+def provenance_steps(citation_network_path: Path, synonyms_file: Optional[Path]) -> list[dict]:
+    """How the figures were made (see _provenance.py): the steps the input graph
+    carries, then this one."""
+    return steps_for(CURRENT_FILE_NAME, stage_settings("wordclouds"),
+                     [citation_network_path, synonyms_file], [TD_IDF_SAVING_PATH])
+
+
+@datasaver()
+def save_provenance_record(provenance_steps: list[dict]) -> dict:
+    """provenance.json in the output folder (see _provenance.py)."""
+    return {"path": str(write_folder_record(TD_IDF_SAVING_PATH, provenance_steps))}
 
 if __name__ == "__main__":
     sys.exit(_main())

@@ -37,7 +37,12 @@ import leidenalg
 import numpy as np
 import pandas as pd
 
-from scientographer._provenance import step_record, write_graphml_with_step
+from scientographer._provenance import (
+    stage_settings,
+    steps_for,
+    write_graphml_with_steps,
+    write_parquet_with_steps,
+)
 from scientographer._resolution_store import (
     STORE_SUBDIR,
     ResolutionStore,
@@ -234,21 +239,29 @@ def partition_summary_df(citation_network_with_communities: ig.Graph) -> pd.Data
     return _partition_summary(citation_network_with_communities, RESOLUTIONS)
 
 
+def provenance_steps(input_graphml_path: Path, output_graphml_path: Path, summary_parquet_path: Path) -> list[dict]:
+    """How the outputs were made (see _provenance.py): the steps the input graph
+    carries, then this one. Written into the graph and the summary table (the
+    resolution store is a cache and has none)."""
+    return steps_for(CURRENT_FILE_NAME, stage_settings("detect_communities", "resolutions"),
+                     [input_graphml_path], [output_graphml_path, summary_parquet_path])
+
+
 @datasaver()
 def save_citation_network_with_communities(
-    citation_network_with_communities: ig.Graph, output_graphml_path: Path, input_graphml_path: Path
+    citation_network_with_communities: ig.Graph, output_graphml_path: Path, provenance_steps: list[dict]
 ) -> dict:
-    """The graph, its history (see _provenance.py) kept and this step added."""
     Path(output_graphml_path).parent.mkdir(parents=True, exist_ok=True)
-    record = step_record(CURRENT_FILE_NAME, _cfg, [input_graphml_path])
-    write_graphml_with_step(citation_network_with_communities, output_graphml_path, record)
+    write_graphml_with_steps(citation_network_with_communities, output_graphml_path, provenance_steps)
     return utils.get_file_metadata(output_graphml_path)
 
 
 @datasaver()
-def save_partition_summary(partition_summary_df: pd.DataFrame, summary_parquet_path: Path) -> dict:
+def save_partition_summary(
+    partition_summary_df: pd.DataFrame, summary_parquet_path: Path, provenance_steps: list[dict]
+) -> dict:
     Path(summary_parquet_path).parent.mkdir(parents=True, exist_ok=True)
-    partition_summary_df.to_parquet(summary_parquet_path, index=False)
+    write_parquet_with_steps(partition_summary_df, summary_parquet_path, provenance_steps, index=False)
     return utils.get_file_metadata(summary_parquet_path)
 
 

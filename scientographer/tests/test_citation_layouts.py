@@ -103,7 +103,7 @@ def test_layouts_write_tables_and_leave_the_graph_alone(tmp_path):
     specs = layout_specs([{"key": "linlog", "lin_log": True, "iterations": 50, "engine": "fa2"},
                           {"key": "linlog_3d", "lin_log": True, "dimensions": 3, "iterations": 50, "engine": "fa2"}])
     result = citation_layouts(g, specs)
-    save_citation_layouts(result, tmp_path)
+    save_citation_layouts(result, tmp_path, [{"stage": "citation_layouts"}])
 
     flat = pd.read_csv(tmp_path / "linlog.csv")
     deep = pd.read_csv(tmp_path / "linlog_3d.csv")
@@ -111,13 +111,15 @@ def test_layouts_write_tables_and_leave_the_graph_alone(tmp_path):
     assert flat["doi"].tolist() == g.vs["name"]
     manifest = json.loads((tmp_path / "citation_layouts.json").read_text())
     assert manifest["linlog_3d"]["dimensions"] == 3 and manifest["linlog"]["engine"] == "fa2"
+    # The CSVs' record is the folder's provenance.json.
+    assert json.loads((tmp_path / "provenance.json").read_text()) == {"steps": [{"stage": "citation_layouts"}]}
     # Only positions are produced: the communities are not touched.
     assert g.vs["cpm_communities_at_res=0.005"] == before
     assert "x" not in g.vs.attributes()
 
 
 def test_no_layouts_still_writes_the_output_directory(tmp_path):
-    save_citation_layouts(citation_layouts(_two_groups(), layout_specs([])), tmp_path / "out")
+    save_citation_layouts(citation_layouts(_two_groups(), layout_specs([])), tmp_path / "out", [])
     assert json.loads((tmp_path / "out" / "citation_layouts.json").read_text()) == {}
 
 

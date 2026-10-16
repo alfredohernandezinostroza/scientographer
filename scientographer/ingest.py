@@ -56,6 +56,7 @@ import hamilton.log_setup
 import pandas as pd
 
 from scientographer import _database_exports, _medline
+from scientographer._provenance import stage_settings, steps_for, write_folder_record, write_parquet_with_steps
 from scientographer.config import FIGURES_PATH, draw_dag, ensure_dirs, params, tracker_adapters
 
 ###################
@@ -264,18 +265,29 @@ def ingest_report(read_sources: dict, papers_table: pd.DataFrame) -> dict:
     }
 
 
+def provenance_steps(sources: list, read_sources: dict, papers_table_path: Path, report_dir: Path) -> list[dict]:
+    """How the table was made (see _provenance.py): the steps its exports carry (a
+    PubMed search's folder has them), then this one. Each source is an input as
+    named in params.yaml, or the files a pattern matched."""
+    inputs = [Path(s["path"]) for s in sources if Path(str(s.get("path", ""))).exists()]
+    if len(inputs) < len(sources):  # a pattern: the files it matched
+        inputs += [Path(f["file"]) for f in read_sources["files"]]
+    return steps_for(CURRENT_FILE_NAME, stage_settings("ingest"), inputs, [papers_table_path, report_dir])
+
+
 @datasaver()
-def save_papers_table(papers_table: pd.DataFrame, papers_table_path: Path) -> dict:
+def save_papers_table(papers_table: pd.DataFrame, papers_table_path: Path, provenance_steps: list[dict]) -> dict:
     path = Path(papers_table_path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    papers_table.to_parquet(path, index=False)
+    write_parquet_with_steps(papers_table, path, provenance_steps, index=False)
     return utils.get_file_metadata(path)
 
 
 @datasaver()
-def save_ingest_report(ingest_report: dict, read_sources: dict, report_dir: Path) -> dict:
+def save_ingest_report(ingest_report: dict, read_sources: dict, report_dir: Path, provenance_steps: list[dict]) -> dict:
     report_dir = Path(report_dir)
     report_dir.mkdir(parents=True, exist_ok=True)
+    write_folder_record(report_dir, provenance_steps)
     (report_dir / "report.json").write_text(json.dumps(ingest_report, indent=1), encoding="utf-8")
     table = read_sources["table"]
     columns = [c for c in ("pmid", "scopus_id", "wos_id", "ebsco_id", "title", "year", "journal", "sources")

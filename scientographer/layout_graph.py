@@ -38,7 +38,7 @@ import numpy as np
 import pandas as pd
 from scipy.stats import skew
 
-from scientographer._provenance import step_record, write_graphml_with_step
+from scientographer._provenance import stage_settings, steps_for, write_graphml_with_steps
 from scientographer.config import FIGURES_PATH, draw_dag, ensure_dirs, params, tracker_adapters
 
 ###################
@@ -279,20 +279,21 @@ def citation_network_with_layout(
     raise ValueError(f"unknown layout mode {mode!r}; use one of {MODES}")
 
 
+def provenance_steps(
+    input_graphml_path: Path, output_graphml_path: Path, mode: str, import_path: Optional[Path]
+) -> list[dict]:
+    """How the graph was made (see _provenance.py): the steps the input graph
+    carries, then this one (the imported layout file is an input in ``import`` mode)."""
+    inputs = [input_graphml_path, import_path if mode == "import" else None]
+    return steps_for(CURRENT_FILE_NAME, stage_settings("layout"), inputs, [output_graphml_path])
+
+
 @datasaver()
 def save_citation_network_with_layout(
-    citation_network_with_layout: ig.Graph,
-    output_graphml_path: Path,
-    input_graphml_path: Path,
-    mode: str,
-    import_path: Optional[Path],
+    citation_network_with_layout: ig.Graph, output_graphml_path: Path, provenance_steps: list[dict]
 ) -> dict:
-    """The graph, its history (see _provenance.py) kept and this step added (the
-    imported layout file is an input in ``import`` mode)."""
     Path(output_graphml_path).parent.mkdir(parents=True, exist_ok=True)
-    inputs = [input_graphml_path, import_path if mode == "import" else None]
-    record = step_record(CURRENT_FILE_NAME, _cfg, inputs)
-    write_graphml_with_step(citation_network_with_layout, output_graphml_path, record)
+    write_graphml_with_steps(citation_network_with_layout, output_graphml_path, provenance_steps)
     return utils.get_file_metadata(output_graphml_path)
 
 

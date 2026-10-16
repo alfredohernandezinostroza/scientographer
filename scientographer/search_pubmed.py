@@ -39,6 +39,7 @@ import hamilton.log_setup
 
 from scientographer import _medline
 from scientographer._http import RateLimiter, request, request_json
+from scientographer._provenance import stage_settings, steps_for, write_folder_record
 from scientographer.config import FIGURES_PATH, draw_dag, ensure_dirs, params, tracker_adapters
 
 ###################
@@ -187,9 +188,14 @@ def pubmed_records(matched_pmids: list[str], output_dir: Path, batch_size: int,
     return records
 
 
+def provenance_steps(output_dir: Path) -> list[dict]:
+    """How the records were made (see _provenance.py): the first step, with no input files."""
+    return steps_for(CURRENT_FILE_NAME, stage_settings("pubmed_search"), [], [output_dir])
+
+
 @datasaver()
 def save_pubmed_records(pubmed_records: dict[str, str], matched_pmids: list[str], query: str,
-                        output_dir: Path) -> dict:
+                        output_dir: Path, provenance_steps: list[dict]) -> dict:
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     path = output_dir / RECORDS_FILE
@@ -203,6 +209,7 @@ def save_pubmed_records(pubmed_records: dict[str, str], matched_pmids: list[str]
         "downloaded": len(pubmed_records),
         "pmids": matched_pmids,
     }, indent=1), encoding="utf-8")
+    write_folder_record(output_dir, provenance_steps)
     logger.info("%d MEDLINE records in %s", len(pubmed_records), path)
     return utils.get_file_metadata(path)
 

@@ -36,6 +36,7 @@ import hamilton.log_setup
 import pandas as pd
 
 from scientographer._http import HttpError, RateLimiter, request_json
+from scientographer._provenance import stage_settings, steps_for, write_folder_record, write_parquet_with_steps
 from scientographer.config import FIGURES_PATH, draw_dag, ensure_dirs, params, tracker_adapters
 
 ###################
@@ -233,12 +234,20 @@ def references_table(works: pd.DataFrame) -> pd.DataFrame:
     return table
 
 
+def provenance_steps(papers_table_path: Path, references_table_path: Path, store_dir: Path) -> list[dict]:
+    """How the table was made (see _provenance.py): the steps the papers table
+    carries, then this one. The store is read and written by this stage, so it is
+    an output only."""
+    return steps_for(CURRENT_FILE_NAME, stage_settings("fetch_references"),
+                     [papers_table_path], [references_table_path, store_dir])
+
+
 @datasaver()
 def save_references_table(references_table: pd.DataFrame, works: pd.DataFrame, references_table_path: Path,
-                          store_dir: Path) -> dict:
+                          store_dir: Path, provenance_steps: list[dict]) -> dict:
     path = Path(references_table_path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    references_table.to_parquet(path, index=False)
+    write_parquet_with_steps(references_table, path, provenance_steps, index=False)
     report = {
         "source": "openalex",
         "papers": len(works),
@@ -249,6 +258,7 @@ def save_references_table(references_table: pd.DataFrame, works: pd.DataFrame, r
     }
     Path(store_dir).mkdir(parents=True, exist_ok=True)
     (Path(store_dir) / "report.json").write_text(json.dumps(report, indent=1), encoding="utf-8")
+    write_folder_record(store_dir, provenance_steps)
     return utils.get_file_metadata(path)
 
 
