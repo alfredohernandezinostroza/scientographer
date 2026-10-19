@@ -38,6 +38,7 @@ import numpy as np
 import pandas as pd
 from scipy.stats import skew
 
+from scientographer._environment import require_locked_environment
 from scientographer._provenance import stage_settings, steps_for, write_graphml_with_steps
 from scientographer.config import FIGURES_PATH, draw_dag, ensure_dirs, params, tracker_adapters
 
@@ -298,4 +299,5 @@ def save_citation_network_with_layout(
 
 
 if __name__ == "__main__":
+    require_locked_environment(CURRENT_FILE_NAME)
     sys.exit(_main())

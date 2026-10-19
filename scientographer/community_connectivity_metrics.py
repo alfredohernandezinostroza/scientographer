@@ -53,6 +53,7 @@ import igraph as ig
 import numpy as np
 import pandas as pd
 
+from scientographer._environment import require_locked_environment
 from scientographer._provenance import (
     stage_settings,
     steps_for,
@@ -419,4 +420,5 @@ def save_dvc_metrics_and_plots(per_partition_connectivity_metrics_df: pd.DataFra
 
 
 if __name__ == "__main__":
+    require_locked_environment(CURRENT_FILE_NAME)
     sys.exit(_main())

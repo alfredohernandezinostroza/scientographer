@@ -412,6 +412,25 @@ def test_website_works_on_old_inputs_without_records(tmp_path):
     assert written["versions"] == [exact_version()]
 
 
+def test_website_records_the_full_environment_and_its_warnings(tmp_path, monkeypatch):
+    from scientographer._environment import installed_distributions
+
+    monkeypatch.chdir(tmp_path)  # a project without a lock file
+    old = _step("build_citation_network", "2026-10-16T08:00:00Z", inputs=[], outputs=["data/graph.graphml"])
+    assert "environment" not in old  # a step recorded before environments were kept
+    written = _website(tmp_path, [old], [])
+    environment = written["environment"]
+    assert set(environment) == {"python", "platform", "packages", "lock"}
+    assert environment["packages"] == installed_distributions()
+    assert list(environment["packages"]) == sorted(environment["packages"])
+    assert "numpy" in environment["packages"] and "igraph" in environment["packages"]
+    assert environment["lock"] == {"kind": None}
+    # The site's own step has its environment; the old step still reads.
+    assert "environment" in written["steps"][-1] and "environment" not in written["steps"][0]
+    assert written["environment_warnings"] == [
+        {"kind": "no_lock", "text": "No lock file: the environment is recorded but was not pinned."}]
+
+
 def test_the_page_has_the_stamp_and_the_about_panel():
     from scientographer.build_website import ASSETS_DIR
 
@@ -425,5 +444,6 @@ def test_the_page_has_the_stamp_and_the_about_panel():
     assert '<a id="about-logo" href="https://github.com/alfredohernandezinostroza/scientographer"' in page
     script = (ASSETS_DIR / "main.js").read_text(encoding="utf-8")
     assert "/provenance.json`" in script
-    for field in ("from_step", "unrecorded_inputs", "versions", "outputs"):
+    for field in ("from_step", "unrecorded_inputs", "versions", "outputs", "environment_warnings",
+                  "environment"):
         assert field in script

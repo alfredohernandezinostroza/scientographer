@@ -10,6 +10,9 @@ in its ``dvc.yaml`` and keeps every setting in its ``params.yaml``::
     scientographer example [dir]          create the example project, data included
     scientographer stages                 list the stages (* = declared in ./dvc.yaml)
     scientographer run detect_communities run one stage in the current project
+                                          (refused when the packages differ from the
+                                          project's pixi.lock / uv.lock / pinned
+                                          requirements.txt; --allow-environment-mismatch)
     scientographer pipeline [stage]       `dvc repro`: everything out of date, or up to one stage
     scientographer website [--port 8123]  serve the built site
     scientographer ui [--port 8241]       start the Hamilton UI tracker for this project
@@ -19,6 +22,7 @@ in its ``dvc.yaml`` and keeps every setting in its ``params.yaml``::
 """
 
 from importlib import resources
+import os
 from pathlib import Path
 import runpy
 import shutil
@@ -281,12 +285,38 @@ def stages() -> None:
         typer.echo(f"{'*' if name in declared else ' '} {name}")
 
 
+ALLOW_MISMATCH_HELP = (
+    "run even when the installed packages differ from the project's lock file "
+    "(pixi.lock, uv.lock or a pinned requirements.txt); the step record keeps the differences")
+
+
+def _check_environment(command: str, allow_mismatch: bool) -> None:
+    """Stop with the differences when the environment does not match the project's
+    lock (see _environment.py); the flag sets the override for this process and the
+    stages it starts."""
+    from scientographer._environment import OVERRIDE_VARIABLE, EnvironmentMismatch, check_locked_environment
+
+    if allow_mismatch:
+        os.environ[OVERRIDE_VARIABLE] = "1"
+    try:
+        check_locked_environment(command=command)
+    except EnvironmentMismatch as error:
+        typer.echo(f"scientographer: {error}", err=True)
+        raise typer.Exit(code=1) from None
+
+
 @app.command()
-def run(stage: str = typer.Argument(..., help="stage name, e.g. detect_communities")) -> None:
-    """Run one stage in the current project (reads/writes the paths in params.yaml)."""
+def run(
+    stage: str = typer.Argument(..., help="stage name, e.g. detect_communities"),
+    allow_environment_mismatch: bool = typer.Option(
+        False, "--allow-environment-mismatch", help=ALLOW_MISMATCH_HELP),
+) -> None:
+    """Run one stage in the current project (reads/writes the paths in params.yaml).
+    Refuses when the installed packages differ from the project's lock file."""
     if stage not in _stage_modules():
         typer.echo(f"unknown stage '{stage}'. Known: {', '.join(_stage_modules())}", err=True)
         raise typer.Exit(code=2)
+    _check_environment(f"scientographer run {stage}", allow_environment_mismatch)
     # Stages build their Hamilton driver from `__main__`, so run them as a script would.
     runpy.run_module(f"scientographer.{stage}", run_name="__main__", alter_sys=True)
 
@@ -295,8 +325,12 @@ def run(stage: str = typer.Argument(..., help="stage name, e.g. detect_communiti
 def pipeline(
     stage: Optional[str] = typer.Argument(None, help="reproduce up to this dvc.yaml stage only"),
     force: bool = typer.Option(False, "--force", help="re-run even when nothing changed"),
+    allow_environment_mismatch: bool = typer.Option(
+        False, "--allow-environment-mismatch", help=ALLOW_MISMATCH_HELP),
 ) -> None:
-    """`dvc repro`: run every stage whose inputs or params changed, in order."""
+    """`dvc repro`: run every stage whose inputs or params changed, in order.
+    Refuses when the installed packages differ from the project's lock file."""
+    _check_environment("scientographer pipeline" + (f" {stage}" if stage else ""), allow_environment_mismatch)
     cmd = ["dvc", "repro"]
     if force:
         cmd.append("--force")
@@ -342,8 +376,6 @@ def _wait_for(url: str, timeout_seconds: float) -> bool:
 def ui(port: int = typer.Option(8241, help="port for the Hamilton UI")) -> None:
     """Start the Hamilton UI for this project (its own .hamilton/db), create the
     project and user tracked runs report to, and keep serving until Ctrl-C."""
-    import os
-
     from scientographer.config import PARAMS
 
     tracker = PARAMS.get("tracker", {})

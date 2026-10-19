@@ -28,6 +28,10 @@ project's `params.yaml`**, which documents itself. Read it before changing anyth
 - **Results depend on library versions.** `leidenalg` 0.11 and 0.12 give different
   partitions with the same seed. Keep `pixi.lock` (or a `pip freeze`) with the
   results, and do not upgrade packages in a project mid-analysis without saying so.
+  Stages check this themselves: with a lock file present they refuse to run on an
+  environment that differs from it, and every step record keeps its environment.
+  Do not reach for the override to get past the refusal; run in the project's
+  environment instead.
 - **Long stages:** the Connectivity Modifier (minimum cuts) can take hours on large
   communities. Before a big run, check `communities.connectivity_modifier_max_community_size`
   and `communities.workers`; run long jobs in the background and watch their log.
@@ -190,7 +194,7 @@ the Gephi graphml (or a CSV with `name`/`id`, `x`, `y`), and add the file to the
 | `data/citation_layouts/<key>.csv`, `citation_layouts.json` | extra layouts of the citation graph (`doi`, `x`, `y`, `z` in 3D) and what was run |
 | `data/wordclouds/` | word clouds and TF-IDF histograms |
 | `reports/website/` | the site; `reports/figures/` the stages' Hamilton DAG drawings |
-| `reports/website/network_data/provenance.json` | how the map was made (the site's "About this map" panel, opened from the compass badge): each step's stage, Scientographer version, settings, input md5s (comparable with `dvc.lock`), outputs and date, oldest first. The same records travel with every output: a GraphML's `provenance` graph attribute, a parquet's `scientographer_provenance` metadata, a `provenance.json` in each stage's output folder |
+| `reports/website/network_data/provenance.json` | how the map was made (the site's "About this map" panel, opened from the compass badge): each step's stage, Scientographer version, settings, input md5s (comparable with `dvc.lock`), outputs, date and `environment` (Python, platform, key package versions, and `lock`: how they compared with the project's `pixi.lock` / `uv.lock` / pinned `requirements.txt`, with any `override`), oldest first; plus the full package list of the environment that built the site (`environment`) and `environment_warnings`. The same records travel with every output: a GraphML's `provenance` graph attribute, a parquet's `scientographer_provenance` metadata, a `provenance.json` in each stage's output folder |
 
 Load results with pandas (`pd.read_parquet`) and igraph (`ig.Graph.Read_GraphML`);
 community ids are integers, `-1` means none.
@@ -199,7 +203,16 @@ community ids are integers, `-1` means none.
 
 - **`dvc repro` says nothing changed but you expected a re-run:** the change was not in
   a declared dependency (for example package code after an upgrade). `dvc repro -f -s
-  <stage>` forces one stage.
+  <stage>` forces one stage, then `dvc repro` reruns the ones after it. Never a plain
+  `dvc repro -f`: it reruns `search_pubmed` / `fetch_references` too, whose answers
+  change over time.
+- **A stage refuses with "This environment does not match the project's pixi.lock":**
+  the installed packages differ from the project's lock file (the message lists them).
+  Run inside the project's environment (`pixi run scientographer run <stage>`) or
+  reinstall from the lock (`pixi install`, `uv sync`, `pip install -r
+  requirements.txt`). Only if the user accepts results from another environment:
+  `SCIENTOGRAPHER_ALLOW_ENVIRONMENT_MISMATCH=1` or `--allow-environment-mismatch`; the
+  step record then keeps the override and the differences.
 - **A stage re-runs everything after adding a resolution:** the stores were empty
   (run `scientographer store-existing-results` once) or a result-relevant setting or
   library version changed, which correctly invalidates them.

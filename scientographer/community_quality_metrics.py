@@ -56,6 +56,7 @@ import pandas as pd
 from scipy.special import comb
 from scipy.stats import hypergeom
 
+from scientographer._environment import require_locked_environment
 from scientographer._parallel import resolve_workers as _resolve_workers
 from scientographer._parallel import run_in_worker_processes
 from scientographer._provenance import (
@@ -948,4 +949,5 @@ def save_dvc_metrics_and_plots(per_partition_quality_metrics_df: pd.DataFrame) -
 
 
 if __name__ == "__main__":
+    require_locked_environment(CURRENT_FILE_NAME)
     sys.exit(_main())

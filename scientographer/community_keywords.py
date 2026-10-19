@@ -52,6 +52,7 @@ import pandas as pd
 import scipy.sparse
 from sklearn.feature_extraction.text import TfidfVectorizer
 
+from scientographer._environment import require_locked_environment
 from scientographer._provenance import (
     stage_settings,
     steps_for,
@@ -582,4 +583,5 @@ def save_community_keyword_scores_parquet(
 
 
 if __name__ == "__main__":
+    require_locked_environment(CURRENT_FILE_NAME)
     sys.exit(_main())

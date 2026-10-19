@@ -23,6 +23,21 @@ settings or outputs).
   read, its settings, and a warning when the steps ran on more than one version or
   on a checkout with uncommitted changes. Maps and outputs made before keep working;
   the tab says they have no record.
+- **The environment behind every step:** each step record also keeps its Python,
+  platform and the versions of the packages that change results (igraph, leidenalg,
+  numpy, pandas, scikit-learn, ...), and how the installed packages compare with the
+  project's lock file: `pixi.lock`, else `uv.lock`, else a `requirements.txt` pinned
+  throughout with `==`. When a lock exists and the environment differs from it, a
+  stage refuses to run (`scientographer run`, `pipeline` and `python -m
+  scientographer.<stage>` alike), listing the differences and how to fix them;
+  `SCIENTOGRAPHER_ALLOW_ENVIRONMENT_MISMATCH=1` or `--allow-environment-mismatch` runs
+  it anyway and the record keeps the override and the differences. Without a lock,
+  stages run as before. The site's `provenance.json` adds the full package list of
+  the environment that built it; **About this map** shows it in an Environment
+  section (with a `requirements.txt` download), each step's key packages, and
+  warnings when steps ran on different package versions or outside the lock. The
+  README explains how to rerun one stage (`dvc repro -f -s <stage>`, then `dvc repro`)
+  without redoing the search and the downloads.
 - **More ingest formats:** `ingest` now reads Scopus CSV (`scopus`), Web of Science
   tab-delimited (`wos`, a folder of `savedrecs.txt` files) and EBSCOhost CSV (`ebsco`)
   exports as well as PubMed's MEDLINE, and merges them by DOI: a paper in several

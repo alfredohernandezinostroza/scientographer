@@ -38,6 +38,7 @@ from hamilton.io import utils
 import hamilton.log_setup
 
 from scientographer import _medline
+from scientographer._environment import require_locked_environment
 from scientographer._http import RateLimiter, request, request_json
 from scientographer._provenance import stage_settings, steps_for, write_folder_record
 from scientographer.config import FIGURES_PATH, draw_dag, ensure_dirs, params, tracker_adapters
@@ -215,4 +216,5 @@ def save_pubmed_records(pubmed_records: dict[str, str], matched_pmids: list[str]
 
 
 if __name__ == "__main__":
+    require_locked_environment(CURRENT_FILE_NAME)
     sys.exit(_main())
