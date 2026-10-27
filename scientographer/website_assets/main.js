@@ -16,6 +16,7 @@
 
 import Graph from "https://cdn.jsdelivr.net/npm/graphology@0.25.4/+esm";
 import { Sigma } from "https://cdn.jsdelivr.net/npm/sigma@2.4.0/+esm";
+import EdgeFastProgram from "https://cdn.jsdelivr.net/npm/sigma@2.4.0/rendering/webgl/programs/edge.fast/+esm";
 import { MATCH_MODES, makeFilter } from "./textmatch.js?v=2";
 import {
   BRIDGE_MIN_LINKS,
@@ -188,12 +189,12 @@ const state = {
   // into the graph and every centroid read from the data, see orient().
   orientation: { angle: 0, flipX: false, flipY: false }, // angle in degrees
   dotScale: 1, // the Dot size slider
-  // The Edge opacity and Edge thickness sliders. Each citation is drawn on its own,
-  // so in the dense middle of the map hundreds overlap and their colours add up
-  // towards white; a low opacity keeps them apart. (The PNG export strokes all
-  // edges of one colour as one path, whose overlaps do not add up.)
-  edgeOpacity: 0.05,
-  edgeWidth: 0.1,
+  // The Edge opacity and Edge thickness (pixels) sliders. Each citation is drawn
+  // on its own, so in the dense middle of the map many overlap; a low opacity
+  // keeps their colours apart. (The PNG export strokes all edges of one colour as
+  // one path, whose overlaps do not add up.)
+  edgeOpacity: 0.2,
+  edgeWidth: 0.5,
 
   // The Connectivity Modifier's verdict per resolution (well_connected.json):
   // { n, resolutions: { "<r>": base64 bitset } }, decoded lazily into masks.
@@ -710,6 +711,7 @@ async function main() {
 async function loadDataset(name) {
   const cfg = DATASETS[name];
   state.dataset = name;
+  citationEdgeStyles.clear(); // 2D and 3D edges are styled differently
 
   // "community" has no static file (see DATASETS) -- its data is resolution-
   // indexed and populated below by setupResolutionMetrics().
@@ -1398,13 +1400,14 @@ function initOrientationControls() {
   edgeOpacity?.addEventListener("input", () => {
     document.getElementById("edge-opacity-value").textContent = edgeOpacity.value;
     state.edgeOpacity = parseFloat(edgeOpacity.value);
-    citationEdgeColors.clear();
+    citationEdgeStyles.clear();
     state.renderer?.refresh();
   });
   const edgeWidth = document.getElementById("edge-width");
   edgeWidth?.addEventListener("input", () => {
     document.getElementById("edge-width-value").textContent = edgeWidth.value;
     state.edgeWidth = parseFloat(edgeWidth.value);
+    citationEdgeStyles.clear();
     state.renderer?.refresh();
   });
   // Auto-rotate (3D views): on by default, this button stops and restarts it.
@@ -1873,6 +1876,7 @@ function initSigma() {
     labelFont: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
     minCameraRatio: 0.03,
     maxCameraRatio: 30,
+    edgeProgramClasses: { fast: EdgeFastProgram },
     nodeReducer,
     edgeReducer,
   });
@@ -1991,24 +1995,42 @@ function edgeReducer(edge, attrs) {
     if (!state.showEdges) return { ...attrs, hidden: true };
     // Coloured by the citing paper, like the PNG export's edges.
     const source = state.nodesData.nodes[parseInt(edge.slice(7), 10)];
-    return { ...attrs, color: citationEdgeColor(nodeColor(source)), size: state.edgeWidth };
+    return { ...attrs, ...citationEdgeStyle(nodeColor(source)) };
   } else if (edge.startsWith("__intra:")) {
     if (!state.showIntraTopic) return { ...attrs, hidden: true };
   }
   return attrs;
 }
 
-// A paper's colour at the Edge opacity slider's opacity, cached per colour (and
-// cleared when the slider moves) as the reducer runs for every citation on each
-// redraw.
-const citationEdgeColors = new Map();
-function citationEdgeColor(color) {
-  let edgeColor = citationEdgeColors.get(color);
-  if (!edgeColor) {
-    edgeColor = `rgba(${parseColor(color).join(",")},${state.edgeOpacity})`;
-    citationEdgeColors.set(color, edgeColor);
+// A citation's colour and line, from the citing paper's colour and the Edge
+// opacity and Edge thickness sliders. Cached per colour (cleared when a slider or
+// the view changes) as the reducer runs for every citation on each redraw.
+//
+// The 2D map (sigma 2.4) blends edges as premultiplied colours (gl.ONE,
+// gl.ONE_MINUS_SRC_ALPHA), so the colour is multiplied by its opacity here;
+// otherwise every edge adds its full colour and the overlaps turn white. Sigma
+// draws its edges at least 1.7 pixels wide, so thinner edges are its one-pixel
+// lines ("fast") made fainter in proportion. The 3D viewer blends ordinary
+// colours and draws one-pixel lines.
+const citationEdgeStyles = new Map();
+const SIGMA_MIN_EDGE_WIDTH = 1.7;
+function citationEdgeStyle(color) {
+  let style = citationEdgeStyles.get(color);
+  if (!style) {
+    const rgb = parseColor(color);
+    if (is3D()) {
+      style = { color: `rgba(${rgb.join(",")},${state.edgeOpacity})` };
+    } else {
+      const thin = state.edgeWidth < SIGMA_MIN_EDGE_WIDTH;
+      const alpha = state.edgeOpacity * (thin ? Math.min(1, state.edgeWidth) : 1);
+      const premultiplied = rgb.map((v) => Math.round(v * alpha));
+      style = thin
+        ? { type: "fast", color: `rgba(${premultiplied.join(",")},${alpha})` }
+        : { size: state.edgeWidth, color: `rgba(${premultiplied.join(",")},${alpha})` };
+    }
+    citationEdgeStyles.set(color, style);
   }
-  return edgeColor;
+  return style;
 }
 
 // ── Color modes ───────────────────────────────────────────────────────────

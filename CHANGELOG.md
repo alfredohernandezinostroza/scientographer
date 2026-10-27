@@ -8,9 +8,10 @@ settings or outputs).
 ## [Unreleased]
 
 - **Map edges** are coloured by the citing paper, like the PNG export, instead of
-  one grey, with **Edge opacity** and **Edge thickness** sliders. They start thin and
-  faint (0.05), since each citation is drawn on its own and many faint colours
-  overlapping in the dense middle of the map add up towards white.
+  one grey, with **Edge opacity** (up to 1) and **Edge thickness** (from 0.05 pixels)
+  sliders. Fixed: overlapping edges no longer add up to white on the 2D maps (sigma
+  blends premultiplied colours, which the edge colours were not), and edges can be
+  thinner than sigma's 1.7-pixel minimum.
 - **How a map was made:** `scientographer --version` prints the exact version: the
   release, or from a git checkout of Scientographer the release plus the commit
   (`0.2.0.dev0+g1a2b3c4`, with `.dirty` for uncommitted changes). Every stage writes
