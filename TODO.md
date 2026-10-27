@@ -132,3 +132,5 @@ Where each paper came from:
       (`SCIENTOGRAPHER_ALLOW_ENVIRONMENT_MISMATCH=1`, `--allow-environment-mismatch`).
       The site keeps the full package list, shows it in About (with a
       `requirements.txt` download) and warns about mixed versions and overrides
+- [x] Map edges coloured by the citing paper, like the PNG export; Edge opacity and
+      Edge thickness sliders

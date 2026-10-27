@@ -188,6 +188,12 @@ const state = {
   // into the graph and every centroid read from the data, see orient().
   orientation: { angle: 0, flipX: false, flipY: false }, // angle in degrees
   dotScale: 1, // the Dot size slider
+  // The Edge opacity and Edge thickness sliders. Each citation is drawn on its own,
+  // so in the dense middle of the map hundreds overlap and their colours add up
+  // towards white; a low opacity keeps them apart. (The PNG export strokes all
+  // edges of one colour as one path, whose overlaps do not add up.)
+  edgeOpacity: 0.05,
+  edgeWidth: 0.1,
 
   // The Connectivity Modifier's verdict per resolution (well_connected.json):
   // { n, resolutions: { "<r>": base64 bitset } }, decoded lazily into masks.
@@ -1386,6 +1392,21 @@ function initOrientationControls() {
     state.dotScale = parseFloat(dotSize.value);
     state.renderer?.refresh();
   });
+  // Edge opacity and thickness: the citation edges, in every view (3D lines are
+  // always one pixel wide, so thickness only changes the 2D views).
+  const edgeOpacity = document.getElementById("edge-opacity");
+  edgeOpacity?.addEventListener("input", () => {
+    document.getElementById("edge-opacity-value").textContent = edgeOpacity.value;
+    state.edgeOpacity = parseFloat(edgeOpacity.value);
+    citationEdgeColors.clear();
+    state.renderer?.refresh();
+  });
+  const edgeWidth = document.getElementById("edge-width");
+  edgeWidth?.addEventListener("input", () => {
+    document.getElementById("edge-width-value").textContent = edgeWidth.value;
+    state.edgeWidth = parseFloat(edgeWidth.value);
+    state.renderer?.refresh();
+  });
   // Auto-rotate (3D views): on by default, this button stops and restarts it.
   const autoRotate = document.getElementById("auto-rotate");
   autoRotate?.addEventListener("click", () => {
@@ -1970,20 +1991,21 @@ function edgeReducer(edge, attrs) {
     if (!state.showEdges) return { ...attrs, hidden: true };
     // Coloured by the citing paper, like the PNG export's edges.
     const source = state.nodesData.nodes[parseInt(edge.slice(7), 10)];
-    return { ...attrs, color: citationEdgeColor(nodeColor(source)) };
+    return { ...attrs, color: citationEdgeColor(nodeColor(source)), size: state.edgeWidth };
   } else if (edge.startsWith("__intra:")) {
     if (!state.showIntraTopic) return { ...attrs, hidden: true };
   }
   return attrs;
 }
 
-// A paper's colour at the PNG export's edge opacity, cached per colour as the
-// reducer runs for every citation on each redraw.
+// A paper's colour at the Edge opacity slider's opacity, cached per colour (and
+// cleared when the slider moves) as the reducer runs for every citation on each
+// redraw.
 const citationEdgeColors = new Map();
 function citationEdgeColor(color) {
   let edgeColor = citationEdgeColors.get(color);
   if (!edgeColor) {
-    edgeColor = `rgba(${parseColor(color).join(",")},${EXPORT_EDGE_ALPHA})`;
+    edgeColor = `rgba(${parseColor(color).join(",")},${state.edgeOpacity})`;
     citationEdgeColors.set(color, edgeColor);
   }
   return edgeColor;
