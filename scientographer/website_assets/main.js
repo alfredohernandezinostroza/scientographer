@@ -16,7 +16,9 @@
 
 import Graph from "https://cdn.jsdelivr.net/npm/graphology@0.25.4/+esm";
 import { Sigma } from "https://cdn.jsdelivr.net/npm/sigma@2.4.0/+esm";
-import EdgeFastProgram from "https://cdn.jsdelivr.net/npm/sigma@2.4.0/rendering/webgl/programs/edge.fast/+esm";
+// Sigma's one-pixel edge lines; the CommonJS module's class is on its `default`.
+import edgeFastModule from "https://cdn.jsdelivr.net/npm/sigma@2.4.0/rendering/webgl/programs/edge.fast/+esm";
+const EdgeFastProgram = edgeFastModule.default;
 import { MATCH_MODES, makeFilter } from "./textmatch.js?v=2";
 import {
   BRIDGE_MIN_LINKS,
