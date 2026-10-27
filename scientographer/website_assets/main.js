@@ -26,7 +26,7 @@ import {
   participationCoefficients,
   rankingScores,
   topPapersByGroup,
-} from "./rankings.js?v=1";
+} from "./rankings.js?v=2";
 
 // ── Dataset definitions ─────────────────────────────────────────────────────
 // Each grouping: key (also the "Color by" value), label (detail panel + color
