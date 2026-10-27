@@ -104,9 +104,9 @@ const STEPS = [
     row: true,
     title: "Bridge papers",
     body:
-      "Highlight <strong>bridge papers</strong> in gold: papers with at least 10 " +
-      "citation links spread over many communities (a participation coefficient " +
-      "above 0.62), so they connect otherwise separate parts of the map.",
+      "Highlight <strong>bridge papers</strong> in gold: the 50 papers whose citation " +
+      "links reach across communities the most (participation coefficient × ln(links)), " +
+      "so they connect otherwise separate parts of the map.",
   },
   {
     target: "#top-papers-toggle",

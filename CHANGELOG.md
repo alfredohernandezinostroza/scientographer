@@ -79,6 +79,10 @@ settings or outputs).
   current resolution, shown in the paper panel; **top papers by four rankings**
   (citations, citations within the community, citations per year, PageRank), in
   the community panel and as a new "Highlight top papers" control.
+- **Bridge papers** are now the 50 papers with the highest participation coefficient
+  × ln(links) (at least 10 links) at the current resolution, instead of every paper
+  with a coefficient above 0.62: at a fine resolution that rule marked thousands
+  (3,033 of 22,982 papers on the motor-learning map at γ = 0.0015).
 
 ## [0.1.0] - 2026-10-09
 

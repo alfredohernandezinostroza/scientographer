@@ -17,11 +17,17 @@
 // P_i = 1 - sum over communities c of (k_ic / k_i)^2, where k_i is the paper's
 // number of links and k_ic its links to papers of community c. P is 0 when every
 // link stays in one community and approaches 1 when the links spread evenly over
-// many. Guimerà & Amaral call a node with P > 0.62 a "connector"; a paper needs
-// at least BRIDGE_MIN_LINKS links before its P counts, as a paper with a handful
-// of citations spread over a few communities is not a bridge in any useful sense.
+// many.
+//
+// Bridge papers are the BRIDGE_COUNT papers with the highest P × ln(links): P
+// rewards links spread over communities, ln(links) how many links there are to
+// spread, so a paper with a handful of citations over a few communities does not
+// outrank one that connects hundreds. A paper needs at least BRIDGE_MIN_LINKS
+// links. A fixed count, not a cutoff on P such as Guimerà & Amaral's 0.62: at a
+// fine resolution any well-cited paper's links reach many small communities, and
+// on the motor-learning map P > 0.62 marked 3,033 of 22,982 papers at γ = 0.0015.
 export const BRIDGE_MIN_LINKS = 10;
-export const BRIDGE_MIN_PARTICIPATION = 0.62;
+export const BRIDGE_COUNT = 50;
 
 function neighbors(csr, i) {
   return csr.targets.subarray(csr.offsets[i], csr.offsets[i + 1]);
@@ -63,12 +69,24 @@ export function participationCoefficients(outCSR, inCSR, groupOf) {
   return { coefficient, links, communitiesReached };
 }
 
-// 1 for the bridge papers of a participationCoefficients() result, else 0.
-export function bridgePapers({ coefficient, links }) {
-  const bridge = new Uint8Array(coefficient.length);
-  for (let i = 0; i < coefficient.length; i++) {
-    bridge[i] = links[i] >= BRIDGE_MIN_LINKS && coefficient[i] > BRIDGE_MIN_PARTICIPATION ? 1 : 0;
+// A paper's bridge score, P × ln(links); 0 below BRIDGE_MIN_LINKS links.
+export function bridgeScore(coefficient, links) {
+  return links >= BRIDGE_MIN_LINKS ? coefficient * Math.log(links) : 0;
+}
+
+// 1 for the bridge papers of a participationCoefficients() result, else 0: the
+// `count` papers with the highest bridge score (ties: more links first), leaving
+// out papers whose score is 0.
+export function bridgePapers({ coefficient, links }, count = BRIDGE_COUNT) {
+  const n = coefficient.length;
+  const scored = [];
+  for (let i = 0; i < n; i++) {
+    const score = bridgeScore(coefficient[i], links[i]);
+    if (score > 0) scored.push([score, links[i], i]);
   }
+  scored.sort((a, b) => b[0] - a[0] || b[1] - a[1] || a[2] - b[2]);
+  const bridge = new Uint8Array(n);
+  for (const [, , i] of scored.slice(0, count)) bridge[i] = 1;
   return bridge;
 }
 

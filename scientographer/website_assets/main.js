@@ -19,7 +19,7 @@ import { Sigma } from "https://cdn.jsdelivr.net/npm/sigma@2.4.0/+esm";
 import { MATCH_MODES, makeFilter } from "./textmatch.js?v=2";
 import {
   BRIDGE_MIN_LINKS,
-  BRIDGE_MIN_PARTICIPATION,
+  BRIDGE_COUNT,
   DEFAULT_RANKING,
   RANKINGS,
   bridgePapers,
@@ -2497,7 +2497,7 @@ function showPaperDetail(idx) {
   // Its participation coefficient at the current resolution (rankings.js).
   const bridges = bridgeData();
   const bridgeBadge = bridges?.bridge[idx]
-    ? `<span class="cluster-tag" style="background:${BRIDGE_COLOR};color:#0e1116" title="Links many communities: at least ${BRIDGE_MIN_LINKS} links and a participation coefficient above ${BRIDGE_MIN_PARTICIPATION}">Bridge paper</span>`
+    ? `<span class="cluster-tag" style="background:${BRIDGE_COLOR};color:#0e1116" title="One of the ${BRIDGE_COUNT} papers whose links reach across communities the most (participation coefficient × ln(links), at least ${BRIDGE_MIN_LINKS} links)">Bridge paper</span>`
     : "";
   const participationHtml = bridges && bridges.links[idx]
     ? `<div class="meta">Participation coefficient ${bridges.coefficient[idx].toFixed(2)} &middot; links reach ${bridges.communitiesReached[idx]} ${bridges.communitiesReached[idx] === 1 ? "community" : "communities"}</div>`

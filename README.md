@@ -347,9 +347,10 @@ get it with `scientographer init --force` (which rewrites `dvc.yaml` and
   substrings or regular expressions. A comma means AND, `|` means OR, and quoted
   text is matched literally, so pasted titles find exactly those papers:
   `"First title" | "Second title"`.
-- **Bridge papers** (gold): papers with at least 10 citation links spread over many
-  communities at the current resolution (participation coefficient above 0.62,
-  Guimerà & Amaral 2005); the paper panel shows each paper's coefficient.
+- **Bridge papers** (gold): the 50 papers whose citation links reach across
+  communities the most at the current resolution (participation coefficient,
+  Guimerà & Amaral 2005, times the log of the paper's links; at least 10 links); the
+  paper panel shows each paper's coefficient.
 - **Top papers** of every community or topic, ranked by citations, citations from
   within the community, citations per year, or PageRank; one menu ranks them in the
   community panel and highlights them (white) on the map.
