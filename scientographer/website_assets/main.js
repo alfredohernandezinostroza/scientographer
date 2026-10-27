@@ -1968,10 +1968,25 @@ function edgeReducer(edge, attrs) {
   // Static citation layer is hidden unless the global toggle is on.
   if (edge.startsWith("__cite:")) {
     if (!state.showEdges) return { ...attrs, hidden: true };
+    // Coloured by the citing paper, like the PNG export's edges.
+    const source = state.nodesData.nodes[parseInt(edge.slice(7), 10)];
+    return { ...attrs, color: citationEdgeColor(nodeColor(source)) };
   } else if (edge.startsWith("__intra:")) {
     if (!state.showIntraTopic) return { ...attrs, hidden: true };
   }
   return attrs;
+}
+
+// A paper's colour at the PNG export's edge opacity, cached per colour as the
+// reducer runs for every citation on each redraw.
+const citationEdgeColors = new Map();
+function citationEdgeColor(color) {
+  let edgeColor = citationEdgeColors.get(color);
+  if (!edgeColor) {
+    edgeColor = `rgba(${parseColor(color).join(",")},${EXPORT_EDGE_ALPHA})`;
+    citationEdgeColors.set(color, edgeColor);
+  }
+  return edgeColor;
 }
 
 // ── Color modes ───────────────────────────────────────────────────────────
