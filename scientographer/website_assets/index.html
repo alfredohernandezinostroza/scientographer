@@ -7,7 +7,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{SITE_TITLE}}</title>
   <link rel="icon" type="image/svg+xml" href="scientographer-icon.svg">
-  <link rel="stylesheet" href="styles.css?v=18">
+  <link rel="stylesheet" href="styles.css?v=19">
 
   <!-- Tabulator -->
   <link href="https://unpkg.com/tabulator-tables@6.3.1/dist/css/tabulator.min.css" rel="stylesheet">
@@ -255,6 +255,16 @@
     <input id="filter-mesh" type="search" placeholder="Filter by MeSH terms, comma-separated..." hidden>
 
     <div class="control-row">
+      <label id="filter-combine-label">Papers must match</label>
+      <label class="combine-switch" title="With several text filters filled in: keep the papers that match all of them, or any of them. Years, well-connected papers and hidden communities always apply.">
+        <span class="combine-side combine-all">All filters</span>
+        <input id="filter-any" type="checkbox" role="switch" aria-labelledby="filter-combine-label">
+        <span class="combine-track" aria-hidden="true"><span class="combine-knob"></span></span>
+        <span class="combine-side combine-any">Any filter</span>
+      </label>
+    </div>
+
+    <div class="control-row">
       <label>Text matching</label>
       <select id="match-mode" title="How search and filters match text: whole words (with plurals), word beginnings, anywhere, or a regular expression. A comma means AND, | means OR, and quoted text is matched literally: &quot;first title&quot; | &quot;second title&quot; finds either paper."></select>
     </div>
@@ -489,7 +499,7 @@
   <script src="https://unpkg.com/tabulator-tables@6.3.1/dist/js/tabulator.min.js"></script>
 
   <!-- App -->
-  <script type="module" src="main.js?v=47"></script>
+  <script type="module" src="main.js?v=48"></script>
   <!-- Guided tour (independent of main.js; only reads the DOM) -->
   <script type="module" src="tour.js?v=6"></script>
   <!-- Word map tab (lazy: loads its data the first time the tab is opened) -->

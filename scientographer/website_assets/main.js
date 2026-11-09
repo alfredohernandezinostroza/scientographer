@@ -204,6 +204,7 @@ const state = {
   wellConnectedMasks: {},
   wellConnectedOnly: true, // the "Papers" control
   matchMode: "word", // search + filters: word | prefix | substring | regex (textmatch.js)
+  filterAny: false, // filled text filters: false = a paper must match all, true = any
 
   // floating-label bookkeeping for the currently-active grouping
   labelMode: "dynamic", // dynamic | always
@@ -3247,6 +3248,15 @@ function initGlobalFilters() {
 
   btn.addEventListener("click", run);
 
+  const any = document.getElementById("filter-any");
+  if (any) {
+    any.checked = state.filterAny;
+    any.addEventListener("change", () => {
+      state.filterAny = any.checked;
+      if (state.filteredSet) run();
+    });
+  }
+
   const mode = document.getElementById("match-mode");
   if (mode) {
     mode.innerHTML = MATCH_MODES.map((m) => `<option value="${m.value}">${escapeHtml(m.label)}</option>`).join("");
@@ -3272,6 +3282,19 @@ async function ensureAbstractsLoadedIfNeeded() {
   if (state.filters.abstract.trim() && !state.abstracts) await loadAbstract("n2");
 }
 
+// The text a filter searches, for paper i.
+function fieldText(field, i) {
+  const idx = state.index;
+  switch (field) {
+    case "title": return idx.title[i];
+    case "author": return idx.authors[i];
+    case "abstract": return state.abstracts?.[state.nodesData.nodes[i].id] || "";
+    case "keywords": return idx.keywords[i];
+    case "mesh": return idx.mesh[i];
+    default: return idx.journal[i];
+  }
+}
+
 async function applyGlobalFilters() {
   await ensureAbstractsLoadedIfNeeded();
 
@@ -3290,21 +3313,22 @@ async function applyGlobalFilters() {
 
   const lo = state.yearMin;
   const hi = state.yearMax;
-  const idx = state.index;
   const nodes = state.nodesData.nodes;
   const out = new Set();
+  // A paper must match all the filled text filters, or any of them with the
+  // "Any filter" switch; years, well-connected papers, muted groups and the time
+  // snapshot always apply.
+  const filled = Object.entries(tests).filter(([, test]) => test);
 
   for (let i = 0; i < nodes.length; i++) {
     const r = nodes[i];
     if (state.snapshot && !state.snapshot.visible.has(String(i))) continue;
     if (r.year != null && (r.year < lo || r.year > hi)) continue;
     if (nodeHiddenByMute(r) || removedByModifier(i)) continue;
-    if (tests.title && !tests.title(idx.title[i])) continue;
-    if (tests.journal && !tests.journal(idx.journal[i])) continue;
-    if (tests.author && !tests.author(idx.authors[i])) continue;
-    if (tests.keywords && !tests.keywords(idx.keywords[i])) continue;
-    if (tests.mesh && !tests.mesh(idx.mesh[i])) continue;
-    if (tests.abstract && !tests.abstract(state.abstracts?.[r.id] || "")) continue;
+    if (filled.length) {
+      const matches = ([field, test]) => test(fieldText(field, i));
+      if (state.filterAny ? !filled.some(matches) : !filled.every(matches)) continue;
+    }
     out.add(String(i));
   }
 
