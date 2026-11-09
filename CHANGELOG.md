@@ -7,6 +7,16 @@ settings or outputs).
 
 ## [Unreleased]
 
+- **Search and filters use the query syntax of PubMed and Scopus:** `AND`, `OR`
+  (or `|`) and `NOT` in capitals, brackets to group, quotes for an exact phrase:
+  `(speech OR language) AND children NOT apraxia`. A space between words now means
+  AND (it was a phrase: quote `"motor learning"` for that), and a comma is no longer
+  an operator: outside quotes it separates words like a space, inside quotes it is
+  matched literally (`"Wolpert, Daniel"`). `&` is plain text. A malformed query says
+  what is wrong ("Invalid query: a bracket is not closed"). The map's search box
+  tests the title and authors together, and the Word map tab uses the same syntax,
+  its "Abstract + keywords" column testing the query on both texts together.
+
 - **Map edges** are coloured by the citing paper, like the PNG export, instead of
   one grey, with **Edge opacity** (up to 1) and **Edge thickness** (from 0.05 pixels)
   sliders. Fixed: overlapping edges no longer add up to white on the 2D maps (sigma

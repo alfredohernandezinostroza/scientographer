@@ -17,7 +17,7 @@
 // filter on, only the papers the Connectivity Modifier keeps at that resolution
 // are counted, smoothed and drawn.
 
-import { MATCH_MODES, buildMatcher, parseTerms } from "./textmatch.js?v=2";
+import { MATCH_MODES, makeQuery } from "./textmatch.js?v=3";
 
 const FIELDS = [
   { key: "abstract", label: "Abstract" },
@@ -234,17 +234,20 @@ function density(L, weights, grid, extent, mode, sigma) {
 }
 
 // ── Counting + weighting ──────────────────────────────────────────────────
-// Matches per paper id for the abstract and keyword fields, counted once for
-// all views.
-function countById(matcher) {
-  const abstract = new Map(), keywords = new Map();
+// Mentions per matching paper id for the abstract, the keywords and both
+// together (the query is tested on the joined text, so speech AND children can
+// match a word in each), counted once for all views.
+function countById(query) {
+  const abstract = new Map(), keywords = new Map(), both = new Map();
   for (const [id, text] of state.texts) {
-    const a = text.abstract ? text.abstract.match(matcher.re) : null;
-    const k = text.keywords ? text.keywords.match(matcher.re) : null;
-    if (a) abstract.set(id, a.length);
-    if (k) keywords.set(id, k.length);
+    const a = text.abstract ? query.count(text.abstract) : 0;
+    const k = text.keywords ? query.count(text.keywords) : 0;
+    const b = text.abstract || text.keywords ? query.count(`${text.abstract}\n|\n${text.keywords}`) : 0;
+    if (a) abstract.set(id, a);
+    if (k) keywords.set(id, k);
+    if (b) both.set(id, b);
   }
-  return { abstract, keywords };
+  return { abstract, keywords, both };
 }
 
 const wordCounts = new Map();
@@ -265,9 +268,7 @@ function weightsFor(L, byId, field, how) {
   for (let i = 0; i < L.n; i++) {
     if (kept && !kept[i]) continue;
     const id = L.ids[i];
-    const c = field === "both"
-      ? (byId.abstract.get(id) || 0) + (byId.keywords.get(id) || 0)
-      : (byId[field].get(id) || 0);
+    const c = byId[field].get(id) || 0;
     if (!c) continue;
     counts[i] = c;
     if (how === "presence") weights[i] = 1;
@@ -398,7 +399,7 @@ function savePng(layoutKey, fieldKey, button) {
     const f = density(L, last.weights, grid, extent, el("wm-mode").value, bw / grid.cell);
     const canvas = document.createElement("canvas");
     paint(canvas, L, f, last.counts, grid, extent, EXPORT_W, true);
-    const words = parseTerms(el("wm-words").value).join("_").replace(/\W+/g, "") || "map";
+    const words = el("wm-words").value.trim().replace(/\W+/g, "_").replace(/^_|_$/g, "").slice(0, 60) || "map";
     const a = document.createElement("a");
     a.download = `wordmap_${layoutKey}_${fieldKey}_${words}_${EXPORT_W}px.png`;
     a.href = canvas.toDataURL("image/png");
@@ -429,11 +430,11 @@ async function recompute() {
   const status = el("wm-status");
   let matcher;
   try {
-    matcher = buildMatcher(parseTerms(el("wm-words").value), el("wm-match").value);
+    matcher = makeQuery(el("wm-words").value, el("wm-match").value);
     status.className = "";
   } catch (err) {
     status.className = "wm-err";
-    status.textContent = `Invalid regular expression: ${err.message}`;
+    status.textContent = `Invalid query: ${err.message}`;
     return;
   }
   el("wm-forms").innerHTML = matcher

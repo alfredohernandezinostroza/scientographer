@@ -77,6 +77,8 @@ Where each paper came from:
       `init --own-references` for corpora that bring their own (#5)
 - [x] `init` keeps an existing project's `dvc.yaml` and `params.yaml` (#5)
 - [x] Search and filters: `|` means OR, quoted text is matched literally (#6)
+- [x] Search and filters: `AND` / `OR` / `NOT`, brackets and phrases, as in PubMed and
+      Scopus; a space means AND, commas are not operators
 - [x] 3D and LinLog views: the `citation_layouts` stage, a three.js viewer for 3D
       views, layouts lined up with the 2D map (#7)
 - [x] The map opens on the standard 3D view; auto-rotate, turn and tilt buttons (#7)
