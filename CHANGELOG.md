@@ -59,6 +59,9 @@ settings or outputs).
   their own references table use `init --own-references`.
 - `init` on an existing project keeps its `dvc.yaml` and `params.yaml` as they are
   (`--force` starts it again).
+- **Typed slider values:** click a slider's value (dot size, edge opacity and
+  thickness, the years, the Word map's bandwidth) to type an exact one; Enter applies
+  it, Escape cancels. The year readout takes both ends (`1990-2010`).
 - **LinLog and 3D layouts:** a new `citation_layouts` stage runs ForceAtlas2 again,
   in LinLog mode and/or in 3D, and the map shows each result as another view; 3D
   views open in a 3D viewer (three.js, loaded only for them) with the same legend,

@@ -277,6 +277,24 @@ html, body {
 #controls input[type="search"]:focus { border-color: var(--accent); }
 #controls input[type="search"][hidden] { display: none; }
 
+/* A slider's value can be clicked and typed into. */
+.editable-value {
+  cursor: text;
+  border-bottom: 1px dotted var(--text-dim);
+  text-transform: none;
+}
+.editable-value:hover, .editable-value:focus { color: var(--text); outline: none; }
+.editable-value-input {
+  font: inherit;
+  font-size: 11px;
+  color: var(--text);
+  background: #161a22;
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  padding: 0 3px;
+  width: auto;
+}
+
 .control-row {
   margin-top: 10px;
   display: flex;
