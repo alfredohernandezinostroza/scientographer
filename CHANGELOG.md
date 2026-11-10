@@ -84,6 +84,10 @@ settings or outputs).
   citations, the same tiny dot, and community top-paper lists in arbitrary order:
   the site read only Gephi's own in-degree, degree and size columns. It now counts
   them from the graph's citations when those columns are missing.
+- **All or any filter:** a switch under the map's filters chooses whether a paper
+  must match all the filled text filters (as before) or any of them, so a word can be
+  looked for in the abstract or the keywords. Years, well-connected papers and hidden
+  communities always apply.
 - A **Dot size** slider in every view.
 - **Search and filters:** `|` means OR and quoted text is matched literally (commas,
   brackets and all), so `"First title" | "Second title"` finds exactly those papers;

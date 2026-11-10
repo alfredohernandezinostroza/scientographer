@@ -255,6 +255,16 @@
     <input id="filter-mesh" type="search" placeholder="Filter by MeSH terms..." hidden>
 
     <div class="control-row">
+      <label id="filter-combine-label">Papers must match</label>
+      <label class="toggle-switch" title="With several text filters filled in: keep the papers that match all of them, or any of them. Years, well-connected papers and hidden communities always apply.">
+        <span class="toggle-side toggle-left">All filters</span>
+        <input id="filter-any" type="checkbox" role="switch" aria-labelledby="filter-combine-label">
+        <span class="toggle-track" aria-hidden="true"><span class="toggle-knob"></span></span>
+        <span class="toggle-side toggle-right">Any filter</span>
+      </label>
+    </div>
+
+    <div class="control-row">
       <label>Text matching</label>
       <select id="match-mode" title="How search and filters match each word: whole words (with plurals), word beginnings, anywhere, or a regular expression. Combine words as in PubMed or Scopus: a space or AND means both, OR (or |) either, NOT excludes, brackets group, and quoted text is matched literally: (speech OR language) AND children NOT apraxia; &quot;first title&quot; OR &quot;second title&quot; finds either paper. AND, OR and NOT count only in capitals."></select>
     </div>
