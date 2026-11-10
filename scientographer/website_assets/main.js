@@ -19,7 +19,7 @@ import { Sigma } from "https://cdn.jsdelivr.net/npm/sigma@2.4.0/+esm";
 // Sigma's one-pixel edge lines; the CommonJS module's class is on its `default`.
 import edgeFastModule from "https://cdn.jsdelivr.net/npm/sigma@2.4.0/rendering/webgl/programs/edge.fast/+esm";
 const EdgeFastProgram = edgeFastModule.default;
-import { MATCH_MODES, makeFilter } from "./textmatch.js?v=3";
+import { MATCH_MODES, makeFilter, makeQuery } from "./textmatch.js?v=4";
 import {
   BRIDGE_MIN_LINKS,
   BRIDGE_COUNT,
@@ -3265,11 +3265,42 @@ function initGlobalFilters() {
     mode.value = state.matchMode;
     mode.addEventListener("change", () => {
       state.matchMode = mode.value;
+      inputs.forEach(showQuery);
       if (state.filteredSet) run();
     });
   }
 
   const inputs = [elTitle, elAuthor, elAbstract, elJournal, elKeywords, elMesh].filter(Boolean);
+
+  // Under each filter, the query as it will be searched in the current matching
+  // mode (plurals, operators, brackets), or what is wrong with it.
+  const showQuery = (input) => {
+    const line = input._queryLine;
+    let query = null, error = null;
+    try {
+      query = makeQuery(input.value, state.matchMode);
+    } catch (err) {
+      error = err.message;
+    }
+    line.hidden = input.hidden || (!query && !error);
+    line.classList.toggle("query-error", !!error);
+    line.innerHTML = error
+      ? `Invalid query: ${escapeHtml(error)}`
+      : query ? `searching <code>${escapeHtml(query.text)}</code>` : "";
+  };
+  for (const input of inputs) {
+    const line = document.createElement("div");
+    line.className = "query-line";
+    line.hidden = true;
+    input.after(line);
+    input._queryLine = line;
+    let timer = null;
+    input.addEventListener("input", () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => showQuery(input), 150);
+    });
+  }
+
   for (const input of inputs) {
     input.addEventListener("keydown", (e) => {
       if (e.key !== "Enter") return;

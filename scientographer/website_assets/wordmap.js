@@ -17,7 +17,7 @@
 // filter on, only the papers the Connectivity Modifier keeps at that resolution
 // are counted, smoothed and drawn.
 
-import { MATCH_MODES, makeQuery } from "./textmatch.js?v=3";
+import { MATCH_MODES, makeQuery } from "./textmatch.js?v=4";
 
 const FIELDS = [
   { key: "abstract", label: "Abstract" },
@@ -438,7 +438,7 @@ async function recompute() {
     return;
   }
   el("wm-forms").innerHTML = matcher
-    ? `searching <code>${matcher.forms.map((f) => f.replace(/[<&>]/g, "")).join(" | ")}</code>`
+    ? `searching <code>${matcher.text.replace(/[<&>]/g, "")}</code>`
     : "";
   if (!matcher) {
     status.textContent = "Type a word to search.";

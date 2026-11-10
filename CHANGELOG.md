@@ -17,6 +17,13 @@ settings or outputs).
   tests the title and authors together, and the Word map tab uses the same syntax,
   its "Abstract + keywords" column testing the query on both texts together.
 
+- **The query as it is searched** shows under each filter as you type, in the chosen
+  matching mode: `(speech | speeches) AND (child | children) AND NOT (apraxia |
+  apraxias)`, or what is wrong with it. Whole-word matching takes singular and
+  plural alike, whichever is typed (*sports* finds *sport*, *studies* finds *study*),
+  no longer searches made-up forms (*speechs*, *sportses*), leaves words like
+  *series* and *kinematics* as they are, and knows a few irregular plurals common in
+  the literature (child/children, mouse/mice, stimulus/stimuli, criterion/criteria).
 - **Map edges** are coloured by the citing paper, like the PNG export, instead of
   one grey, with **Edge opacity** (up to 1) and **Edge thickness** (from 0.05 pixels)
   sliders. Fixed: overlapping edges no longer add up to white on the 2D maps (sigma
