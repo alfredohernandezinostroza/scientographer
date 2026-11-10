@@ -276,6 +276,16 @@ html, body {
 }
 #controls input[type="search"]:focus { border-color: var(--accent); }
 #controls input[type="search"][hidden] { display: none; }
+.query-line {
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1.4;
+  margin-top: 3px;
+  overflow-wrap: anywhere;
+}
+.query-line[hidden] { display: none; }
+.query-line code { color: var(--text); }
+.query-line.query-error { color: #ff8a8a; }
 
 /* A slider's value can be clicked and typed into. */
 .editable-value {

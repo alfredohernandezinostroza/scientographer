@@ -345,12 +345,14 @@ get it with `scientographer init --force` (which rewrites `dvc.yaml` and
   filtered map with the whole one.
 - **Search and filters** on title, author, abstract, journal, keywords and (for a
   PubMed corpus) MeSH terms, matching
-  whole words by default (so *dance* does not match *guidance*), or prefixes,
+  whole words by default (so *dance* does not match *guidance*; singular and regular
+  plural alike, whichever is typed: *sports* also finds *sport*), or prefixes,
   substrings or regular expressions. Words combine as in PubMed or Scopus: a space
   or `AND` means both, `OR` (or `|`) either, `NOT` excludes, brackets group, and
   quoted text is matched literally, so pasted titles find exactly those papers:
   `(speech OR language) AND children NOT apraxia`,
-  `"First title" OR "Second title"`.
+  `"First title" OR "Second title"`. Under each filter, the query is shown as it is
+  searched: `(speech | speeches) AND (child | children)`.
 - **Bridge papers** (gold): the 50 papers whose citation links reach across
   communities the most at the current resolution (participation coefficient,
   Guimerà & Amaral 2005, times the log of the paper's links; at least 10 links); the

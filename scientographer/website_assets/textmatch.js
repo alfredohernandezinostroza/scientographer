@@ -16,8 +16,9 @@
 // whole titles and "Surname, Name" can be pasted.
 //
 // How each word is matched depends on the mode:
-//   word      whole words, plus regular plurals: "rat" finds rat/rats, not rate,
-//             rationale; "dance" finds dance/dances, not guidance or impedance
+//   word      whole words, singular or regular plural, whichever is typed:
+//             "rat" and "rats" both find rat/rats, not rate or rationale;
+//             "dance" finds dance/dances, not guidance or impedance
 //   prefix    words that start with the term: "bird" finds birdsong
 //   substring anywhere, also inside words (the old behaviour)
 //   regex     the text between the operators is a JavaScript regular
@@ -33,11 +34,42 @@ export const MATCH_MODES = [
   { value: "regex", label: "Regular expression" },
 ];
 
+// Simple English rules, not a dictionary: a short table of irregular plurals
+// common in the literature; any other irregular plural needs both forms typed.
+// Words that are the same in both numbers (series, kinematics) stay as typed.
+const SAME_IN_BOTH = /^(?:series|species|news|diabetes|herpes|\w+ics)$/i;
+const IRREGULAR = Object.fromEntries([
+  ["child", "children"], ["man", "men"], ["woman", "women"], ["mouse", "mice"],
+  ["foot", "feet"], ["tooth", "teeth"], ["person", "people"], ["criterion", "criteria"],
+  ["phenomenon", "phenomena"], ["stimulus", "stimuli"], ["nucleus", "nuclei"],
+].flatMap(([one, many]) => [[one, [one, many]], [many, [one, many]]]));
+
+// The singular of a regular plural, or the word itself.
+export function singular(word) {
+  if (IRREGULAR[word.toLowerCase()]) return IRREGULAR[word.toLowerCase()][0];
+  if (word.length < 4 || SAME_IN_BOTH.test(word)) return word;
+  if (/[^aeiou]ies$/i.test(word)) return word.slice(0, -3) + (word.slice(-3) === "IES" ? "Y" : "y");
+  if (/(?:ss|x|z|ch|sh)es$/i.test(word)) return word.slice(0, -2);
+  if (/[^sui]s$/i.test(word)) return word.slice(0, -1);
+  return word;
+}
+
+// A singular and its regular plural.
+function pluralOf(word) {
+  if (/is$/i.test(word) && word.length > 4) return word.slice(0, -2) + "es"; // analysis → analyses
+  if (/(?:s|x|z|ch|sh)$/i.test(word)) return word + "es";
+  if (/[^aeiou]y$/i.test(word)) return word.slice(0, -1) + "ies";
+  return word + "s";
+}
+
+// The forms searched for a word in the whole-words mode: the word as typed,
+// its singular and that singular's plural (sport, sports → sport | sports).
 export function plurals(word) {
-  const forms = new Set([word, word + "s"]);
-  if (/(?:s|x|z|ch|sh)$/i.test(word)) forms.add(word + "es");
-  if (/[^aeiou]y$/i.test(word)) forms.add(word.slice(0, -1) + "ies");
-  return [...forms];
+  const irregular = IRREGULAR[word.toLowerCase()];
+  if (irregular) return irregular;
+  if (SAME_IN_BOTH.test(word)) return [word];
+  const one = singular(word);
+  return [...new Set([one, pluralOf(one), word])];
 }
 
 export const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -60,10 +92,10 @@ export function parseTerms(str) {
 export function buildMatcher(terms, mode = "word") {
   if (!terms.length) return null;
   if (mode === "regex") {
-    return { re: new RegExp(terms.map((t) => `(?:${t})`).join("|"), "gi"), forms: terms };
+    return { re: new RegExp(terms.map((t) => `(?:${t})`).join("|"), "gi"), forms: terms.map((t) => `/${t}/`) };
   }
   if (mode === "substring") {
-    return { re: new RegExp(terms.map(escapeRegExp).join("|"), "gi"), forms: terms };
+    return { re: new RegExp(terms.map(escapeRegExp).join("|"), "gi"), forms: terms.map((t) => `…${t}…`) };
   }
   if (mode === "prefix") {
     return {
@@ -71,7 +103,7 @@ export function buildMatcher(terms, mode = "word") {
       forms: terms.map((t) => t + "…"),
     };
   }
-  const forms = terms.flatMap(plurals).sort();
+  const forms = [...new Set(terms.flatMap(plurals))];
   return { re: new RegExp("\\b(?:" + forms.map(escapeRegExp).join("|") + ")\\b", "gi"), forms };
 }
 
@@ -211,9 +243,22 @@ function positiveLeaves(node, negated = false, out = []) {
   return out;
 }
 
+// The query as it is searched, e.g. (speech | speeches) AND children NOT
+// apraxia: each word replaced by its forms, brackets only where needed.
+const RANK = { or: 0, and: 1, not: 2, leaf: 3 };
+function describe(node) {
+  const inner = (child, min) => (RANK[child.op] < min ? `(${describe(child)})` : describe(child));
+  switch (node.op) {
+    case "leaf": return node.forms.length > 1 ? `(${node.forms.join(" | ")})` : node.forms[0];
+    case "not": return `NOT ${inner(node.arg, RANK.not)}`;
+    case "and": return node.args.map((a) => inner(a, RANK.and)).join(" AND ");
+    default: return node.args.map((a) => inner(a, RANK.not)).join(" OR "); // brackets an AND inside an OR
+  }
+}
+
 // { test(text) -> boolean, count(text) -> mentions of the searched words in a
-// matching text (0 otherwise), forms (what is searched, for display) }, or null
-// for an empty query.
+// matching text (0 otherwise), forms (what is searched), text (the whole query
+// as it is searched, for display) }, or null for an empty query.
 export function makeQuery(query, mode = "word") {
   const tree = parseQuery(query, mode);
   if (!tree) return null;
@@ -225,7 +270,7 @@ export function makeQuery(query, mode = "word") {
     for (const l of leaves) n += (text.match(l.re) || []).length;
     return Math.max(1, n); // a paper matching only through NOT still counts once
   };
-  return { test, count, forms: [...new Set(leaves.flatMap((l) => l.forms))] };
+  return { test, count, forms: [...new Set(leaves.flatMap((l) => l.forms))], text: describe(tree) };
 }
 
 // A filter: a function text -> boolean, or null when the query is empty.

@@ -13,6 +13,8 @@ Finished items stay at the bottom until the next release, then go to the CHANGEL
 - [ ] Communities whose keyword names come out the same: tell them apart in the legend
 - [ ] Word heatmaps (the Word map tab's densities) as a filter in the map views: 2D, 3D,
       LinLog, all of them. Needs a way to handle the density (KDE) in 3D and on each layout
+- [ ] Plurals and word forms from a lemmatization library instead of the simple
+      rules in `textmatch.js` (irregular plurals, verb forms)
 - [ ] Field tags in the filters' queries (`speech[keywords] OR speech[abstract]`), for
       mixes that the all/any switch cannot express
 - [ ] Journal reputation: hold journal ranking metadata (SCImago, Web of Science, other
