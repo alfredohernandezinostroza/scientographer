@@ -19,7 +19,7 @@ import { Sigma } from "https://cdn.jsdelivr.net/npm/sigma@2.4.0/+esm";
 // Sigma's one-pixel edge lines; the CommonJS module's class is on its `default`.
 import edgeFastModule from "https://cdn.jsdelivr.net/npm/sigma@2.4.0/rendering/webgl/programs/edge.fast/+esm";
 const EdgeFastProgram = edgeFastModule.default;
-import { MATCH_MODES, makeFilter } from "./textmatch.js?v=2";
+import { MATCH_MODES, makeFilter } from "./textmatch.js?v=3";
 import {
   BRIDGE_MIN_LINKS,
   BRIDGE_COUNT,
@@ -3014,7 +3014,8 @@ function initSearch() {
       list.innerHTML = "";
       return;
     }
-    // Titles and authors in the chosen matching mode; DOIs anywhere.
+    // Titles and authors together in the chosen matching mode (so a query can
+    // name an author and a title word); DOIs anywhere.
     let test;
     try {
       test = makeFilter(q, state.matchMode);
@@ -3027,7 +3028,7 @@ function initSearch() {
     const nodes = state.nodesData.nodes;
     const idx = state.index;
     for (let i = 0; i < nodes.length && hits.length < 25; i++) {
-      if (test(idx.title[i]) || test(idx.authors[i]) || idx.doi[i].includes(doi)) hits.push(i);
+      if (test(`${idx.title[i]}\n|\n${idx.authors[i]}`) || idx.doi[i].includes(doi)) hits.push(i);
     }
     list.innerHTML = hits
       .map((i) => {
@@ -3276,15 +3277,16 @@ async function applyGlobalFilters() {
   await ensureAbstractsLoadedIfNeeded();
 
   const f = state.filters;
-  // Every field: comma-separated queries that must all match, in the chosen
-  // matching mode (whole words by default, so "dance" skips "guidance").
+  // Every field: a query (AND / OR / NOT, brackets, "quoted phrases"; see
+  // textmatch.js) in the chosen matching mode (whole words by default, so
+  // "dance" skips "guidance"). Filled fields must all match.
   let tests;
   try {
     tests = Object.fromEntries(["title", "journal", "abstract", "author", "keywords", "mesh"]
       .map((k) => [k, makeFilter(f[k] || "", state.matchMode)]));
   } catch (err) {
     const el = document.getElementById("selected-count");
-    if (el) el.textContent = `Invalid regular expression: ${err.message}`;
+    if (el) el.textContent = `Invalid query: ${err.message}`;
     return;
   }
 
