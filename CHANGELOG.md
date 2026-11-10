@@ -22,6 +22,11 @@ settings or outputs).
   sliders. Fixed: overlapping edges no longer add up to white on the 2D maps (sigma
   blends premultiplied colours, which the edge colours were not), and edges can be
   thinner than sigma's 1.7-pixel minimum.
+- **Filters on and off:** a switch under "Nodes selected" turns the text filters and
+  the year range off, bringing every paper back while the boxes keep what was typed,
+  and on again, to compare the filtered map with the whole one. `F` does the same,
+  and holding Space shows the unfiltered map until it is let go. Well-connected
+  papers, hidden communities and the time snapshot stay as they are.
 - **How a map was made:** `scientographer --version` prints the exact version: the
   release, or from a git checkout of Scientographer the release plus the commit
   (`0.2.0.dev0+g1a2b3c4`, with `.dirty` for uncommitted changes). Every stage writes

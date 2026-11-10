@@ -341,6 +341,8 @@ get it with `scientographer init --force` (which rewrites `dvc.yaml` and
 - **Colour by** community at any resolution of the sweep, embedding topic, year,
   citations, or integration; **well-connected papers only** hides the papers the
   Connectivity Modifier left out at that resolution.
+- **Filters on and off** (the switch, `F`, or hold Space to peek) to compare the
+  filtered map with the whole one.
 - **Search and filters** on title, author, abstract, journal, keywords and (for a
   PubMed corpus) MeSH terms, matching
   whole words by default (so *dance* does not match *guidance*), or prefixes,

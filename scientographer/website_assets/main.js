@@ -205,6 +205,8 @@ const state = {
   wellConnectedOnly: true, // the "Papers" control
   matchMode: "word", // search + filters: word | prefix | substring | regex (textmatch.js)
   filterAny: false, // filled text filters: false = a paper must match all, true = any
+  filtersOff: false, // the Filters switch (or F): text filters and years not applied
+  filtersPeek: false, // Space held: the same, until it is let go
 
   // floating-label bookkeeping for the currently-active grouping
   labelMode: "dynamic", // dynamic | always
@@ -677,6 +679,7 @@ async function main() {
   initWellConnectedControl();
   initTabs();
   initGlobalFilters();
+  initFiltersSwitch();
   initEditableSliderValues();
   initYearControls();
   initDatasetSelector();
@@ -1917,11 +1920,14 @@ function nodeReducer(node, attrs) {
     a.hidden = true;
     return a;
   }
-  if (state.filteredSet && !state.filteredSet.has(node)) {
+  // The text filters and the year range, unless the Filters switch (F, Space)
+  // has them off.
+  const filtering = filtersActive();
+  if (filtering && state.filteredSet && !state.filteredSet.has(node)) {
     a.hidden = true;
     return a;
   }
-  if (r.year != null && (r.year < state.yearMin || r.year > state.yearMax)) {
+  if (filtering && r.year != null && (r.year < state.yearMin || r.year > state.yearMax)) {
     a.hidden = true;
     return a;
   }
@@ -3351,17 +3357,18 @@ function scheduleRefilter() {
 function updateSelectedCount() {
   const el = document.getElementById("selected-count");
   if (!el) return;
-  if (!state.filteredSet) {
+  const filtering = filtersActive();
+  if (!state.filteredSet || !filtering) {
     let c = 0;
     const nodes = state.nodesData.nodes;
     for (let i = 0; i < nodes.length; i++) {
       const r = nodes[i];
       if (state.snapshot && !state.snapshot.visible.has(String(i))) continue;
-      if (r.year != null && (r.year < state.yearMin || r.year > state.yearMax)) continue;
+      if (filtering && r.year != null && (r.year < state.yearMin || r.year > state.yearMax)) continue;
       if (nodeHiddenByMute(r) || removedByModifier(i)) continue;
       c++;
     }
-    el.textContent = `Nodes selected: ${c.toLocaleString()}`;
+    el.textContent = `Nodes selected: ${c.toLocaleString()}${filtering ? "" : " (filters off)"}`;
     return;
   }
   el.textContent = `Nodes selected: ${state.filteredSet.size.toLocaleString()}`;
@@ -3436,6 +3443,64 @@ function setSliders(sliders, text) {
     slider.dispatchEvent(new Event("input", { bubbles: true }));
     slider.dispatchEvent(new Event("change", { bubbles: true }));
   });
+}
+
+// ── Filters on / off ───────────────────────────────────────────────────────
+// The Filters switch turns the text filters and the year range off (every
+// paper back, the boxes keeping their text) and on again; F does the same, and
+// holding Space shows the map unfiltered until it is let go. Well-connected
+// papers, muted groups and the time snapshot are the view, not filters: they
+// stay. Keys typed into a text box, a menu or the like are left alone.
+function filtersActive() {
+  return !state.filtersOff && !state.filtersPeek;
+}
+
+function filtersChanged() {
+  const box = document.getElementById("filters-on");
+  if (box) box.checked = !state.filtersOff;
+  const badge = document.getElementById("filters-off-badge");
+  if (badge) {
+    badge.hidden = filtersActive();
+    badge.innerHTML = state.filtersPeek
+      ? "Unfiltered map while <kbd>Space</kbd> is held"
+      : "Filters off: every paper shown · <kbd>F</kbd> turns them back on";
+  }
+  updateSelectedCount();
+  state.renderer?.refresh();
+}
+
+function typingInto(target) {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.isContentEditable || target.tagName === "TEXTAREA" || target.tagName === "SELECT") return true;
+  return target.tagName === "INPUT" && !["checkbox", "radio", "range", "button", "submit", "reset"].includes(target.type);
+}
+
+function initFiltersSwitch() {
+  const box = document.getElementById("filters-on");
+  box?.addEventListener("change", () => {
+    state.filtersOff = !box.checked;
+    filtersChanged();
+  });
+  window.addEventListener("keydown", (e) => {
+    if (e.ctrlKey || e.metaKey || e.altKey || typingInto(e.target)) return;
+    if (e.code === "Space") {
+      e.preventDefault(); // no page scroll, no click on a focused button
+      if (!e.repeat && !state.filtersPeek) {
+        state.filtersPeek = true;
+        filtersChanged();
+      }
+    } else if ((e.key === "f" || e.key === "F") && !e.repeat) {
+      state.filtersOff = !state.filtersOff;
+      filtersChanged();
+    }
+  });
+  const release = () => {
+    if (!state.filtersPeek) return;
+    state.filtersPeek = false;
+    filtersChanged();
+  };
+  window.addEventListener("keyup", (e) => { if (e.code === "Space") release(); });
+  window.addEventListener("blur", release); // the key may be let go in another window
 }
 
 // ── Shift key tracking ─────────────────────────────────────────────────────
