@@ -53,6 +53,7 @@ settings or outputs).
   warnings when steps ran on different package versions or outside the lock. The
   README explains how to rerun one stage (`dvc repro -f -s <stage>`, then `dvc repro`)
   without redoing the search and the downloads.
+- The journal filter is the last of the map's filters, after keywords (and MeSH terms).
 - **More ingest formats:** `ingest` now reads Scopus CSV (`scopus`), Web of Science
   tab-delimited (`wos`, a folder of `savedrecs.txt` files) and EBSCOhost CSV (`ebsco`)
   exports as well as PubMed's MEDLINE, and merges them by DOI: a paper in several
