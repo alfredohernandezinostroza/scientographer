@@ -7,7 +7,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{SITE_TITLE}}</title>
   <link rel="icon" type="image/svg+xml" href="scientographer-icon.svg">
-  <link rel="stylesheet" href="styles.css?v=18">
+  <link rel="stylesheet" href="styles.css?v=19">
 
   <!-- Tabulator -->
   <link href="https://unpkg.com/tabulator-tables@6.3.1/dist/css/tabulator.min.css" rel="stylesheet">
@@ -203,7 +203,7 @@
         </div>
         <div class="wm-ctl">
           <label for="wm-bw">Bandwidth <span id="wm-bw-val">2.0%</span></label>
-          <input id="wm-bw" type="range" min="5" max="60" value="20">
+          <input id="wm-bw" type="range" min="5" max="60" value="20" data-scale="10">
         </div>
         <div class="wm-ctl">
           <label for="wm-resolution">Community resolution</label>
@@ -260,7 +260,7 @@
     </div>
 
     <div class="control-row">
-      <label>Year <span id="year-readout"></span></label>
+      <label for="year-min">Year <span id="year-readout"></span></label>
       <input id="year-min" type="range">
       <input id="year-max" type="range">
     </div>

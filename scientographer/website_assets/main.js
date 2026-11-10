@@ -676,6 +676,7 @@ async function main() {
   initWellConnectedControl();
   initTabs();
   initGlobalFilters();
+  initEditableSliderValues();
   initYearControls();
   initDatasetSelector();
   initSnapshotControl();
@@ -3340,6 +3341,77 @@ function updateSelectedCount() {
     return;
   }
   el.textContent = `Nodes selected: ${state.filteredSet.size.toLocaleString()}`;
+}
+
+// ── Typed slider values ───────────────────────────────────────────────────
+// Every slider's readout (the <span> in its <label for=…>) can be clicked and
+// typed into. The typed number times the slider's data-scale is its value (a
+// readout in % of a 0-1 slider has data-scale 0.01). Out-of-range values are
+// clamped; values between the slider's steps are kept exactly (the slider takes
+// any value from then on), except on the year sliders, which take whole years.
+// The year readout ("1990–2010") takes both ends.
+function initEditableSliderValues() {
+  for (const label of document.querySelectorAll("label[for]")) {
+    const slider = document.getElementById(label.htmlFor);
+    const readout = label.querySelector("span[id]");
+    if (!slider || slider.type !== "range" || !readout) continue;
+    const pair = slider.id === "year-min" ? [slider, document.getElementById("year-max")] : [slider];
+    readout.classList.add("editable-value");
+    readout.title = "Click to type a value";
+    readout.tabIndex = 0;
+    const edit = (e) => {
+      e.preventDefault(); // a click on a label would otherwise focus the slider
+      e.stopPropagation();
+      if (readout.querySelector("input")) return;
+      const before = readout.textContent;
+      const box = document.createElement("input");
+      box.type = "text";
+      box.className = "editable-value-input";
+      box.value = before.replace(/[×%]/g, "").trim();
+      box.size = Math.max(4, box.value.length + 1);
+      readout.textContent = "";
+      readout.appendChild(box);
+      box.focus();
+      box.select();
+      let done = false;
+      const finish = (apply) => {
+        if (done) return;
+        done = true;
+        const text = box.value;
+        readout.textContent = before; // the slider's own handler rewrites it
+        if (apply) setSliders(pair, text);
+      };
+      box.addEventListener("keydown", (k) => {
+        if (k.key === "Enter") finish(true);
+        if (k.key === "Escape") finish(false);
+        k.stopPropagation();
+      });
+      box.addEventListener("blur", () => finish(true));
+      box.addEventListener("click", (c) => { c.preventDefault(); c.stopPropagation(); });
+    };
+    readout.addEventListener("click", edit);
+    readout.addEventListener("keydown", (k) => { if (k.key === "Enter") edit(k); });
+  }
+}
+
+function setSliders(sliders, text) {
+  // No slider goes below zero, so "1990-2010" is two years, not a minus sign.
+  const numbers = (text.match(/\d+(?:[.,]\d+)?|[.,]\d+/g) || []).map((n) => parseFloat(n.replace(",", ".")));
+  if (numbers.length < sliders.length) return;
+  sliders.forEach((slider, i) => {
+    const min = parseFloat(slider.min), max = parseFloat(slider.max);
+    let value = numbers[i] * parseFloat(slider.dataset.scale || "1");
+    value = Math.min(max, Math.max(min, value));
+    if (slider.id === "year-min" || slider.id === "year-max") value = Math.round(value);
+    else {
+      const step = parseFloat(slider.step) || 1;
+      const steps = (value - (Number.isFinite(min) ? min : 0)) / step;
+      if (Math.abs(steps - Math.round(steps)) > 1e-9) slider.step = "any";
+    }
+    slider.value = String(value);
+    slider.dispatchEvent(new Event("input", { bubbles: true }));
+    slider.dispatchEvent(new Event("change", { bubbles: true }));
+  });
 }
 
 // ── Shift key tracking ─────────────────────────────────────────────────────
