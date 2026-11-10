@@ -24,6 +24,21 @@ settings or outputs).
   no longer searches made-up forms (*speechs*, *sportses*), leaves words like
   *series* and *kinematics* as they are, and knows a few irregular plurals common in
   the literature (child/children, mouse/mice, stimulus/stimuli, criterion/criteria).
+- **Density heatmap** on the 2D views: a "Density heatmap" switch under the filters
+  draws a heatmap (Gaussian kernel density estimate, `kde.js`) of exactly the papers
+  counted in "Nodes selected" (text filters, years, well-connected papers, hidden
+  communities, time snapshot), over or under the dots, with its bandwidth, opacity, a
+  colour bar and rings around the papers. It is computed once per selection on a grid
+  of cells a sixth of the bandwidth wide, in the layout's own coordinates, and drawn
+  through the map's camera and its rotation and flips, so it stays sharp and locked to
+  the dots at any zoom and its colours do not shift. The bandwidth is a share of the
+  box holding the central 99% of the view's papers, so no filter changes it. Each paper
+  counts once (presence), or by its mentions of the searched words (as is, their log,
+  or per 1,000 words). "Show all papers under the heat" draws the papers the filters
+  leave out faded instead of hiding them. The heat hides while the filters are off.
+- **Filters survive a view switch:** switching views (for example from the citation
+  network to an embedding map) applies the filters again instead of silently dropping
+  them while their boxes still showed them.
 - **Map edges** are coloured by the citing paper, like the PNG export, instead of
   one grey, with **Edge opacity** (up to 1) and **Edge thickness** (from 0.05 pixels)
   sliders. Fixed: overlapping edges no longer add up to white on the 2D maps (sigma

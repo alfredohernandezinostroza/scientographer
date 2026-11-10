@@ -479,6 +479,15 @@ def test_citation_counts_and_sizes_come_from_the_edges_when_gephi_columns_are_mi
     assert attrs[3] == {"Eingangsgrad": "7", "Grad": "9", "size": "4.5"}
 
 
+def test_every_site_asset_is_shipped():
+    # A file added to website_assets/ but not to FRONTEND_FILES would be missing
+    # from every built site, and the page would fail to load it.
+    from scientographer.build_website import ASSETS_DIR, FRONTEND_FILES
+
+    assets = {p.name for p in ASSETS_DIR.iterdir() if p.suffix in {".html", ".js", ".css", ".svg"}}
+    assert assets == set(FRONTEND_FILES)
+
+
 def test_every_site_ships_the_logo_and_the_badge():
     from pathlib import Path
 

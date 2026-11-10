@@ -343,6 +343,11 @@ get it with `scientographer init --force` (which rewrites `dvc.yaml` and
   Connectivity Modifier left out at that resolution.
 - **Filters on and off** (the switch, `F`, or hold Space to peek) to compare the
   filtered map with the whole one.
+- **Density heatmap** of the papers the filters select, on the 2D views: a Gaussian
+  kernel density (bandwidth a share of the map's extent) drawn under or over the dots,
+  locked to them as the map pans, zooms and turns. Each paper counts once, or by how
+  often it mentions the searched words; the papers left out can be shown faded under
+  the heat.
 - **Search and filters** on title, author, abstract, journal, keywords and (for a
   PubMed corpus) MeSH terms, matching
   whole words by default (so *dance* does not match *guidance*; singular and regular

@@ -11,8 +11,11 @@ Finished items stay at the bottom until the next release, then go to the CHANGEL
 - [ ] Dot size: a "Same size" option
 - [ ] 3D views: time snapshots and PNG export (2D only for now)
 - [ ] Communities whose keyword names come out the same: tell them apart in the legend
-- [ ] Word heatmaps (the Word map tab's densities) as a filter in the map views: 2D, 3D,
-      LinLog, all of them. Needs a way to handle the density (KDE) in 3D and on each layout
+- [x] Density heatmap of the filtered papers on the 2D views (citation, LinLog, embeddings)
+- [ ] Density heatmap in the 3D views: a density in three dimensions, e.g. papers coloured by
+      it or a glowing cloud
+- [ ] Density heatmap: an enrichment mode, a PNG export lined up with the map's, and the
+      Word map tab retired once the map does all it did
 - [ ] Plurals and word forms from a lemmatization library instead of the simple
       rules in `textmatch.js` (irregular plurals, verb forms)
 - [ ] Field tags in the filters' queries (`speech[keywords] OR speech[abstract]`), for
