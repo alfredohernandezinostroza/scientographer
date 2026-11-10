@@ -63,6 +63,7 @@ settings or outputs).
   first is used. A journal name ending in its ISSN in brackets (as EBSCO writes it)
   loses it to an `issn` column. Web of Science lines that cannot be split are
   reported as `unreadable_records`.
+- The PNG export starts on curved edges and labels around the map.
 - **Citations fetched for any corpus:** `scientographer init` now puts the
   `fetch_references` stage in front of the pipeline, so a papers table with DOIs is
   enough; the citations between the papers come from OpenAlex. Projects that bring
