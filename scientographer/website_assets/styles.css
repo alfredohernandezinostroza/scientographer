@@ -301,8 +301,9 @@ html, body {
   width: 100%;
 }
 
-/* "Papers must match: All filters ◯— Any filter": a switch sliding left to right. */
-.control-row label.combine-switch {
+/* A switch sliding left to right between two named sides, e.g. "All filters
+   ◯— Any filter": a checkbox (role=switch) between .toggle-left and .toggle-right. */
+.control-row label.toggle-switch {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -312,16 +313,16 @@ html, body {
   font-size: 12px;
   user-select: none;
 }
-.combine-switch input {
+.toggle-switch input {
   position: absolute;
   opacity: 0;
   width: 1px;
   height: 1px;
 }
-.combine-side { color: var(--text-dim); transition: color 0.15s; }
-.combine-switch:has(input:not(:checked)) .combine-all,
-.combine-switch:has(input:checked) .combine-any { color: var(--text); font-weight: 600; }
-.combine-track {
+.toggle-side { color: var(--text-dim); transition: color 0.15s; }
+.toggle-switch:has(input:not(:checked)) .toggle-left,
+.toggle-switch:has(input:checked) .toggle-right { color: var(--text); font-weight: 600; }
+.toggle-track {
   position: relative;
   flex: 0 0 auto;
   width: 34px;
@@ -331,7 +332,7 @@ html, body {
   border: 1px solid var(--panel-border);
   transition: background 0.15s, border-color 0.15s;
 }
-.combine-knob {
+.toggle-knob {
   position: absolute;
   top: 2px;
   left: 2px;
@@ -341,8 +342,8 @@ html, body {
   background: var(--accent);
   transition: transform 0.18s ease;
 }
-.combine-switch input:checked + .combine-track .combine-knob { transform: translateX(16px); }
-.combine-switch input:focus-visible + .combine-track { border-color: var(--accent); }
+.toggle-switch input:checked + .toggle-track .toggle-knob { transform: translateX(16px); }
+.toggle-switch input:focus-visible + .toggle-track { border-color: var(--accent); }
 
 .checkbox-row {
   flex-direction: row;
