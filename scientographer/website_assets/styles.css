@@ -277,6 +277,24 @@ html, body {
 #controls input[type="search"]:focus { border-color: var(--accent); }
 #controls input[type="search"][hidden] { display: none; }
 
+/* A slider's value can be clicked and typed into. */
+.editable-value {
+  cursor: text;
+  border-bottom: 1px dotted var(--text-dim);
+  text-transform: none;
+}
+.editable-value:hover, .editable-value:focus { color: var(--text); outline: none; }
+.editable-value-input {
+  font: inherit;
+  font-size: 11px;
+  color: var(--text);
+  background: #161a22;
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  padding: 0 3px;
+  width: auto;
+}
+
 .control-row {
   margin-top: 10px;
   display: flex;
@@ -300,6 +318,50 @@ html, body {
 .control-row input[type="range"] {
   width: 100%;
 }
+
+/* A switch sliding left to right between two named sides, e.g. "All filters
+   ◯— Any filter": a checkbox (role=switch) between .toggle-left and .toggle-right. */
+.control-row label.toggle-switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 12px;
+  user-select: none;
+}
+.toggle-switch input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+}
+.toggle-side { color: var(--text-dim); transition: color 0.15s; }
+.toggle-switch:has(input:not(:checked)) .toggle-left,
+.toggle-switch:has(input:checked) .toggle-right { color: var(--text); font-weight: 600; }
+.toggle-track {
+  position: relative;
+  flex: 0 0 auto;
+  width: 34px;
+  height: 18px;
+  border-radius: 9px;
+  background: #161a22;
+  border: 1px solid var(--panel-border);
+  transition: background 0.15s, border-color 0.15s;
+}
+.toggle-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--accent);
+  transition: transform 0.18s ease;
+}
+.toggle-switch input:checked + .toggle-track .toggle-knob { transform: translateX(16px); }
+.toggle-switch input:focus-visible + .toggle-track { border-color: var(--accent); }
 
 .checkbox-row {
   flex-direction: row;

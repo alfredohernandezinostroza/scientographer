@@ -7,6 +7,16 @@ settings or outputs).
 
 ## [Unreleased]
 
+- **Search and filters use the query syntax of PubMed and Scopus:** `AND`, `OR`
+  (or `|`) and `NOT` in capitals, brackets to group, quotes for an exact phrase:
+  `(speech OR language) AND children NOT apraxia`. A space between words now means
+  AND (it was a phrase: quote `"motor learning"` for that), and a comma is no longer
+  an operator: outside quotes it separates words like a space, inside quotes it is
+  matched literally (`"Wolpert, Daniel"`). `&` is plain text. A malformed query says
+  what is wrong ("Invalid query: a bracket is not closed"). The map's search box
+  tests the title and authors together, and the Word map tab uses the same syntax,
+  its "Abstract + keywords" column testing the query on both texts together.
+
 - **Map edges** are coloured by the citing paper, like the PNG export, instead of
   one grey, with **Edge opacity** (up to 1) and **Edge thickness** (from 0.05 pixels)
   sliders. Fixed: overlapping edges no longer add up to white on the 2D maps (sigma
@@ -54,12 +64,16 @@ settings or outputs).
   first is used. A journal name ending in its ISSN in brackets (as EBSCO writes it)
   loses it to an `issn` column. Web of Science lines that cannot be split are
   reported as `unreadable_records`.
+- The PNG export starts on curved edges and labels around the map.
 - **Citations fetched for any corpus:** `scientographer init` now puts the
   `fetch_references` stage in front of the pipeline, so a papers table with DOIs is
   enough; the citations between the papers come from OpenAlex. Projects that bring
   their own references table use `init --own-references`.
 - `init` on an existing project keeps its `dvc.yaml` and `params.yaml` as they are
   (`--force` starts it again).
+- **Typed slider values:** click a slider's value (dot size, edge opacity and
+  thickness, the years, the Word map's bandwidth) to type an exact one; Enter applies
+  it, Escape cancels. The year readout takes both ends (`1990-2010`).
 - **LinLog and 3D layouts:** a new `citation_layouts` stage runs ForceAtlas2 again,
   in LinLog mode and/or in 3D, and the map shows each result as another view; 3D
   views open in a 3D viewer (three.js, loaded only for them) with the same legend,
@@ -72,6 +86,10 @@ settings or outputs).
   citations, the same tiny dot, and community top-paper lists in arbitrary order:
   the site read only Gephi's own in-degree, degree and size columns. It now counts
   them from the graph's citations when those columns are missing.
+- **All or any filter:** a switch under the map's filters chooses whether a paper
+  must match all the filled text filters (as before) or any of them, so a word can be
+  looked for in the abstract or the keywords. Years, well-connected papers and hidden
+  communities always apply.
 - A **Dot size** slider in every view.
 - **Search and filters:** `|` means OR and quoted text is matched literally (commas,
   brackets and all), so `"First title" | "Second title"` finds exactly those papers;

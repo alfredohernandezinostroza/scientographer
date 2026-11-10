@@ -7,7 +7,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{SITE_TITLE}}</title>
   <link rel="icon" type="image/svg+xml" href="scientographer-icon.svg">
-  <link rel="stylesheet" href="styles.css?v=18">
+  <link rel="stylesheet" href="styles.css?v=19">
 
   <!-- Tabulator -->
   <link href="https://unpkg.com/tabulator-tables@6.3.1/dist/css/tabulator.min.css" rel="stylesheet">
@@ -180,7 +180,7 @@
       </div>
       <div class="wm-controls">
         <div class="wm-ctl wm-grow">
-          <label for="wm-words">Words (several are OR'd together; "quote a phrase")</label>
+          <label for="wm-words">Words (speech OR language, "quote a phrase")</label>
           <input id="wm-words" type="text" value="cerebellum" spellcheck="false"
                  placeholder='bird   or   "motor imagery"   or   zebra birdsong'>
         </div>
@@ -203,7 +203,7 @@
         </div>
         <div class="wm-ctl">
           <label for="wm-bw">Bandwidth <span id="wm-bw-val">2.0%</span></label>
-          <input id="wm-bw" type="range" min="5" max="60" value="20">
+          <input id="wm-bw" type="range" min="5" max="60" value="20" data-scale="10">
         </div>
         <div class="wm-ctl">
           <label for="wm-resolution">Community resolution</label>
@@ -246,21 +246,31 @@
     <button id="apply-filters" class="primary" type="button">Filter</button>
 
     <!-- Global filters (v1-like) -->
-    <input id="filter-title" type="search" placeholder="Filter by publication... (&quot;title one&quot; | &quot;title two&quot;)">
-    <input id="filter-author" type="search" placeholder="Filter by author(s), comma-separated...">
+    <input id="filter-title" type="search" placeholder="Filter by title... (&quot;title one&quot; OR &quot;title two&quot;)">
+    <input id="filter-author" type="search" placeholder="Filter by author(s)... (Wolpert AND Kawato)">
     <input id="filter-abstract" type="search" placeholder="Filter by abstracts...">
-    <input id="filter-keywords" type="search" placeholder="Filter by keywords, comma-separated...">
+    <input id="filter-keywords" type="search" placeholder="Filter by keywords... (speech NOT apraxia)">
     <!-- Shown only when the papers carry MeSH terms (e.g. a PubMed corpus). -->
-    <input id="filter-mesh" type="search" placeholder="Filter by MeSH terms, comma-separated..." hidden>
+    <input id="filter-mesh" type="search" placeholder="Filter by MeSH terms..." hidden>
     <input id="filter-journal" type="search" placeholder="Filter by journal...">
 
     <div class="control-row">
-      <label>Text matching</label>
-      <select id="match-mode" title="How search and filters match text: whole words (with plurals), word beginnings, anywhere, or a regular expression. A comma means AND, | means OR, and quoted text is matched literally: &quot;first title&quot; | &quot;second title&quot; finds either paper."></select>
+      <label id="filter-combine-label">Papers must match</label>
+      <label class="toggle-switch" title="With several text filters filled in: keep the papers that match all of them, or any of them. Years, well-connected papers and hidden communities always apply.">
+        <span class="toggle-side toggle-left">All filters</span>
+        <input id="filter-any" type="checkbox" role="switch" aria-labelledby="filter-combine-label">
+        <span class="toggle-track" aria-hidden="true"><span class="toggle-knob"></span></span>
+        <span class="toggle-side toggle-right">Any filter</span>
+      </label>
     </div>
 
     <div class="control-row">
-      <label>Year <span id="year-readout"></span></label>
+      <label>Text matching</label>
+      <select id="match-mode" title="How search and filters match each word: whole words (with plurals), word beginnings, anywhere, or a regular expression. Combine words as in PubMed or Scopus: a space or AND means both, OR (or |) either, NOT excludes, brackets group, and quoted text is matched literally: (speech OR language) AND children NOT apraxia; &quot;first title&quot; OR &quot;second title&quot; finds either paper. AND, OR and NOT count only in capitals."></select>
+    </div>
+
+    <div class="control-row">
+      <label for="year-min">Year <span id="year-readout"></span></label>
       <input id="year-min" type="range">
       <input id="year-max" type="range">
     </div>
@@ -333,7 +343,7 @@
         <select id="export-edges" aria-label="Citation edges">
           <option value="none">No edges</option>
           <option value="straight">Straight edges</option>
-          <option value="curved">Curved edges</option>
+          <option value="curved" selected>Curved edges</option>
         </select>
         <select id="export-background" aria-label="Image background">
           <option value="transparent-light">Transparent, for white pages</option>
@@ -350,7 +360,7 @@
         </select>
         <select id="export-labels" aria-label="Community labels">
           <option value="centre">Labels inside</option>
-          <option value="border">Labels around</option>
+          <option value="border" selected>Labels around</option>
           <option value="none">No labels</option>
         </select>
         <button id="export-png" type="button">Export PNG</button>
@@ -489,10 +499,10 @@
   <script src="https://unpkg.com/tabulator-tables@6.3.1/dist/js/tabulator.min.js"></script>
 
   <!-- App -->
-  <script type="module" src="main.js?v=47"></script>
+  <script type="module" src="main.js?v=48"></script>
   <!-- Guided tour (independent of main.js; only reads the DOM) -->
   <script type="module" src="tour.js?v=6"></script>
   <!-- Word map tab (lazy: loads its data the first time the tab is opened) -->
-  <script type="module" src="wordmap.js?v=3"></script>
+  <script type="module" src="wordmap.js?v=4"></script>
 </body>
 </html>

@@ -19,7 +19,7 @@ import { Sigma } from "https://cdn.jsdelivr.net/npm/sigma@2.4.0/+esm";
 // Sigma's one-pixel edge lines; the CommonJS module's class is on its `default`.
 import edgeFastModule from "https://cdn.jsdelivr.net/npm/sigma@2.4.0/rendering/webgl/programs/edge.fast/+esm";
 const EdgeFastProgram = edgeFastModule.default;
-import { MATCH_MODES, makeFilter } from "./textmatch.js?v=2";
+import { MATCH_MODES, makeFilter } from "./textmatch.js?v=3";
 import {
   BRIDGE_MIN_LINKS,
   BRIDGE_COUNT,
@@ -204,6 +204,7 @@ const state = {
   wellConnectedMasks: {},
   wellConnectedOnly: true, // the "Papers" control
   matchMode: "word", // search + filters: word | prefix | substring | regex (textmatch.js)
+  filterAny: false, // filled text filters: false = a paper must match all, true = any
 
   // floating-label bookkeeping for the currently-active grouping
   labelMode: "dynamic", // dynamic | always
@@ -676,6 +677,7 @@ async function main() {
   initWellConnectedControl();
   initTabs();
   initGlobalFilters();
+  initEditableSliderValues();
   initYearControls();
   initDatasetSelector();
   initSnapshotControl();
@@ -3014,7 +3016,8 @@ function initSearch() {
       list.innerHTML = "";
       return;
     }
-    // Titles and authors in the chosen matching mode; DOIs anywhere.
+    // Titles and authors together in the chosen matching mode (so a query can
+    // name an author and a title word); DOIs anywhere.
     let test;
     try {
       test = makeFilter(q, state.matchMode);
@@ -3027,7 +3030,7 @@ function initSearch() {
     const nodes = state.nodesData.nodes;
     const idx = state.index;
     for (let i = 0; i < nodes.length && hits.length < 25; i++) {
-      if (test(idx.title[i]) || test(idx.authors[i]) || idx.doi[i].includes(doi)) hits.push(i);
+      if (test(`${idx.title[i]}\n|\n${idx.authors[i]}`) || idx.doi[i].includes(doi)) hits.push(i);
     }
     list.innerHTML = hits
       .map((i) => {
@@ -3247,6 +3250,15 @@ function initGlobalFilters() {
 
   btn.addEventListener("click", run);
 
+  const any = document.getElementById("filter-any");
+  if (any) {
+    any.checked = state.filterAny;
+    any.addEventListener("change", () => {
+      state.filterAny = any.checked;
+      if (state.filteredSet) run();
+    });
+  }
+
   const mode = document.getElementById("match-mode");
   if (mode) {
     mode.innerHTML = MATCH_MODES.map((m) => `<option value="${m.value}">${escapeHtml(m.label)}</option>`).join("");
@@ -3272,39 +3284,54 @@ async function ensureAbstractsLoadedIfNeeded() {
   if (state.filters.abstract.trim() && !state.abstracts) await loadAbstract("n2");
 }
 
+// The text a filter searches, for paper i.
+function fieldText(field, i) {
+  const idx = state.index;
+  switch (field) {
+    case "title": return idx.title[i];
+    case "author": return idx.authors[i];
+    case "abstract": return state.abstracts?.[state.nodesData.nodes[i].id] || "";
+    case "keywords": return idx.keywords[i];
+    case "mesh": return idx.mesh[i];
+    default: return idx.journal[i];
+  }
+}
+
 async function applyGlobalFilters() {
   await ensureAbstractsLoadedIfNeeded();
 
   const f = state.filters;
-  // Every field: comma-separated queries that must all match, in the chosen
-  // matching mode (whole words by default, so "dance" skips "guidance").
+  // Every field: a query (AND / OR / NOT, brackets, "quoted phrases"; see
+  // textmatch.js) in the chosen matching mode (whole words by default, so
+  // "dance" skips "guidance"). Filled fields must all match.
   let tests;
   try {
     tests = Object.fromEntries(["title", "journal", "abstract", "author", "keywords", "mesh"]
       .map((k) => [k, makeFilter(f[k] || "", state.matchMode)]));
   } catch (err) {
     const el = document.getElementById("selected-count");
-    if (el) el.textContent = `Invalid regular expression: ${err.message}`;
+    if (el) el.textContent = `Invalid query: ${err.message}`;
     return;
   }
 
   const lo = state.yearMin;
   const hi = state.yearMax;
-  const idx = state.index;
   const nodes = state.nodesData.nodes;
   const out = new Set();
+  // A paper must match all the filled text filters, or any of them with the
+  // "Any filter" switch; years, well-connected papers, muted groups and the time
+  // snapshot always apply.
+  const filled = Object.entries(tests).filter(([, test]) => test);
 
   for (let i = 0; i < nodes.length; i++) {
     const r = nodes[i];
     if (state.snapshot && !state.snapshot.visible.has(String(i))) continue;
     if (r.year != null && (r.year < lo || r.year > hi)) continue;
     if (nodeHiddenByMute(r) || removedByModifier(i)) continue;
-    if (tests.title && !tests.title(idx.title[i])) continue;
-    if (tests.journal && !tests.journal(idx.journal[i])) continue;
-    if (tests.author && !tests.author(idx.authors[i])) continue;
-    if (tests.keywords && !tests.keywords(idx.keywords[i])) continue;
-    if (tests.mesh && !tests.mesh(idx.mesh[i])) continue;
-    if (tests.abstract && !tests.abstract(state.abstracts?.[r.id] || "")) continue;
+    if (filled.length) {
+      const matches = ([field, test]) => test(fieldText(field, i));
+      if (state.filterAny ? !filled.some(matches) : !filled.every(matches)) continue;
+    }
     out.add(String(i));
   }
 
@@ -3338,6 +3365,77 @@ function updateSelectedCount() {
     return;
   }
   el.textContent = `Nodes selected: ${state.filteredSet.size.toLocaleString()}`;
+}
+
+// ── Typed slider values ───────────────────────────────────────────────────
+// Every slider's readout (the <span> in its <label for=…>) can be clicked and
+// typed into. The typed number times the slider's data-scale is its value (a
+// readout in % of a 0-1 slider has data-scale 0.01). Out-of-range values are
+// clamped; values between the slider's steps are kept exactly (the slider takes
+// any value from then on), except on the year sliders, which take whole years.
+// The year readout ("1990–2010") takes both ends.
+function initEditableSliderValues() {
+  for (const label of document.querySelectorAll("label[for]")) {
+    const slider = document.getElementById(label.htmlFor);
+    const readout = label.querySelector("span[id]");
+    if (!slider || slider.type !== "range" || !readout) continue;
+    const pair = slider.id === "year-min" ? [slider, document.getElementById("year-max")] : [slider];
+    readout.classList.add("editable-value");
+    readout.title = "Click to type a value";
+    readout.tabIndex = 0;
+    const edit = (e) => {
+      e.preventDefault(); // a click on a label would otherwise focus the slider
+      e.stopPropagation();
+      if (readout.querySelector("input")) return;
+      const before = readout.textContent;
+      const box = document.createElement("input");
+      box.type = "text";
+      box.className = "editable-value-input";
+      box.value = before.replace(/[×%]/g, "").trim();
+      box.size = Math.max(4, box.value.length + 1);
+      readout.textContent = "";
+      readout.appendChild(box);
+      box.focus();
+      box.select();
+      let done = false;
+      const finish = (apply) => {
+        if (done) return;
+        done = true;
+        const text = box.value;
+        readout.textContent = before; // the slider's own handler rewrites it
+        if (apply) setSliders(pair, text);
+      };
+      box.addEventListener("keydown", (k) => {
+        if (k.key === "Enter") finish(true);
+        if (k.key === "Escape") finish(false);
+        k.stopPropagation();
+      });
+      box.addEventListener("blur", () => finish(true));
+      box.addEventListener("click", (c) => { c.preventDefault(); c.stopPropagation(); });
+    };
+    readout.addEventListener("click", edit);
+    readout.addEventListener("keydown", (k) => { if (k.key === "Enter") edit(k); });
+  }
+}
+
+function setSliders(sliders, text) {
+  // No slider goes below zero, so "1990-2010" is two years, not a minus sign.
+  const numbers = (text.match(/\d+(?:[.,]\d+)?|[.,]\d+/g) || []).map((n) => parseFloat(n.replace(",", ".")));
+  if (numbers.length < sliders.length) return;
+  sliders.forEach((slider, i) => {
+    const min = parseFloat(slider.min), max = parseFloat(slider.max);
+    let value = numbers[i] * parseFloat(slider.dataset.scale || "1");
+    value = Math.min(max, Math.max(min, value));
+    if (slider.id === "year-min" || slider.id === "year-max") value = Math.round(value);
+    else {
+      const step = parseFloat(slider.step) || 1;
+      const steps = (value - (Number.isFinite(min) ? min : 0)) / step;
+      if (Math.abs(steps - Math.round(steps)) > 1e-9) slider.step = "any";
+    }
+    slider.value = String(value);
+    slider.dispatchEvent(new Event("input", { bubbles: true }));
+    slider.dispatchEvent(new Event("change", { bubbles: true }));
+  });
 }
 
 // ── Shift key tracking ─────────────────────────────────────────────────────

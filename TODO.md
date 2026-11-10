@@ -13,6 +13,8 @@ Finished items stay at the bottom until the next release, then go to the CHANGEL
 - [ ] Communities whose keyword names come out the same: tell them apart in the legend
 - [ ] Word heatmaps (the Word map tab's densities) as a filter in the map views: 2D, 3D,
       LinLog, all of them. Needs a way to handle the density (KDE) in 3D and on each layout
+- [ ] Field tags in the filters' queries (`speech[keywords] OR speech[abstract]`), for
+      mixes that the all/any switch cannot express
 - [ ] Journal reputation: hold journal ranking metadata (SCImago, Web of Science, other
       reputable sources), filter by it on the map, and colour papers by it
 
@@ -77,6 +79,8 @@ Where each paper came from:
       `init --own-references` for corpora that bring their own (#5)
 - [x] `init` keeps an existing project's `dvc.yaml` and `params.yaml` (#5)
 - [x] Search and filters: `|` means OR, quoted text is matched literally (#6)
+- [x] Search and filters: `AND` / `OR` / `NOT`, brackets and phrases, as in PubMed and
+      Scopus; a space means AND, commas are not operators
 - [x] 3D and LinLog views: the `citation_layouts` stage, a three.js viewer for 3D
       views, layouts lined up with the 2D map (#7)
 - [x] The map opens on the standard 3D view; auto-rotate, turn and tilt buttons (#7)

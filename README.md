@@ -344,9 +344,11 @@ get it with `scientographer init --force` (which rewrites `dvc.yaml` and
 - **Search and filters** on title, author, abstract, journal, keywords and (for a
   PubMed corpus) MeSH terms, matching
   whole words by default (so *dance* does not match *guidance*), or prefixes,
-  substrings or regular expressions. A comma means AND, `|` means OR, and quoted
-  text is matched literally, so pasted titles find exactly those papers:
-  `"First title" | "Second title"`.
+  substrings or regular expressions. Words combine as in PubMed or Scopus: a space
+  or `AND` means both, `OR` (or `|`) either, `NOT` excludes, brackets group, and
+  quoted text is matched literally, so pasted titles find exactly those papers:
+  `(speech OR language) AND children NOT apraxia`,
+  `"First title" OR "Second title"`.
 - **Bridge papers** (gold): the 50 papers whose citation links reach across
   communities the most at the current resolution (participation coefficient,
   Guimerà & Amaral 2005, times the log of the paper's links; at least 10 links); the
