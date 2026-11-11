@@ -400,6 +400,31 @@ html, body {
 }
 .filters-off-badge[hidden] { display: none; }
 
+/* Density heatmap: its controls and the layer drawn among sigma's canvases. */
+.density-controls { padding-left: 22px; }
+.density-controls[hidden] { display: none; }
+.density-bar {
+  height: 10px;
+  margin-top: 10px;
+  border-radius: 3px;
+  border: 1px solid var(--panel-border);
+}
+.density-bar-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: var(--text-dim);
+  margin-top: 2px;
+}
+.density-status { font-size: 11px; color: var(--text-dim); margin-top: 4px; line-height: 1.4; }
+#sigma-container canvas.density-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+}
+#sigma-container canvas.density-layer[hidden] { display: none; }
+
 .checkbox-row {
   flex-direction: row;
   align-items: center;

@@ -20,6 +20,7 @@ import { Sigma } from "https://cdn.jsdelivr.net/npm/sigma@2.4.0/+esm";
 import edgeFastModule from "https://cdn.jsdelivr.net/npm/sigma@2.4.0/rendering/webgl/programs/edge.fast/+esm";
 const EdgeFastProgram = edgeFastModule.default;
 import { MATCH_MODES, makeFilter, makeQuery } from "./textmatch.js?v=4";
+import { createDensityLayer } from "./density.js?v=1";
 import {
   BRIDGE_MIN_LINKS,
   BRIDGE_COUNT,
@@ -683,6 +684,7 @@ async function main() {
   initGlobalFilters();
   initFiltersSwitch();
   initEditableSliderValues();
+  initDensityLayer();
   initYearControls();
   initDatasetSelector();
   initSnapshotControl();
@@ -804,8 +806,11 @@ async function loadDataset(name) {
   }
 
   hideDetail();
+  // Keep the applied filters across a view switch (the boxes still show them).
+  if (Object.values(state.filters).some((q) => (q || "").trim())) await applyGlobalFilters();
   updateSelectedCount();
   state.renderer.refresh();
+  state.density?.update();
 }
 
 function initDatasetSelector() {
@@ -1047,6 +1052,20 @@ function parseColor(color) {
   }
   const rgb = /rgba?\(([^)]+)\)/i.exec(color || "");
   return rgb ? rgb[1].split(",").slice(0, 3).map((v) => parseFloat(v)) : [136, 136, 136];
+}
+
+// A colour faded two thirds of the way into the page background (opaque, so it
+// draws the same in 2D and 3D), for papers shown only as context.
+const FADED_COLORS = new Map();
+function fadedColor(color) {
+  let faded = FADED_COLORS.get(color);
+  if (!faded) {
+    const bg = parseColor(getComputedStyle(document.body).backgroundColor || "#0e1116");
+    const rgb = parseColor(color).map((v, i) => Math.round(v * 0.33 + bg[i] * 0.67));
+    faded = `rgb(${rgb.join(",")})`;
+    FADED_COLORS.set(color, faded);
+  }
+  return faded;
 }
 
 // The colour, darkened until it reads on white (greys stay grey).
@@ -1862,6 +1881,7 @@ async function useRenderer(threeD) {
     if (!state.sigma) {
       initSigma();
       attachRenderer(state.sigma, sigmaContainer);
+      state.density?.attach(state.sigma);
     }
     if (state.renderer3d) state.renderer3d.setVisible(false);
     sigmaContainer.hidden = false;
@@ -1871,6 +1891,7 @@ async function useRenderer(threeD) {
   // Controls only one kind of view has.
   for (const el of document.querySelectorAll("[data-view-3d]")) el.hidden = !threeD;
   for (const el of document.querySelectorAll("[data-view-2d]")) el.hidden = threeD;
+  state.density?.update();
 }
 
 // ── Sigma setup ───────────────────────────────────────────────────────────
@@ -1926,13 +1947,13 @@ function nodeReducer(node, attrs) {
     return a;
   }
   // The text filters and the year range, unless the Filters switch (F, Space)
-  // has them off.
+  // has them off. The papers they leave out are hidden, or drawn faded under the
+  // density layer's "Show all papers under the heat".
   const filtering = filtersActive();
-  if (filtering && state.filteredSet && !state.filteredSet.has(node)) {
-    a.hidden = true;
-    return a;
-  }
-  if (filtering && r.year != null && (r.year < state.yearMin || r.year > state.yearMax)) {
+  let leftOut = false;
+  if (filtering && state.filteredSet && !state.filteredSet.has(node)) leftOut = true;
+  if (filtering && r.year != null && (r.year < state.yearMin || r.year > state.yearMax)) leftOut = true;
+  if (leftOut && !state.density?.showsAll()) {
     a.hidden = true;
     return a;
   }
@@ -1947,6 +1968,13 @@ function nodeReducer(node, attrs) {
   }
 
   a.color = nodeColor(r);
+  if (leftOut) {
+    a.color = fadedColor(a.color);
+    a.size = a._baseSize * 0.7;
+    a.zIndex = 0;
+    a.label = "";
+    return a;
+  }
 
   if (state.highlightBridges && bridgeData()?.bridge[parseInt(node, 10)]) {
     a.color = BRIDGE_COLOR;
@@ -3529,7 +3557,8 @@ async function ensureAbstractsLoadedIfNeeded() {
   if (state.filters.abstract.trim() && !state.abstracts) await loadAbstract("n2");
 }
 
-// The text a filter searches, for paper i.
+// The fields the filters search, and the text of one for paper i.
+const FILTER_FIELDS = ["title", "author", "abstract", "keywords", "mesh", "journal"];
 function fieldText(field, i) {
   const idx = state.index;
   switch (field) {
@@ -3548,11 +3577,10 @@ async function applyGlobalFilters() {
   const f = state.filters;
   // Every field: a query (AND / OR / NOT, brackets, "quoted phrases"; see
   // textmatch.js) in the chosen matching mode (whole words by default, so
-  // "dance" skips "guidance"). Filled fields must all match.
+  // "dance" skips "guidance").
   let tests;
   try {
-    tests = Object.fromEntries(["title", "journal", "abstract", "author", "keywords", "mesh"]
-      .map((k) => [k, makeFilter(f[k] || "", state.matchMode)]));
+    tests = Object.fromEntries(FILTER_FIELDS.map((k) => [k, makeFilter(f[k] || "", state.matchMode)]));
   } catch (err) {
     const el = document.getElementById("selected-count");
     if (el) el.textContent = `Invalid query: ${err.message}`;
@@ -3583,14 +3611,88 @@ async function applyGlobalFilters() {
   state.filteredSet = out;
   updateSelectedCount();
   state.renderer.refresh();
+  state.density?.update();
 }
 
 function scheduleRefilter() {
   clearTimeout(state._refilterTimer);
   state._refilterTimer = setTimeout(() => {
     if (state.filteredSet) applyGlobalFilters();
-    else updateSelectedCount();
+    else {
+      updateSelectedCount();
+      state.density?.update();
+    }
   }, 90);
+}
+
+// ── Density layer (density.js) ─────────────────────────────────────────────
+// The papers the filters select, in layout coordinates (the time snapshot's
+// when one is active), or null while no filter narrows the selection: no text
+// filter applied and the full year range.
+function densityPoints(weight = "presence") {
+  const nodes = state.nodesData?.nodes;
+  if (!nodes) return null;
+  const textFilter = state.filteredSet && Object.values(state.filters).some((q) => (q || "").trim());
+  const yearsNarrowed = state.yearMin > state.nodesData.year_min || state.yearMax < state.nodesData.year_max;
+  if (!textFilter && !yearsNarrowed) return null;
+  // Weights other than presence count the searched words in the fields that
+  // have a text filter.
+  let queries = null;
+  if (textFilter && weight !== "presence") {
+    try {
+      queries = FILTER_FIELDS
+        .map((k) => [k, makeQuery(state.filters[k] || "", state.matchMode)])
+        .filter(([, q]) => q);
+    } catch {
+      queries = null;
+    }
+  }
+  const xs = [], ys = [], indices = [], weights = queries ? [] : null;
+  for (let i = 0; i < nodes.length; i++) {
+    const r = nodes[i];
+    if (state.filteredSet) {
+      if (!state.filteredSet.has(String(i))) continue;
+    } else {
+      if (state.snapshot && !state.snapshot.visible.has(String(i))) continue;
+      if (r.year != null && (r.year < state.yearMin || r.year > state.yearMax)) continue;
+      if (nodeHiddenByMute(r) || removedByModifier(i)) continue;
+    }
+    const c = state.snapshot ? state.snapshot.coords[r.id] : [r.x, r.y];
+    if (!c) continue;
+    xs.push(+c[0]);
+    ys.push(+c[1]);
+    indices.push(i);
+    if (queries) {
+      let mentions = 0, words = 0;
+      for (const [k, q] of queries) {
+        const text = fieldText(k, i) || "";
+        mentions += q.count(text);
+        if (weight === "per1000") words += text.split(/\s+/).filter(Boolean).length;
+      }
+      weights.push(weight === "count" ? mentions
+        : weight === "log" ? Math.log1p(mentions)
+        : (1000 * mentions) / Math.max(1, words));
+    }
+  }
+  return { xs, ys, indices, weights, weighted: !!queries };
+}
+
+function initDensityLayer() {
+  if (!document.getElementById("density-on")) return;
+  state.density = createDensityLayer({
+    container: document.getElementById("sigma-container"),
+    renderer: () => (is3D() ? null : state.sigma),
+    is3D,
+    points: densityPoints,
+    basePositions: () => ({
+      xs: state.nodesData.nodes.map((r) => +r.x),
+      ys: state.nodesData.nodes.map((r) => +r.y),
+    }),
+    toGraph: orient,
+    viewKey: () => state.dataset,
+    filtersActive,
+    refresh: () => state.renderer?.refresh(),
+  });
 }
 
 function updateSelectedCount() {
