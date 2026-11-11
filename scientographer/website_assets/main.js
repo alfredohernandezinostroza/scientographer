@@ -87,6 +87,7 @@ async function loadViewsManifest() {
       dims: v.dims === 3 ? 3 : 2,
       sharedDir: manifest.shared_dir || v.dir,
       groupings: v.groupings,
+      colorBy: v.color_by || null, // the view's own colouring, when views.json names it
     };
   }
   DATASETS = views;
@@ -745,7 +746,7 @@ async function loadDataset(name) {
   state.muted = {};
   cfg.groupings.forEach((g) => { state.muted[g.key] = new Set(); });
   fileGroupings.forEach((g, i) => { state.groupData[g.key] = groupingPayloads[i]; });
-  state.colorBy = cfg.groupings[0].key;
+  state.colorBy = colorByFor(name);
 
   state.wellConnected = null;
   state.wellConnectedMasks = {};
@@ -2935,6 +2936,7 @@ function isolateGroup(key, gid) {
 function initControls() {
   document.getElementById("color-by").addEventListener("change", (e) => {
     state.colorBy = e.target.value;
+    state.colorByChoice = e.target.value; // the viewer's own pick: kept across views
     renderGroupLabels();
     state.renderer.refresh();
   });
@@ -2983,6 +2985,23 @@ function initControls() {
 
 // Build the "Color by" menu from the active dataset's groupings (+ year /
 // citations), then point colorBy at the current value.
+// What a view is coloured by when it opens: what the viewer picked in "Color
+// by" (state.colorByChoice), if this view offers it; otherwise the view's own
+// grouping: views.json's color_by, else the topics of an embedding map (a view
+// other than the main citation map that has its own semantic grouping), else
+// its first grouping (communities on the citation layouts).
+function colorByFor(name) {
+  const cfg = DATASETS[name];
+  const keys = cfg.groupings.map((g) => g.key);
+  const offered = new Set([...keys, "year", "indegree"]);
+  if (cfg.groupings.some((g) => g.citation)) offered.add("integration");
+  if (state.colorByChoice && offered.has(state.colorByChoice)) return state.colorByChoice;
+  if (cfg.colorBy && offered.has(cfg.colorBy)) return cfg.colorBy;
+  const semantic = cfg.groupings.find((g) => g.semantic);
+  if (semantic && cfg.dir !== cfg.sharedDir) return semantic.key;
+  return keys[0];
+}
+
 function buildColorByOptions() {
   const sel = document.getElementById("color-by");
   const opts = activeGroupings().map((g) => ({ value: g.key, label: g.label }));
