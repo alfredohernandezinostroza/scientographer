@@ -1651,3 +1651,102 @@ body.about-open #provenance-stamp { display: none; }
 }
 
 .wm-check[hidden] { display: none; }
+
+/* Legend colours: the palette menu, and swatches that open a colour picker. */
+.legend-colour-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  margin: 6px 0;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.legend-colour-row label { display: flex; align-items: center; gap: 6px; }
+.legend-colour-row select {
+  padding: 3px 6px;
+  background: #161a22;
+  color: var(--text);
+  border: 1px solid var(--panel-border);
+  border-radius: 5px;
+  font-size: 11px;
+}
+.legend-colour-row button { font-size: 11px; padding: 3px 8px; }
+.legend-colour-hint { flex-basis: 100%; font-size: 10px; }
+.swatch-pick {
+  cursor: pointer;
+  border: 0;
+  padding: 0;
+  flex: 0 0 auto;
+}
+.swatch-pick:hover, .swatch-pick:focus-visible { outline: 1px solid var(--text); outline-offset: 1px; }
+
+/* The colour picker (colorpicker.js) and its eyedropper. */
+body.colour-sampling, body.colour-sampling * { cursor: crosshair !important; }
+.colour-picker {
+  position: fixed;
+  z-index: 1000;
+  width: 248px;
+  padding: 10px;
+  border-radius: 8px;
+  background: var(--panel, #161a22);
+  border: 1px solid var(--panel-border);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.55);
+  color: var(--text);
+  font-size: 11px;
+  cursor: default;
+}
+.cp-title { font-weight: 600; font-size: 12px; margin-bottom: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cp-sv { position: relative; height: 140px; border-radius: 4px; cursor: crosshair; touch-action: none; }
+.cp-sv-white, .cp-sv-black { position: absolute; inset: 0; border-radius: 4px; }
+.cp-sv-white { background: linear-gradient(to right, #fff, rgba(255, 255, 255, 0)); }
+.cp-sv-black { background: linear-gradient(to top, #000, rgba(0, 0, 0, 0)); }
+.cp-sv-handle, .cp-hue-handle {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  margin: -6px 0 0 -6px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+}
+.cp-hue {
+  position: relative;
+  height: 12px;
+  margin: 10px 0;
+  border-radius: 6px;
+  cursor: pointer;
+  touch-action: none;
+  background: linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00);
+}
+.cp-hue-handle { top: 50%; }
+.cp-row { display: flex; align-items: center; gap: 6px; }
+.cp-compare { display: flex; width: 44px; height: 22px; border-radius: 4px; overflow: hidden; border: 1px solid var(--panel-border); flex: 0 0 auto; }
+.cp-compare span { flex: 1; cursor: pointer; }
+.cp-hex {
+  width: 74px;
+  padding: 3px 6px;
+  font: inherit;
+  font-family: ui-monospace, monospace;
+  color: var(--text);
+  background: #0e1116;
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+}
+.cp-screen { font-size: 10px; padding: 3px 6px; }
+.cp-label { margin: 10px 0 4px; color: var(--text-dim); display: flex; align-items: center; justify-content: space-between; }
+.cp-save { font-size: 10px; padding: 1px 6px; }
+.cp-quick, .cp-slots { display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px; }
+.colour-quick, .colour-slot {
+  height: 20px;
+  border-radius: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  padding: 0;
+  cursor: pointer;
+}
+.colour-slot:not(.filled) { background: transparent; border-style: dashed; }
+.cp-slots.choosing .colour-slot { outline: 1px solid var(--accent); outline-offset: 1px; }
+.cp-hint { margin-top: 8px; color: var(--text-dim); line-height: 1.35; min-height: 14px; }
+.cp-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 10px; }
+.cp-actions button { font-size: 11px; padding: 4px 12px; }
