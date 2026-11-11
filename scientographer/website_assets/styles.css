@@ -100,16 +100,23 @@ html, body {
 
 #controls.collapsed {
   width: 44px;
-  padding: 10px;
+  padding: 6px; /* (44 - 30) / 2 minus the 1px border: the 30px button sits in the middle */
   overflow: hidden;
 }
 #controls.collapsed *:not(#controls-toggle) {
   display: none !important;
 }
 #controls.collapsed #controls-toggle {
-  display: block !important;
+  display: flex !important;
   float: none;
-  margin: 0;
+  margin: 0 auto;
+}
+#controls-toggle.icon-btn {
+  /* the arrow glyph centred by the box, not by the font's own metrics */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0 2px;
 }
 /* ── Cluster centroid labels ─────────────────────────────────────────── */
 #cluster-labels {
@@ -374,11 +381,22 @@ html, body {
 .toggle-switch input:focus-visible + .toggle-track { border-color: var(--accent); }
 
 .filters-power .toggle-switch { flex-wrap: wrap; }
-.filters-power-keys { flex-basis: 100%; font-size: 10px; color: var(--text-dim); }
+.filters-power-keys {
+  flex-basis: 100%;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  line-height: 1;
+  color: var(--text-dim);
+}
 .filters-power-keys kbd, .filters-off-badge kbd {
   font: inherit;
   font-size: 10px;
-  padding: 0 4px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 4px;
   border: 1px solid var(--panel-border);
   border-radius: 3px;
   background: #161a22;
