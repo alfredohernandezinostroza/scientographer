@@ -30,6 +30,7 @@ import {
   rankingScores,
   topPapersByGroup,
 } from "./rankings.js?v=2";
+import { openColourPicker } from "./colorpicker.js?v=1";
 
 // ── Dataset definitions ─────────────────────────────────────────────────────
 // Each grouping: key (also the "Color by" value), label (detail panel + color
@@ -748,6 +749,7 @@ async function loadDataset(name) {
 
   state.wellConnected = null;
   state.wellConnectedMasks = {};
+  fileGroupings.forEach((g) => recolourGroups(g.key)); // palettes and the viewer's colours
   try {
     const response = await fetch(`${cfg.dir}/well_connected.json`);
     state.wellConnected = response.ok ? await response.json() : null;
@@ -1518,6 +1520,7 @@ async function setupResolutionMetrics(cfg) {
   // default resolution). applyCommunityResolution() handles later switches.
   state.communityResolution = defaultRes;
   state.groupData.community = communityLegend(defaultRes);
+  recolourGroups("community"); // the papers come with the site's colours at this resolution
   updateWellConnectedRow();
   refreshResolutionOptions();
   // Switching views keeps the resolution the user picked, when this view has it.
@@ -1626,6 +1629,7 @@ function applyCommunityResolution(resolution) {
     r.community_color = entry ? entry.color : OUTLIER_COLOR_JS;
   }
   state.groupData.community = legend;
+  recolourGroups("community");
   state.muted.community = new Set();
   // Bridges and top papers depend on the communities (bridgeData() also checks
   // the resolution; the well-connected filter changes which ones are named).
@@ -2271,6 +2275,7 @@ function positionTooltipAt(e) {
 
 function initHover(renderer, container) {
   renderer.on("enterNode", ({ node }) => {
+    state.colourSampler?.hover(displayedColour(node));
     state.hoveredNode = node;
     const r = state.graph.getNodeAttribute(node, "_data");
     const auths = (r.authors || "").split("|");
@@ -2284,6 +2289,7 @@ function initHover(renderer, container) {
   });
 
   renderer.on("leaveNode", () => {
+    state.colourSampler?.leave();
     state.hoveredNode = null;
     hideTooltipEl();
     state.renderer.refresh();
@@ -2294,8 +2300,12 @@ function initHover(renderer, container) {
 
 // ── Selection (click → draw incident edges + open detail) ────────────────
 function initSelection(renderer) {
-  renderer.on("clickNode", ({ node }) => selectNode(parseInt(node, 10)));
+  renderer.on("clickNode", ({ node }) => {
+    if (state.colourSampler) return state.colourSampler.take(displayedColour(node)); // the colour picker's eyedropper
+    selectNode(parseInt(node, 10));
+  });
   renderer.on("clickStage", () => {
+    if (state.colourSampler) return;
     clearSelection();
     hideDetail();
   });
@@ -2985,6 +2995,168 @@ function buildColorByOptions() {
 }
 
 // Generate one <details> legend block per grouping into #legends.
+// ── Group colours: palettes and the user's own colours ─────────────────────
+// Every grouping (communities, topics) can take another palette, and any group
+// a colour of the viewer's choosing. Both are kept in this browser
+// (localStorage, per site) and applied by rewriting the colours the rest of
+// the page reads: each group's entry (legend, labels, panels, export labels)
+// and each paper's copy (dots, citation edges, exports). The site's own
+// colours are kept aside (_siteColor) to go back to.
+//
+// A chosen colour is stored with the group's name and only applies while the
+// group of that id still has that name: a rebuilt map whose communities came
+// out differently never paints a saved colour onto the wrong group.
+const GROUP_PALETTES = [
+  { key: "original", label: "Original" },
+  // Kenneth Kelly (1965): 22 colours of maximum contrast (white and black left out).
+  { key: "kelly", label: "Kelly (maximum contrast)", colors: ["#F3C300", "#875692", "#F38400", "#A1CAF1", "#BE0032", "#C2B280", "#848482", "#008856", "#E68FAC", "#0067A5", "#F99379", "#604E97", "#F6A600", "#B3446C", "#DCD300", "#882D17", "#8DB600", "#654522", "#E25822", "#2B3D26"] },
+  // Tableau 20 (Tableau Software).
+  { key: "tableau20", label: "Tableau 20", colors: ["#4E79A7", "#A0CBE8", "#F28E2B", "#FFBE7D", "#59A14F", "#8CD17D", "#B6992D", "#F1CE63", "#499894", "#86BCB6", "#E15759", "#FF9D9A", "#79706E", "#BAB0AC", "#D37295", "#FABFD2", "#B07AA1", "#D4A6C8", "#9D7660", "#D7B5A6"] },
+  // CARTOColors (CARTO), qualitative; their closing grey left out.
+  { key: "bold", label: "Bold (CARTO)", colors: ["#7F3C8D", "#11A579", "#3969AC", "#F2B701", "#E73F74", "#80BA5A", "#E68310", "#008695", "#CF1C90", "#F97B72", "#4B4B8F"] },
+  { key: "vivid", label: "Vivid (CARTO)", colors: ["#E58606", "#5D69B1", "#52BCA3", "#99C945", "#CC61B0", "#24796C", "#DAA51B", "#2F8AC4", "#764E9F", "#ED645A", "#CC3A8E"] },
+  { key: "prism", label: "Prism (CARTO)", colors: ["#5F4690", "#1D6996", "#38A6A5", "#0F8554", "#73AF48", "#EDAD08", "#E17C05", "#CC503E", "#94346E", "#6F4070", "#994E95"] },
+  { key: "safe", label: "Safe for colour blindness (CARTO)", colors: ["#88CCEE", "#CC6677", "#DDCC77", "#117733", "#332288", "#AA4499", "#44AA99", "#999933", "#882255", "#661100", "#6699CC"] },
+  { key: "pastel", label: "Pastel (CARTO)", colors: ["#66C5CC", "#F6CF71", "#F89C74", "#DCB0F2", "#87C55F", "#9EB9F3", "#FE88B1", "#C9DB74", "#8BE0A4", "#B497E7", "#D3B484"] },
+  { key: "antique", label: "Antique (CARTO)", colors: ["#855C75", "#D9AF6B", "#AF6458", "#736F4C", "#526A83", "#625377", "#68855C", "#9C9C5E", "#A06177", "#8C785D", "#467378"] },
+  // ColorBrewer (Cynthia Brewer), qualitative.
+  { key: "set3", label: "Set3 (ColorBrewer)", colors: ["#8DD3C7", "#FFFFB3", "#BEBADA", "#FB8072", "#80B1D3", "#FDB462", "#B3DE69", "#FCCDE5", "#D9D9D9", "#BC80BD", "#CCEBC5", "#FFED6F"] },
+  { key: "paired", label: "Paired (ColorBrewer)", colors: ["#A6CEE3", "#1F78B4", "#B2DF8A", "#33A02C", "#FB9A99", "#E31A1C", "#FDBF6F", "#FF7F00", "#CAB2D6", "#6A3D9A", "#FFFF99", "#B15928"] },
+  // Okabe & Ito (2008), safe for colour blindness; black and grey left out.
+  { key: "okabeito", label: "Okabe–Ito (colour-blind safe)", colors: ["#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7"] },
+];
+const COLOURS_KEY = `scientographer-colours:${location.pathname}`;
+
+function loadColourSettings() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(COLOURS_KEY) || "null");
+    if (saved && saved.version === 1) return saved;
+  } catch {
+    // storage blocked or unreadable: start from the site's colours
+  }
+  return { version: 1, palettes: {}, colors: {} };
+}
+const colourSettings = loadColourSettings();
+function saveColourSettings() {
+  try {
+    localStorage.setItem(COLOURS_KEY, JSON.stringify(colourSettings));
+  } catch {
+    // not saved (private window, storage full): the colours still apply now
+  }
+}
+
+// The key of a group's chosen colour: communities differ per resolution.
+function groupColourKey(key, gid) {
+  return `${key}|${key === "community" ? state.communityResolution : ""}|${gid}`;
+}
+
+// The colour a group is drawn in: the viewer's own, else the grouping's
+// palette, else the site's.
+function groupColour(key, gid, entry) {
+  const own = colourSettings.colors[groupColourKey(key, gid)];
+  if (own && own.name === entry.name) return own.color;
+  const palette = GROUP_PALETTES.find((p) => p.key === colourSettings.palettes[key]);
+  const n = parseInt(gid, 10);
+  if (palette?.colors && n >= 0) return palette.colors[n % palette.colors.length];
+  return entry._siteColor;
+}
+
+// Rewrite one grouping's colours (its entries and its papers' copies).
+function recolourGroups(key) {
+  const g = grouping(key);
+  if (!g?.data) return;
+  for (const [gid, entry] of Object.entries(g.data)) {
+    if (entry._siteColor == null) entry._siteColor = entry.color;
+    entry.color = groupColour(key, gid, entry);
+  }
+  for (const r of state.nodesData.nodes) {
+    const entry = g.data[String(r[g.nodeField])];
+    if (entry) r[g.colorField] = entry.color;
+  }
+}
+
+// After a colour change: everything that shows a group's colour.
+function groupColoursChanged(key) {
+  recolourGroups(key);
+  citationEdgeStyles.clear();
+  buildLegend(key);
+  renderGroupLabels();
+  state.renderer?.refresh();
+}
+
+// While the picker is open: the colour on the map, nothing saved yet.
+function previewGroupColour(key, gid, color, swatch) {
+  const g = grouping(key);
+  const entry = g.data[gid];
+  if (!entry || entry.color === color) return;
+  entry.color = color;
+  for (const r of state.nodesData.nodes) if (String(r[g.nodeField]) === String(gid)) r[g.colorField] = color;
+  if (swatch) swatch.style.background = color;
+  citationEdgeStyles.clear();
+  renderGroupLabels();
+  state.renderer?.refresh();
+}
+
+// The picker's quick colours: the grouping's palette, or the site's colours.
+function quickColours(key) {
+  const palette = GROUP_PALETTES.find((p) => p.key === colourSettings.palettes[key]);
+  if (palette?.colors) return palette.colors;
+  const g = grouping(key);
+  const ids = Object.keys(g.data).map(Number).filter((n) => n >= 0).sort((a, b) => a - b);
+  return [...new Set(ids.map((n) => g.data[n]._siteColor || g.data[n].color))].slice(0, 20);
+}
+
+// The picker's eyedropper on the map: hovering a dot previews its colour and a
+// click takes it, instead of the usual tooltip refresh and selection.
+const mapColourSampler = {
+  start(handlers) { state.colourSampler = handlers; },
+  stop() { state.colourSampler = null; },
+};
+function displayedColour(node) {
+  return nodeReducer(node, state.graph.getNodeAttributes(node)).color;
+}
+
+function setGroupColour(key, gid, color) {
+  const entry = grouping(key).data[gid];
+  colourSettings.colors[groupColourKey(key, gid)] = { color, name: entry.name };
+  saveColourSettings();
+  groupColoursChanged(key);
+}
+
+function setGroupPalette(key, palette) {
+  if (palette === "original") delete colourSettings.palettes[key];
+  else colourSettings.palettes[key] = palette;
+  saveColourSettings();
+  groupColoursChanged(key);
+}
+
+// Back to the site's colours for a grouping: its palette and every chosen
+// colour (at every resolution).
+function resetGroupColours(key) {
+  delete colourSettings.palettes[key];
+  for (const k of Object.keys(colourSettings.colors)) if (k.startsWith(`${key}|`)) delete colourSettings.colors[k];
+  saveColourSettings();
+  groupColoursChanged(key);
+}
+
+// Colour controls above a legend: the palette and a reset.
+function legendColourRow(key) {
+  const row = document.createElement("div");
+  row.className = "legend-colour-row";
+  const own = Object.keys(colourSettings.colors).some((k) => k.startsWith(`${key}|`));
+  row.innerHTML = `
+    <label>Palette
+      <select>${GROUP_PALETTES.map((p) => `<option value="${p.key}">${escapeHtml(p.label)}</option>`).join("")}</select>
+    </label>
+    <button type="button" title="Back to the site's colours: the original palette and no colours of your own"${own || colourSettings.palettes[key] ? "" : " disabled"}>Reset colours</button>
+    <span class="legend-colour-hint">Click a colour to change it; kept in this browser.</span>`;
+  const select = row.querySelector("select");
+  select.value = colourSettings.palettes[key] || "original";
+  select.addEventListener("change", () => setGroupPalette(key, select.value));
+  row.querySelector("button").addEventListener("click", () => resetGroupColours(key));
+  return row;
+}
+
 function buildLegends() {
   const container = document.getElementById("legends");
   container.innerHTML = "";
@@ -3108,6 +3280,9 @@ function buildLegend(key) {
   // switch), so drop any button row from a previous call before adding a new one.
   const prevBtnRow = ul.previousElementSibling;
   if (prevBtnRow && prevBtnRow.classList.contains("legend-btn-row")) prevBtnRow.remove();
+  const prevColourRow = ul.previousElementSibling;
+  if (prevColourRow && prevColourRow.classList.contains("legend-colour-row")) prevColourRow.remove();
+  ul.parentNode.insertBefore(legendColourRow(key), ul);
 
   const btnRow = document.createElement("div");
   btnRow.className = "legend-btn-row";
@@ -3145,8 +3320,22 @@ function buildLegend(key) {
     const c = g.data[cid];
     const li = document.createElement("li");
     li.dataset.cid = cid;
-    li.innerHTML = `<span class="swatch" style="background:${c.color}"></span>${escapeHtml(c.name)} <span style="margin-left:auto;color:var(--text-dim)">${c.size}</span>`;
+    li.innerHTML = `<button type="button" class="swatch swatch-pick" style="background:${c.color}" title="Change the colour of ${escapeHtml(c.name)}" aria-label="Change the colour of ${escapeHtml(c.name)}"></button>${escapeHtml(c.name)} <span style="margin-left:auto;color:var(--text-dim)">${c.size}</span>`;
     li.style.display = "flex";
+    const swatch = li.querySelector(".swatch-pick");
+    swatch.addEventListener("click", (e) => {
+      e.stopPropagation(); // pick a colour, don't toggle the group
+      openColourPicker({
+        anchor: swatch,
+        color: c.color,
+        title: c.name,
+        quick: quickColours(key),
+        onInput: (color) => previewGroupColour(key, cid, color, swatch),
+        onDone: (color) => setGroupColour(key, cid, color),
+        onCancel: () => groupColoursChanged(key),
+        sampler: mapColourSampler,
+      });
+    });
     li.addEventListener("click", () => toggleRow(parseInt(cid, 10)));
     li.addEventListener("dblclick", () => {
       g.muted.clear();

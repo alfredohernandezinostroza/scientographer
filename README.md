@@ -340,7 +340,11 @@ get it with `scientographer init --force` (which rewrites `dvc.yaml` and
   snapshots, and one per extra layout (LinLog, 3D).
 - **Colour by** community at any resolution of the sweep, embedding topic, year,
   citations, or integration; **well-connected papers only** hides the papers the
-  Connectivity Modifier left out at that resolution.
+  Connectivity Modifier left out at that resolution. Each legend has a **palette**
+  menu (the original or one of a dozen published ones: Kelly, Tableau 20, CARTO,
+  ColorBrewer, Okabe–Ito), and clicking a colour opens a picker (with an
+  eyedropper on the map and slots for your own colours) to give a group any
+  colour; both are kept in the browser.
 - **Filters on and off** (the switch, `F`, or hold Space to peek) to compare the
   filtered map with the whole one.
 - **Search and filters** on title, author, abstract, journal, keywords and (for a
