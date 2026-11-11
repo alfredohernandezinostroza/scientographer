@@ -219,10 +219,11 @@ website:
   # (UMAP of SPECTER2 or Gemini embeddings). Each needs `key`, `label` and a
   # `positions` table (Parquet/CSV/TSV) with `doi`, `x`, `y`, optionally `topic`
   # (integer, -1 = none) and `topic_name`; optional `subtitle`, `topic_label`
-  # ("Topic", "Cluster", ...) and `snapshots` (JSON: {"cutoffs": [1990, ...],
-  # "snapshots": {"1990": {"<doi>": [x, y], ...}}} for the Time menu). Every view
-  # is coloured by the same communities; papers absent from a layout are left
-  # out of that view only. A table with a `z` column (citation_layouts with
+  # ("Topic", "Cluster", ...), `snapshots` (JSON: {"cutoffs": [1990, ...],
+  # "snapshots": {"1990": {"<doi>": [x, y], ...}}} for the Time menu) and
+  # `color_by` (community or cluster: what the view opens coloured by; default
+  # its topics when it has some, else its communities). Every view has the same
+  # communities; papers absent from a layout are left out of that view only. A table with a `z` column (citation_layouts with
   # `dimensions: 3`) opens in the site's 3D view.
   extra_layouts:  # example
     - key: forceatlas2_3d

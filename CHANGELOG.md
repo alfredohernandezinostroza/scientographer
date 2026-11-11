@@ -66,6 +66,12 @@ settings or outputs).
   README explains how to rerun one stage (`dvc repro -f -s <stage>`, then `dvc repro`)
   without redoing the search and the downloads.
 - The journal filter is the last of the map's filters, after keywords (and MeSH terms).
+- **Each view opens on its own colouring:** an embedding map (Gemini, SPECTER2) on
+  its topics, a citation layout (the main map, LinLog, 3D) on its communities, so
+  a map shows its own structure first. What the viewer picks in "Color by" wins and
+  carries over to every view that offers it. `views.json` says each view's colouring
+  (`color_by`, from `website.extra_layouts`: a layout's `color_by`, or its topics
+  when it brings some); sites built before fall back to the same rule.
 - **More ingest formats:** `ingest` now reads Scopus CSV (`scopus`), Web of Science
   tab-delimited (`wos`, a folder of `savedrecs.txt` files) and EBSCOhost CSV (`ebsco`)
   exports as well as PubMed's MEDLINE, and merges them by DOI: a paper in several

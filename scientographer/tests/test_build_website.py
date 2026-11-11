@@ -313,6 +313,15 @@ def test_extra_view_places_shared_papers_recomputes_communities_and_converts_sna
     assert manifest["views"] == ["network", "gemini"]
     assert views["shared_dir"] == "network_data" and views["views"][1]["snapshots"] is True
     assert views["views"][1]["groupings"][1]["label"] == "Cluster"
+    # Each view opens on its own colouring: the main map on its communities, an
+    # embedding map (it brings topics) on its topics.
+    assert [v["color_by"] for v in views["views"]] == ["community", "cluster"]
+    # A layout without topics (a citation layout) opens on communities; a spec chooses.
+    no_topics = tmp_path / "plain.csv"
+    pd.DataFrame([{"doi": r["doi"], "x": r["x"], "y": r["y"]} for r in rows[:-1]]).to_csv(no_topics, index=False)
+    plain = _extra_view({"key": "linlog", "positions": str(no_topics)}, recs, edges, {}, labels, [RES], RES)
+    assert plain["color_by"] == "community"
+    assert _extra_view({**spec, "color_by": "community"}, recs, edges, {}, labels, [RES], RES)["color_by"] == "community"
 
 
 def test_no_extra_layouts_means_no_views_manifest(tmp_path):
