@@ -77,6 +77,9 @@ settings or outputs).
   loses it to an `issn` column. Web of Science lines that cannot be split are
   reported as `unreadable_records`.
 - The PNG export starts on curved edges and labels around the map.
+- **Fixed:** the button that opens the collapsed control panel sat off centre in it,
+  and the "F switches · hold Space to peek" hint's key boxes did not line up with
+  its text.
 - **Citations fetched for any corpus:** `scientographer init` now puts the
   `fetch_references` stage in front of the pipeline, so a papers table with DOIs is
   enough; the citations between the papers come from OpenAlex. Projects that bring
