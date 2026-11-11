@@ -20,7 +20,7 @@ import { Sigma } from "https://cdn.jsdelivr.net/npm/sigma@2.4.0/+esm";
 import edgeFastModule from "https://cdn.jsdelivr.net/npm/sigma@2.4.0/rendering/webgl/programs/edge.fast/+esm";
 const EdgeFastProgram = edgeFastModule.default;
 import { MATCH_MODES, makeFilter, makeQuery } from "./textmatch.js?v=4";
-import { createDensityLayer } from "./density.js?v=1";
+import { createDensityLayer } from "./density.js?v=2";
 import {
   BRIDGE_MIN_LINKS,
   BRIDGE_COUNT,
@@ -3677,6 +3677,24 @@ function densityPoints(weight = "presence") {
   return { xs, ys, indices, weights, weighted: !!queries };
 }
 
+// Every paper the view shows with the filters off (well-connected papers,
+// muted groups and the time snapshot still apply), in layout coordinates: the
+// reference the enrichment compares the selection with.
+function densityBackground() {
+  const nodes = state.nodesData.nodes;
+  const xs = [], ys = [];
+  for (let i = 0; i < nodes.length; i++) {
+    const r = nodes[i];
+    if (state.snapshot && !state.snapshot.visible.has(String(i))) continue;
+    if (nodeHiddenByMute(r) || removedByModifier(i)) continue;
+    const c = state.snapshot ? state.snapshot.coords[r.id] : [r.x, r.y];
+    if (!c) continue;
+    xs.push(+c[0]);
+    ys.push(+c[1]);
+  }
+  return { xs, ys };
+}
+
 function initDensityLayer() {
   if (!document.getElementById("density-on")) return;
   state.density = createDensityLayer({
@@ -3692,6 +3710,7 @@ function initDensityLayer() {
     viewKey: () => state.dataset,
     filtersActive,
     refresh: () => state.renderer?.refresh(),
+    background: densityBackground,
   });
 }
 

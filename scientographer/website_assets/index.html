@@ -304,6 +304,13 @@
         </select>
       </div>
       <div class="control-row">
+        <label for="density-colour">Colour by</label>
+        <select id="density-colour" title="Density: where the selected papers are. Enrichment: where they are over-represented, as a multiple of their share of the whole map (every paper shown with the filters off).">
+          <option value="density" selected>Density (where they are)</option>
+          <option value="enrichment">Enrichment (where they are over-represented)</option>
+        </select>
+      </div>
+      <div class="control-row">
         <label for="density-bandwidth">Bandwidth <span id="density-bandwidth-value"></span></label>
         <input id="density-bandwidth" type="range" min="0.5" max="6" step="0.1" value="2"
                title="The smoothing (the Gaussian's standard deviation), as a share of the map's extent">
@@ -322,7 +329,7 @@
         <label title="Draw the papers the filters leave out too, faded, so the heat sits on the whole map"><input id="density-all" type="checkbox"> Show all papers under the heat</label>
       </div>
       <div class="density-bar" id="density-bar"></div>
-      <div class="density-bar-labels"><span>Low</span><span>High</span></div>
+      <div class="density-bar-labels"><span id="density-bar-low">Low</span><span id="density-bar-high">High</span></div>
       <div class="meta density-status" id="density-status"></div>
     </div>
 
@@ -550,7 +557,7 @@
   <script src="https://unpkg.com/tabulator-tables@6.3.1/dist/js/tabulator.min.js"></script>
 
   <!-- App -->
-  <script type="module" src="main.js?v=50"></script>
+  <script type="module" src="main.js?v=51"></script>
   <!-- Guided tour (independent of main.js; only reads the DOM) -->
   <script type="module" src="tour.js?v=6"></script>
   <!-- Word map tab (lazy: loads its data the first time the tab is opened) -->

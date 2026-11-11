@@ -1,7 +1,10 @@
 // SPDX-FileCopyrightText: 2026 Alfredo Hernández Inostroza and the Scientographer contributors
 // SPDX-License-Identifier: MIT
 // The map's density layer: a heatmap (kernel density estimate, kde.js) of the
-// papers the filters select, drawn on the 2D map under or over the dots.
+// papers the filters select, drawn on the 2D map under or over the dots. It
+// shows their density (where they are), or their enrichment against every
+// paper on the map (where they are over-represented: their share of the
+// density over the map's own, 1x = the same share as anywhere).
 //
 // The points are exactly the papers counted in "Nodes selected" (text filters,
 // years, well-connected papers, muted groups, time snapshot), so the layer
@@ -14,7 +17,7 @@
 // The bandwidth is a share of the view's extent (robustSpan over all its
 // papers), so it is the same whatever the filters select.
 
-import { PALETTES, cssGradient, densityGrid, gridCanvas, lut, robustSpan } from "./kde.js?v=1";
+import { PALETTES, cssGradient, densityGrid, enrichmentGrid, gridCanvas, gridFrame, lut, robustSpan } from "./kde.js?v=2";
 
 const RING_COLOR = { dark: "rgba(255, 240, 200, 0.9)", light: "rgba(103, 0, 13, 0.9)" };
 
@@ -26,13 +29,17 @@ export function createDensityLayer(map) {
   //        of the view), toGraph(x, y) -> [x, y] (the map's rotation and flips),
   //        viewKey(), filtersActive() (false while the Filters switch is off or
   //        Space is held: the layer then hides, keeping its density),
-  //        refresh() (redraw the map's dots) }
+  //        refresh() (redraw the map's dots), background() -> { xs, ys } (every
+  //        paper the view shows with the filters off: enrichment's reference) }
   const el = (id) => document.getElementById(id);
   const ui = {
     on: el("density-on"),
     controls: el("density-controls"),
     status: el("density-status"),
     weight: el("density-weight"),
+    colour: el("density-colour"),
+    barLow: el("density-bar-low"),
+    barHigh: el("density-bar-high"),
     bandwidth: el("density-bandwidth"),
     bandwidthValue: el("density-bandwidth-value"),
     opacity: el("density-opacity"),
@@ -96,16 +103,35 @@ export function createDensityLayer(map) {
     }
     const t0 = performance.now();
     const s = sigma();
-    layer.grid = densityGrid(points.xs, points.ys, s, points.weights);
+    const enrichment = ui.colour.value === "enrichment";
+    let background = null;
+    if (enrichment) {
+      // Both densities on one frame, wide enough (6 sigma) that the papers
+      // around the selection's edge count in the background too.
+      background = map.background();
+      const frame = gridFrame(points.xs, points.ys, s, 6);
+      layer.grid = enrichmentGrid(
+        densityGrid(points.xs, points.ys, s, points.weights, frame),
+        densityGrid(background.xs, background.ys, s, null, frame));
+    } else {
+      layer.grid = densityGrid(points.xs, points.ys, s, points.weights);
+    }
     layer.theme = theme();
     layer.image = gridCanvas(layer.grid, lut(PALETTES[layer.theme]));
     layer.points = points;
     const ms = performance.now() - t0;
+    ui.barLow.textContent = enrichment ? "1×" : "Low";
+    ui.barHigh.textContent = enrichment ? `${fmtRatio(layer.grid.max)}×` : "High";
     const weighting = ui.weight.value === "presence" ? ""
       : points.weighted ? `, weighted by ${ui.weight.selectedOptions[0].textContent.toLowerCase()}`
       : " (weights count the words of a text filter; with none, each paper counts once)";
-    setStatus(`Density of ${points.xs.length.toLocaleString()} papers${weighting}, normalised to its maximum. ` +
-      `Bandwidth ${+(share() * 100).toFixed(2)}% of the map (σ = ${fmt(s)} layout units; ${layer.grid.gx}×${layer.grid.gy} cells, ${ms.toFixed(0)} ms).`);
+    const what = enrichment
+      ? `Enrichment of ${points.xs.length.toLocaleString()} papers${weighting} against the ` +
+        `${background.xs.length.toLocaleString()} on the map: up to ${fmtRatio(layer.grid.max)}× their share ` +
+        `of the map (1× = the same share as anywhere; log scale; where the map has few papers it fades out).`
+      : `Density of ${points.xs.length.toLocaleString()} papers${weighting}, normalised to its maximum.`;
+    setStatus(`${what} Bandwidth ${+(share() * 100).toFixed(2)}% of the map (σ = ${fmt(s)} layout units; ` +
+      `${layer.grid.gx}×${layer.grid.gy} cells, ${ms.toFixed(0)} ms).`);
   }
 
   // Redraw the coloured grid where the dots are now (every frame).
@@ -172,6 +198,7 @@ export function createDensityLayer(map) {
   let timer = null;
   ui.on.addEventListener("change", update);
   ui.weight.addEventListener("change", update);
+  ui.colour.addEventListener("change", update);
   ui.bandwidth.addEventListener("input", () => {
     showValues();
     clearTimeout(timer);
@@ -190,6 +217,10 @@ export function createDensityLayer(map) {
     attach(renderer) { renderer.on("afterRender", draw); },
     forgetView() { layer.spans.clear(); },
   };
+}
+
+function fmtRatio(v) {
+  return v >= 10 ? v.toFixed(0) : v.toFixed(1);
 }
 
 function fmt(v) {

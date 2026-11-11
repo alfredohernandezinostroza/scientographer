@@ -24,6 +24,16 @@ settings or outputs).
   no longer searches made-up forms (*speechs*, *sportses*), leaves words like
   *series* and *kinematics* as they are, and knows a few irregular plurals common in
   the literature (child/children, mouse/mice, stimulus/stimuli, criterion/criteria).
+- **Heatmap enrichment:** the density heatmap's new "Colour by" menu shows where the
+  selected papers are over-represented rather than where they are: at each place,
+  their share of the density over the share of every paper the view shows with the
+  filters off (`kde.js` `enrichmentGrid`; 1× = the same share as anywhere). Coloured
+  on a log scale from 1× (and below: nothing) to the largest ratio, which the colour
+  bar and the status line give as a multiple; where the map has under 3% of its
+  peak density the colour fades out, a ratio of near-zeros being noise. Both
+  densities share one grid, 6 bandwidths beyond the selection, so the papers around
+  its edge count. On the motor-learning map, `speech` in the keywords peaks at 13×
+  on the citation map and 48× on the Gemini map, matching the exact sums.
 - **Density heatmap** on the 2D views: a "Density heatmap" switch under the filters
   draws a heatmap (Gaussian kernel density estimate, `kde.js`) of exactly the papers
   counted in "Nodes selected" (text filters, years, well-connected papers, hidden

@@ -81,11 +81,10 @@ export function blur(src, gx, gy, sigma) {
   return out;
 }
 
-// The density of points (xs, ys, optional weights) with bandwidth sigma (layout
-// units): { x0, y0, cell, gx, gy, data (row 0 at y0, rising y), max }, or null
-// with no points. Points are spread linearly over the four nearest cells
-// before the blur, so the result does not jump with sub-cell positions.
-export function densityGrid(xs, ys, sigma, weights = null) {
+// The grid for a density of points (xs, ys) with bandwidth sigma: their box
+// plus `pad` sigmas on every side, in cells sigma / CELLS_PER_SIGMA wide, as
+// { x0, y0, cell, gx, gy }, or null with no points.
+export function gridFrame(xs, ys, sigma, pad = 3) {
   const n = xs.length;
   if (!n || !(sigma > 0)) return null;
   let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
@@ -95,16 +94,29 @@ export function densityGrid(xs, ys, sigma, weights = null) {
     if (ys[i] < y0) y0 = ys[i];
     if (ys[i] > y1) y1 = ys[i];
   }
-  const pad = 3 * sigma;
-  x0 -= pad; x1 += pad; y0 -= pad; y1 += pad;
+  x0 -= pad * sigma; x1 += pad * sigma; y0 -= pad * sigma; y1 += pad * sigma;
   const cell = Math.max(sigma / CELLS_PER_SIGMA, Math.max(x1 - x0, y1 - y0) / MAX_CELLS);
-  const gx = Math.ceil((x1 - x0) / cell) + 1;
-  const gy = Math.ceil((y1 - y0) / cell) + 1;
+  return { x0, y0, cell, gx: Math.ceil((x1 - x0) / cell) + 1, gy: Math.ceil((y1 - y0) / cell) + 1 };
+}
+
+// The density of points (xs, ys, optional weights) with bandwidth sigma (layout
+// units): { x0, y0, cell, gx, gy, data (row 0 at y0, rising y), max, total (the
+// summed weights) }, or null with no points. It covers `frame` (gridFrame's
+// output; by default the points plus 3 sigma), leaving out points outside it.
+// Points are spread linearly over the four nearest cells before the blur, so
+// the result does not jump with sub-cell positions.
+export function densityGrid(xs, ys, sigma, weights = null, frame = gridFrame(xs, ys, sigma)) {
+  const n = xs.length;
+  if (!n || !frame) return null;
+  const { x0, y0, cell, gx, gy } = frame;
   const h = new Float32Array(gx * gy);
+  let total = 0;
   for (let i = 0; i < n; i++) {
     const w = weights ? weights[i] : 1;
     if (!w) continue;
+    total += w;
     const fx = (xs[i] - x0) / cell, fy = (ys[i] - y0) / cell;
+    if (fx < 0 || fy < 0 || fx > gx - 1 || fy > gy - 1) continue;
     const cx = Math.min(gx - 2, Math.floor(fx)), cy = Math.min(gy - 2, Math.floor(fy));
     const dx = fx - cx, dy = fy - cy;
     const o = cy * gx + cx;
@@ -116,28 +128,58 @@ export function densityGrid(xs, ys, sigma, weights = null) {
   const data = blur(h, gx, gy, sigma / cell);
   let max = 0;
   for (let i = 0; i < data.length; i++) if (data[i] > max) max = data[i];
-  return { x0, y0, cell, gx, gy, data, max };
+  return { x0, y0, cell, gx, gy, data, max, total };
 }
 
-// The grid coloured through a palette lookup table, normalised by `max` (the
-// grid's own maximum by default), as a canvas gx x gy whose top row is the
-// grid's highest y.
+// Where the selected papers are over-represented: on the same frame, the
+// selection's share of its density over the background's share of its own,
+// (selected / selected total) / (background / background total). 1 is the
+// same share as anywhere, 5 five times it. Cells where the background is
+// thinner than ENRICHMENT_FLOOR of its peak are faded out in proportion (a
+// ratio of two near-zeros is noise), and the largest ratio is taken over the
+// cells above that floor. Returns the grid with data = ratio, weight (0-1,
+// the fade) and max (the largest ratio).
+export const ENRICHMENT_FLOOR = 0.03;
+export function enrichmentGrid(selected, background) {
+  const n = selected.data.length;
+  const data = new Float32Array(n), weight = new Float32Array(n);
+  const floor = ENRICHMENT_FLOOR * background.max;
+  const scale = background.total / Math.max(selected.total, 1e-12);
+  let max = 1;
+  for (let i = 0; i < n; i++) {
+    const b = background.data[i];
+    if (!(b > 0)) continue;
+    data[i] = (selected.data[i] / b) * scale;
+    weight[i] = Math.min(1, b / floor);
+    if (weight[i] >= 1 && data[i] > max) max = data[i];
+  }
+  return { ...selected, data, weight, max };
+}
+
+// The grid coloured through a palette lookup table, as a canvas gx x gy whose
+// top row is the grid's highest y. A density is normalised by `max` (the grid's
+// own maximum by default); an enrichment grid (with `weight`) is coloured on a
+// log scale from 1 (and below: transparent) to its max, faded by its weight.
 export function gridCanvas(grid, table, max = grid.max) {
-  const { gx, gy, data } = grid;
+  const { gx, gy, data, weight } = grid;
   const canvas = document.createElement("canvas");
   canvas.width = gx;
   canvas.height = gy;
   const img = new ImageData(gx, gy);
   const scale = max > 0 ? 255 / max : 0;
+  const logMax = Math.log(Math.max(max, 1 + 1e-6));
+  const level = weight
+    ? (i) => (data[i] > 1 ? Math.min(255, Math.round((255 * Math.log(data[i])) / logMax)) : 0)
+    : (i) => Math.min(255, Math.round(data[i] * scale));
   for (let y = 0; y < gy; y++) {
     const src = (gy - 1 - y) * gx;
     for (let x = 0; x < gx; x++) {
-      const t = Math.min(255, Math.round(data[src + x] * scale)) * 4;
+      const t = level(src + x) * 4;
       const o = (y * gx + x) * 4;
       img.data[o] = table[t];
       img.data[o + 1] = table[t + 1];
       img.data[o + 2] = table[t + 2];
-      img.data[o + 3] = table[t + 3];
+      img.data[o + 3] = weight ? table[t + 3] * weight[src + x] : table[t + 3];
     }
   }
   canvas.getContext("2d").putImageData(img, 0, 0);
