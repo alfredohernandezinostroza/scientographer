@@ -1551,14 +1551,11 @@ body.about-open #provenance-stamp { display: none; }
 .export-options select {
   min-width: 0;
 }
-.export-actions select {
-  flex: 1;
-  min-width: 0;
-}
+.export-options .export-wide { grid-column: 1 / -1; }
 .export-actions {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 8px;
   margin-top: 6px;
 }

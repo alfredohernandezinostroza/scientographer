@@ -396,14 +396,6 @@
           <option value="straight">Straight edges</option>
           <option value="curved" selected>Curved edges</option>
         </select>
-        <select id="export-background" aria-label="Image background">
-          <option value="transparent-light">Transparent, for white pages</option>
-          <option value="transparent">Transparent, for dark slides</option>
-          <option value="white">White background</option>
-          <option value="dark">Dark background</option>
-        </select>
-      </div>
-      <div class="export-actions">
         <select id="export-nodes" aria-label="Node size">
           <option value="1">Nodes</option>
           <option value="0.35">Small nodes</option>
@@ -414,6 +406,21 @@
           <option value="border" selected>Labels around</option>
           <option value="none">No labels</option>
         </select>
+        <select id="export-background" class="export-wide" aria-label="Image background">
+          <option value="transparent-light">Transparent, for white pages</option>
+          <option value="transparent">Transparent, for dark slides</option>
+          <option value="white">White background</option>
+          <option value="dark">Dark background</option>
+        </select>
+        <select id="export-heat" class="export-wide" aria-label="Density heatmap" title="The density heatmap in the image. The options with a heatmap need it on screen (the switch on, a filter applied, a 2D view). Unfiltered: every paper as with the filters off, under the heat of the filtered ones. Heatmap: the heat alone, transparent, framed like the unfiltered map so it stacks on a map exported with the same area and size. Two files: the map and its heat, with exactly the same frame and size.">
+          <option value="with" data-heat selected>Map with heatmap</option>
+          <option value="unfiltered" data-heat>Unfiltered map + heatmap</option>
+          <option value="only" data-heat>Heatmap</option>
+          <option value="separate" data-heat>Map + heatmap, two files</option>
+          <option value="none">Map without heatmap</option>
+        </select>
+      </div>
+      <div class="export-actions">
         <button id="export-png" type="button">Export PNG</button>
       </div>
     </div>
@@ -550,7 +557,7 @@
   <script src="https://unpkg.com/tabulator-tables@6.3.1/dist/js/tabulator.min.js"></script>
 
   <!-- App -->
-  <script type="module" src="main.js?v=50"></script>
+  <script type="module" src="main.js?v=51"></script>
   <!-- Guided tour (independent of main.js; only reads the DOM) -->
   <script type="module" src="tour.js?v=6"></script>
   <!-- Word map tab (lazy: loads its data the first time the tab is opened) -->

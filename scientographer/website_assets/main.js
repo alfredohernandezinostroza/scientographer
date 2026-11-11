@@ -20,7 +20,7 @@ import { Sigma } from "https://cdn.jsdelivr.net/npm/sigma@2.4.0/+esm";
 import edgeFastModule from "https://cdn.jsdelivr.net/npm/sigma@2.4.0/rendering/webgl/programs/edge.fast/+esm";
 const EdgeFastProgram = edgeFastModule.default;
 import { MATCH_MODES, makeFilter, makeQuery } from "./textmatch.js?v=4";
-import { createDensityLayer } from "./density.js?v=1";
+import { createDensityLayer } from "./density.js?v=2";
 import {
   BRIDGE_MIN_LINKS,
   BRIDGE_COUNT,
@@ -1189,6 +1189,15 @@ function exportLabelBoxes(mode, points, names, sizes, fontSize, measure) {
 function initExportControls() {
   const button = document.getElementById("export-png");
   if (!button) return;
+  // The heatmap options need a heatmap on screen: greyed out otherwise (checked
+  // each time the menu is opened, and before exporting).
+  const heatMenu = document.getElementById("export-heat");
+  const refreshHeatMenu = () => {
+    const shown = !!state.density?.isShown();
+    for (const option of heatMenu.querySelectorAll("option[data-heat]")) option.disabled = !shown;
+  };
+  heatMenu?.addEventListener("pointerdown", refreshHeatMenu);
+  heatMenu?.addEventListener("focus", refreshHeatMenu);
   button.addEventListener("click", async () => {
     const label = button.textContent;
     button.disabled = true;
@@ -1196,14 +1205,28 @@ function initExportControls() {
     // Let the button repaint before the (synchronous) drawing starts.
     await new Promise((resolve) => setTimeout(resolve, 30));
     try {
-      await exportMapPng({
+      const options = {
         area: document.getElementById("export-area").value,
         longSide: parseInt(document.getElementById("export-size").value, 10),
         edges: document.getElementById("export-edges").value,
         nodeScale: parseFloat(document.getElementById("export-nodes").value),
         background: document.getElementById("export-background")?.value || "transparent-light",
         labels: document.getElementById("export-labels").value,
-      });
+      };
+      // The density layer, when it shows: drawn into the map (as on screen, or
+      // under every paper as with the filters off), alone, or as a second image
+      // with the same frame and size as the map's, to stack on it.
+      const heat = state.density?.isShown() ? document.getElementById("export-heat")?.value || "with" : "none";
+      if (heat === "separate") {
+        await exportMapPng({ ...options, heat: "none" });
+        await exportMapPng({ ...options, heat: "only" });
+      } else if (heat === "unfiltered") {
+        await exportMapPng({ ...options, heat: "with", unfiltered: true });
+      } else if (heat === "only") {
+        await exportMapPng({ ...options, heat: "only", unfiltered: true });
+      } else {
+        await exportMapPng({ ...options, heat });
+      }
     } catch (err) {
       console.error(err);
       alert(`Export failed: ${err.message}`);
@@ -1234,8 +1257,20 @@ function visibleNodeDrawData() {
   return out;
 }
 
-async function exportMapPng({ area, longSide, edges, nodeScale, labels, background }) {
-  const nodes = visibleNodeDrawData();
+// heat: "none", "with" (the density layer drawn as on screen, under or over the
+// dots) or "only" (the density layer alone on a transparent background, with
+// the same frame and size as the map's image, so the two stack exactly).
+// unfiltered: the papers as with the filters off (every paper, not faded), so
+// the frame and the dots are the original map's.
+async function exportMapPng({ area, longSide, edges, nodeScale, labels, background, heat = "none", unfiltered = false }) {
+  const filtersWere = state.filtersOff;
+  if (unfiltered) state.filtersOff = true;
+  let nodes;
+  try {
+    nodes = visibleNodeDrawData();
+  } finally {
+    state.filtersOff = filtersWere;
+  }
   const { width: viewWidth, height: viewHeight } = state.renderer.getDimensions();
 
   // The exported region, in viewport pixels.
@@ -1313,15 +1348,26 @@ async function exportMapPng({ area, longSide, edges, nodeScale, labels, backgrou
   // Background: transparent or filled, styled for a white page (darker colours,
   // white label outlines) or for a dark one (the map's own colours).
   const forWhite = background === "white" || background === "transparent-light";
-  if (background === "dark") {
+  const heatOnly = heat === "only";
+  if (background === "dark" && !heatOnly) {
     ctx.fillStyle = getComputedStyle(document.body).backgroundColor || "#0e1116";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-  } else if (background === "white") {
+  } else if (background === "white" && !heatOnly) {
     ctx.fillStyle = "#ffffff";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
   }
   ctx.translate(padLeft, padTop);
   const paint = forWhite ? (c) => colorForWhite(c, EXPORT_LIGHT.maxLightness) : (c) => c;
+  // The density layer, in the palette for the image's background: a viewport
+  // point lands at ((x - x0) * scale + padLeft, (y - y0) * scale + padTop).
+  const drawHeat = () => state.density.paint(ctx,
+    (p) => ({ x: (p.x - x0) * scale + padLeft, y: (p.y - y0) * scale + padTop }),
+    forWhite ? "light" : "dark");
+  const heatOver = heat !== "none" && state.density.over();
+  if (heatOnly) {
+    drawHeat();
+    return savePng(canvas, "-heatmap-only");
+  }
 
   // Edges: citations between two visible papers with at least one end in the
   // region, coloured by the citing paper, one path per colour.
@@ -1359,6 +1405,8 @@ async function exportMapPng({ area, longSide, edges, nodeScale, labels, backgrou
     ctx.globalAlpha = 1;
   }
 
+  if (heat === "with" && !heatOver) drawHeat();
+
   // Nodes (nodeScale 0 = edges only).
   if (nodeScale > 0) {
     for (const i of order) {
@@ -1370,6 +1418,8 @@ async function exportMapPng({ area, longSide, edges, nodeScale, labels, backgrou
       ctx.fill();
     }
   }
+
+  if (heatOver) drawHeat();
 
   if (labelBoxes.length) {
     ctx.font = font;
@@ -1388,13 +1438,17 @@ async function exportMapPng({ area, longSide, edges, nodeScale, labels, backgrou
     }
   }
 
+  return savePng(canvas, heat === "with" ? (unfiltered ? "-unfiltered-with-heatmap" : "-with-heatmap") : "");
+}
+
+async function savePng(canvas, suffix) {
   const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
   if (!blob) throw new Error("the browser could not encode the PNG (try a smaller size)");
   const resolution = state.colorBy === "community" && state.communityResolution != null
     ? `-resolution-${state.communityResolution}` : "";
   const link = document.createElement("a");
   link.href = URL.createObjectURL(blob);
-  link.download = `citation-map${resolution}-${canvas.width}x${canvas.height}.png`;
+  link.download = `citation-map${resolution}${suffix}-${canvas.width}x${canvas.height}.png`;
   document.body.appendChild(link);
   link.click();
   link.remove();

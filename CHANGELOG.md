@@ -95,6 +95,16 @@ settings or outputs).
   README explains how to rerun one stage (`dvc repro -f -s <stage>`, then `dvc repro`)
   without redoing the search and the downloads.
 - The journal filter is the last of the map's filters, after keywords (and MeSH terms).
+- **The density heatmap in the PNG export:** a Heatmap menu next to the export's
+  other settings: the map with its heatmap (as on screen, under or over the dots,
+  at its opacity); the **unfiltered** map (every paper, as with the filters off)
+  under the heat of the filtered ones, the density over the original network; the
+  **heatmap** alone on a transparent background, framed like the unfiltered map; the
+  map and its heatmap as **two files** of exactly the same frame and size, to stack
+  in a figure; or the map without it. The heat is drawn through the same mapping as
+  the dots, so it lines up exactly, in the paper's light palette for white pages
+  and its dark one for dark slides. The options with a heatmap are greyed out while
+  none is on screen. The export settings sit in two columns, with nothing cut off.
 - **Each view opens on its own colouring:** an embedding map (Gemini, SPECTER2) on
   its topics, a citation layout (the main map, LinLog, 3D) on its communities, so
   a map shows its own structure first. What the viewer picks in "Color by" wins and

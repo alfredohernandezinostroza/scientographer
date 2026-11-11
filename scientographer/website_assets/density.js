@@ -108,6 +108,27 @@ export function createDensityLayer(map) {
       `Bandwidth ${+(share() * 100).toFixed(2)}% of the map (σ = ${fmt(s)} layout units; ${layer.grid.gx}×${layer.grid.gy} cells, ${ms.toFixed(0)} ms).`);
   }
 
+  // Draw the coloured grid `image` where the dots are: image pixel (u, v) is
+  // centred on grid node (u, gy - 1 - v); three of its corners go through the
+  // layout's rotation and flips, the camera (to viewport pixels) and `toPixels`
+  // (viewport to the target canvas), and the image is drawn through that affine
+  // map, smoothed, at the layer's opacity.
+  function paintGrid(ctx, image, toPixels) {
+    const renderer = map.renderer();
+    const { x0, y0, cell, gx, gy } = layer.grid;
+    const at = (u, v) => {
+      const [x, y] = map.toGraph(x0 + (u - 0.5) * cell, y0 + (gy - 0.5 - v) * cell);
+      return toPixels(renderer.graphToViewport({ x, y }));
+    };
+    const o = at(0, 0), ex = at(gx, 0), ey = at(0, gy);
+    ctx.setTransform((ex.x - o.x) / gx, (ex.y - o.y) / gx, (ey.x - o.x) / gy, (ey.y - o.y) / gy, o.x, o.y);
+    ctx.globalAlpha = Number(ui.opacity.value);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(image, 0, 0);
+    ctx.globalAlpha = 1;
+  }
+
   // Redraw the coloured grid where the dots are now (every frame).
   function draw() {
     const renderer = map.renderer();
@@ -127,23 +148,7 @@ export function createDensityLayer(map) {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // Image pixel (u, v) is centred on grid node (u, gy - 1 - v); map three
-    // corners of the image to the screen and draw it through that affine map.
-    const { x0, y0, cell, gx, gy } = layer.grid;
-    const screen = (u, v) => {
-      const [x, y] = map.toGraph(x0 + (u - 0.5) * cell, y0 + (gy - 0.5 - v) * cell);
-      return renderer.graphToViewport({ x, y });
-    };
-    const o = screen(0, 0), ex = screen(gx, 0), ey = screen(0, gy);
-    ctx.setTransform(
-      dpr * (ex.x - o.x) / gx, dpr * (ex.y - o.y) / gx,
-      dpr * (ey.x - o.x) / gy, dpr * (ey.y - o.y) / gy,
-      dpr * o.x, dpr * o.y);
-    ctx.globalAlpha = Number(ui.opacity.value);
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = "high";
-    ctx.drawImage(layer.image, 0, 0);
-    ctx.globalAlpha = 1;
+    paintGrid(ctx, layer.image, (p) => ({ x: dpr * p.x, y: dpr * p.y }));
 
     if (ui.rings.checked && layer.points) {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -185,6 +190,18 @@ export function createDensityLayer(map) {
   return {
     update,
     draw,
+    // Shown on the map now (a density, on a 2D view, filters on).
+    isShown: () => enabled() && !!layer.image && !map.is3D() && map.filtersActive(),
+    over: () => ui.over.checked,
+    // Draw the layer into another canvas (an export): toCanvas maps a viewport
+    // point to that canvas's pixels, theme picks the palette.
+    paint(ctx, toCanvas, theme) {
+      if (!layer.grid) return;
+      const image = theme === layer.theme ? layer.image : gridCanvas(layer.grid, lut(PALETTES[theme]));
+      ctx.save();
+      paintGrid(ctx, image, (p) => toCanvas(p));
+      ctx.restore();
+    },
     // The left-out papers are drawn faded while the layer shows a density.
     showsAll: () => ui.all.checked && enabled() && !!layer.image && map.filtersActive(),
     attach(renderer) { renderer.on("afterRender", draw); },
