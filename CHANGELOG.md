@@ -65,6 +65,20 @@ settings or outputs).
   read, its settings, and a warning when the steps ran on more than one version or
   on a checkout with uncommitted changes. Maps and outputs made before keep working;
   the tab says they have no record.
+- **Colours of your own:** each legend (communities, topics) has a **Palette** menu,
+  the original or a published palette (Kelly, Tableau 20, CARTO Bold, Vivid, Prism,
+  Safe, Pastel, Antique, ColorBrewer Set3 and Paired, Okabe–Ito), so communities and
+  topics need not share colours (they did: the same list, by group number, which
+  suggested a correspondence between them). Clicking a group's colour opens a colour
+  picker drawn by the page (`colorpicker.js`; the browser's own handed over to the
+  operating system's dialog in some browsers): a colour square, hue, hex, the
+  palette, 16 slots for your own colours ("Save…" asks which slot to fill or
+  replace), "Pick from screen" where the browser has an eyedropper, and outside it
+  the pointer is an eyedropper itself (hover a dot to preview, click a dot, a legend
+  colour or a label to take it). Dots, citation edges, labels, panels and exports
+  follow. Palettes and colours are kept in the browser (per site), each colour with
+  its group's name, so a rebuilt map whose groups came out differently never paints
+  it on the wrong one; **Reset colours** goes back to the site's.
 - **The environment behind every step:** each step record also keeps its Python,
   platform and the versions of the packages that change results (igraph, leidenalg,
   numpy, pandas, scikit-learn, ...), and how the installed packages compare with the
@@ -81,6 +95,12 @@ settings or outputs).
   README explains how to rerun one stage (`dvc repro -f -s <stage>`, then `dvc repro`)
   without redoing the search and the downloads.
 - The journal filter is the last of the map's filters, after keywords (and MeSH terms).
+- **Each view opens on its own colouring:** an embedding map (Gemini, SPECTER2) on
+  its topics, a citation layout (the main map, LinLog, 3D) on its communities, so
+  a map shows its own structure first. What the viewer picks in "Color by" wins and
+  carries over to every view that offers it. `views.json` says each view's colouring
+  (`color_by`, from `website.extra_layouts`: a layout's `color_by`, or its topics
+  when it brings some); sites built before fall back to the same rule.
 - **More ingest formats:** `ingest` now reads Scopus CSV (`scopus`), Web of Science
   tab-delimited (`wos`, a folder of `savedrecs.txt` files) and EBSCOhost CSV (`ebsco`)
   exports as well as PubMed's MEDLINE, and merges them by DOI: a paper in several

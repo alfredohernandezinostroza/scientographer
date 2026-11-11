@@ -143,7 +143,7 @@ OUTLIER_COLOR: Final[str] = "#cccccc"
 ASSETS_DIR: Final[Path] = Path(__file__).resolve().parent / "website_assets"
 FRONTEND_FILES: Final[tuple[str, ...]] = ("index.html", "main.js", "styles.css", "tour.js", "textmatch.js",
                                          "wordmap.js", "renderer3d.js", "rankings.js", "kde.js", "density.js",
-                                         "scientographer-logo-dark.svg", "scientographer-icon.svg")
+                                         "scientographer-logo-dark.svg", "scientographer-icon.svg", "colorpicker.js")
 DATA_SUBDIR: Final[str] = "network_data"
 # Extra views of the same papers on other 2-D layouts (e.g. text-embedding maps);
 # each becomes `<key>_data/` next to network_data/ and an entry in views.json.
@@ -519,6 +519,10 @@ def _extra_view(
         "label": str(spec.get("label") or key),
         "subtitle": str(spec.get("subtitle") or ""),
         "topic_label": str(spec.get("topic_label") or "Topic"),
+        # What the view opens coloured by: its own topics when it brings some (an
+        # embedding map), its communities otherwise (a citation layout); a spec's
+        # `color_by` (community or cluster) chooses.
+        "color_by": str(spec.get("color_by") or ("cluster" if clusters else "community")),
         "dims": 3 if three_d else 2,
         "records": records,
         "edges": view_edges,
@@ -1462,12 +1466,17 @@ def save_views_manifest(
     topic_label = network_topic_source["label"] if network_topic_source else "Topic"
     views = [{"key": "network", "label": base_view_label, "dir": DATA_SUBDIR,
               "subtitle": "Citation-network layout", "snapshots": False, "dims": 2,
-              "groupings": _view_groupings(topic_label, bool(clusters_legend))}]
+              "groupings": _view_groupings(topic_label, bool(clusters_legend)), "color_by": "community"}]
     for view in extra_views:
+        groupings = _view_groupings(view["topic_label"], bool(view["clusters"]))
+        color_by = view.get("color_by", "community")
+        if color_by not in {g["key"] for g in groupings}:
+            logger.warning("view %s: color_by %r is not one of its groupings; colouring by community",
+                           view["key"], color_by)
+            color_by = "community"
         views.append({"key": view["key"], "label": view["label"], "dir": save_extra_views[view["key"]]["dir"],
                       "subtitle": view["subtitle"], "snapshots": view["snapshots"] is not None,
-                      "dims": view["dims"],
-                      "groupings": _view_groupings(view["topic_label"], bool(view["clusters"]))})
+                      "dims": view["dims"], "groupings": groupings, "color_by": color_by})
     keys = [v["key"] for v in views]
     if default_view not in keys:
         logger.warning("website.default_view %r is not one of the views %s; opening on the main map",
