@@ -373,7 +373,8 @@ get it with `scientographer init --force` (which rewrites `dvc.yaml` and
   **Metrics** tab with every measure above against resolution, a **Figures** tab with
   the word clouds, and a **Word map** tab: where words occur across the map, as
   density heatmaps.
-- **Export** of the visible map as a high-resolution PNG: transparent or on a
+- **Export** of the visible map, its main part (where the papers are dense) or the
+  whole map as a high-resolution PNG: transparent or on a
   background, styled for white paper or dark slides, with straight or curved citation
   edges, and labels on the communities or around the map's outline.
 - **Rotate and flip** buttons. The default orientation is reproducible: the main

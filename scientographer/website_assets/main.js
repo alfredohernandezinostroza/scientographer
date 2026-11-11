@@ -32,6 +32,7 @@ import {
   topPapersByGroup,
 } from "./rankings.js?v=2";
 import { openColourPicker } from "./colorpicker.js?v=1";
+import { densityGrid, robustSpan } from "./kde.js?v=2";
 
 // ── Dataset definitions ─────────────────────────────────────────────────────
 // Each grouping: key (also the "Color by" value), label (detail panel + color
@@ -810,6 +811,7 @@ async function loadDataset(name) {
   if (Object.values(state.filters).some((q) => (q || "").trim())) await applyGlobalFilters();
   updateSelectedCount();
   state.renderer.refresh();
+  fitCamera(0); // 2D views open on the bulk of their papers (3D frames itself)
   state.density?.update();
 }
 
@@ -988,11 +990,74 @@ function restoreBaseSizes() {
   }
 }
 
-function resetCamera() {
+function resetCamera(duration = 500) {
   if (state.renderer.resetView) return state.renderer.resetView();
-  const cam = state.renderer.getCamera();
-  if (typeof cam.animatedReset === "function") cam.animatedReset({ duration: 500 });
-  else cam.animate({ x: 0.5, y: 0.5, ratio: 1 }, { duration: 500 });
+  fitCamera(duration);
+}
+
+// The box [x0, x1, y0, y1] around the main body of some points: their
+// density (a Gaussian KDE, bandwidth 2% of their extent, as the heatmap's) is
+// computed, the cells above FRAME_DENSITY of its peak are split into connected
+// regions, and the box is drawn around the region holding the most papers.
+// Sparse surroundings (a long tail of scattered papers) never reach the
+// threshold, however many papers they hold, and a small far-off group, dense
+// as it may be, is a region of its own; so the frame sits on the main body.
+// (A box of percentiles does not: a tail holding a few percent of the papers
+// stretches it and pulls it off centre.)
+const FRAME_DENSITY = 0.02;
+function robustBox(xs, ys) {
+  const { x0, y0, cell, gx, gy, data, max } = densityGrid(xs, ys, 0.02 * robustSpan(xs, ys));
+  const region = new Int32Array(gx * gy).fill(-1);
+  let best = null;
+  for (let start = 0; start < data.length; start++) {
+    if (region[start] !== -1 || data[start] < FRAME_DENSITY * max) continue;
+    // Flood the region (4-neighbours above the threshold), keeping its mass and box.
+    const stack = [start];
+    region[start] = start;
+    let mass = 0, i0 = gx, i1 = -1, j0 = gy, j1 = -1;
+    while (stack.length) {
+      const k = stack.pop();
+      const i = k % gx, j = (k - i) / gx;
+      mass += data[k];
+      if (i < i0) i0 = i;
+      if (i > i1) i1 = i;
+      if (j < j0) j0 = j;
+      if (j > j1) j1 = j;
+      for (const n of [i > 0 ? k - 1 : -1, i < gx - 1 ? k + 1 : -1, j > 0 ? k - gx : -1, j < gy - 1 ? k + gx : -1]) {
+        if (n >= 0 && region[n] === -1 && data[n] >= FRAME_DENSITY * max) {
+          region[n] = start;
+          stack.push(n);
+        }
+      }
+    }
+    if (!best || mass > best.mass) best = { mass, i0, i1, j0, j1 };
+  }
+  return [x0 + best.i0 * cell, x0 + best.i1 * cell, y0 + best.j0 * cell, y0 + best.j1 * cell];
+}
+
+// Point the 2D camera at the main body of the papers the map shows (robustBox
+// of their screen positions, with a 6% margin) rather than at every paper, which
+// sigma's own reset does: outlying groups and hidden papers no longer shrink
+// the main map. duration 0 jumps there.
+function fitCamera(duration = 500) {
+  const renderer = state.sigma;
+  if (!renderer || is3D()) return;
+  const xs = [], ys = [];
+  state.graph.forEachNode((node, attrs) => {
+    if (nodeReducer(node, attrs).hidden) return;
+    const p = renderer.graphToViewport({ x: attrs.x, y: attrs.y });
+    xs.push(p.x);
+    ys.push(p.y);
+  });
+  const camera = renderer.getCamera();
+  if (xs.length < 2) return camera.animatedReset({ duration });
+  const [x0, x1, y0, y1] = robustBox(xs, ys);
+  const { width, height } = renderer.getDimensions();
+  const fill = Math.max((x1 - x0) / width, (y1 - y0) / height, 1e-6) * 1.06;
+  const centre = renderer.viewportToFramedGraph({ x: (x0 + x1) / 2, y: (y0 + y1) / 2 });
+  const target = { x: centre.x, y: centre.y, ratio: camera.getState().ratio * fill };
+  if (duration > 0) camera.animate(target, { duration });
+  else camera.setState(target);
 }
 
 // Snapshot-aware centroid for a group (falls back to the base centroid). Returns
@@ -1250,13 +1315,21 @@ async function exportMapPng({ area, longSide, edges, nodeScale, labels, backgrou
     if (!isFinite(x0)) throw new Error("no visible papers to export");
     const pad = 0.03 * Math.max(x1 - x0, y1 - y0);
     x0 -= pad; y0 -= pad; x1 += pad; y1 += pad;
+  } else if (area === "main") {
+    // The main body of the visible papers (robustBox), without the sparse
+    // surroundings and far-off groups.
+    const shown = nodes.filter(Boolean);
+    if (shown.length < 2) throw new Error("no visible papers to export");
+    [x0, x1, y0, y1] = robustBox(shown.map((n) => n.x), shown.map((n) => n.y));
+    const pad = 0.03 * Math.max(x1 - x0, y1 - y0);
+    x0 -= pad; y0 -= pad; x1 += pad; y1 += pad;
   }
   const inRegion = (n) => n && n.x + n.r >= x0 && n.x - n.r <= x1 && n.y + n.r >= y0 && n.y - n.r <= y1;
   const scale = longSide / Math.max(x1 - x0, y1 - y0);
   // Sizes (radius, line width, font) are kept in proportion to the screen when
-  // exporting the current view; for the whole map they follow the same scale but
+  // exporting the current view; for the whole map (or its main part) they follow the same scale but
   // never shrink below what reads at the exported size.
-  const sizeScale = area === "all" ? Math.max(scale, longSide / Math.max(viewWidth, viewHeight)) : scale;
+  const sizeScale = area !== "view" ? Math.max(scale, longSide / Math.max(viewWidth, viewHeight)) : scale;
 
   const px = (n) => [(n.x - x0) * scale, (n.y - y0) * scale];
   let width = Math.round((x1 - x0) * scale);

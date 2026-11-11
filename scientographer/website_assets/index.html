@@ -384,6 +384,7 @@
       <div class="export-options">
         <select id="export-area" aria-label="Area to export">
           <option value="view">View</option>
+          <option value="main" title="The main body of the map: the area where papers are dense, leaving out sparse surroundings and far-off groups">Main part of the map</option>
           <option value="all">Whole map</option>
         </select>
         <select id="export-size" aria-label="Image size (long side)">
@@ -550,7 +551,7 @@
   <script src="https://unpkg.com/tabulator-tables@6.3.1/dist/js/tabulator.min.js"></script>
 
   <!-- App -->
-  <script type="module" src="main.js?v=50"></script>
+  <script type="module" src="main.js?v=51"></script>
   <!-- Guided tour (independent of main.js; only reads the DOM) -->
   <script type="module" src="tour.js?v=6"></script>
   <!-- Word map tab (lazy: loads its data the first time the tab is opened) -->

@@ -65,6 +65,14 @@ settings or outputs).
   read, its settings, and a warning when the steps ran on more than one version or
   on a checkout with uncommitted changes. Maps and outputs made before keep working;
   the tab says they have no record.
+- **The 2D views open on the main body of the map:** the camera, on opening a view,
+  turning or flipping it, or choosing a time snapshot, frames the region where the
+  shown papers are dense (their density, as the heatmap's, above 2% of its peak; the
+  connected region holding the most papers), not every paper. A long sparse tail or
+  a small far-off group no longer shrinks the map: on the motor-learning citation
+  map, the old frame held the main network in about a fifth of the screen, off
+  centre. The PNG export gets the same frame as **Main part of the map**, next to
+  View and Whole map.
 - **Colours of your own:** each legend (communities, topics) has a **Palette** menu,
   the original or a published palette (Kelly, Tableau 20, CARTO Bold, Vivid, Prism,
   Safe, Pastel, Antique, ColorBrewer Set3 and Paired, Okabe–Ito), so communities and
