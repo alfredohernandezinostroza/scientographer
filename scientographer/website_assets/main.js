@@ -20,7 +20,6 @@ import { Sigma } from "https://cdn.jsdelivr.net/npm/sigma@2.4.0/+esm";
 import edgeFastModule from "https://cdn.jsdelivr.net/npm/sigma@2.4.0/rendering/webgl/programs/edge.fast/+esm";
 const EdgeFastProgram = edgeFastModule.default;
 import { MATCH_MODES, makeFilter, makeQuery } from "./textmatch.js?v=4";
-import { openColourPicker } from "./colorpicker.js?v=1";
 import {
   BRIDGE_MIN_LINKS,
   BRIDGE_COUNT,
@@ -31,6 +30,7 @@ import {
   rankingScores,
   topPapersByGroup,
 } from "./rankings.js?v=2";
+import { openColourPicker } from "./colorpicker.js?v=1";
 
 // ── Dataset definitions ─────────────────────────────────────────────────────
 // Each grouping: key (also the "Color by" value), label (detail panel + color
@@ -745,11 +745,11 @@ async function loadDataset(name) {
   state.muted = {};
   cfg.groupings.forEach((g) => { state.muted[g.key] = new Set(); });
   fileGroupings.forEach((g, i) => { state.groupData[g.key] = groupingPayloads[i]; });
-  fileGroupings.forEach((g) => recolourGroups(g.key));
   state.colorBy = cfg.groupings[0].key;
 
   state.wellConnected = null;
   state.wellConnectedMasks = {};
+  fileGroupings.forEach((g) => recolourGroups(g.key)); // palettes and the viewer's colours
   try {
     const response = await fetch(`${cfg.dir}/well_connected.json`);
     state.wellConnected = response.ok ? await response.json() : null;
